@@ -1,0 +1,98 @@
+[data-humanhelp-refresh-button-frame] {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  padding: 0.55rem;
+  margin: -0.55rem;
+  isolation: isolate;
+}
+
+[data-humanhelp-refresh-button] {
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
+  min-inline-size: 2.75rem;
+  padding: 0 !important;
+  border-radius: 0.65rem;
+  font-size: 1.55rem;
+  line-height: 1;
+  font-weight: 700;
+}
+
+[data-humanhelp-refresh-button-frame][data-humanhelp-refresh-stale="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0.15rem;
+  z-index: 0;
+  border-radius: 1rem;
+  background:
+    radial-gradient(
+      circle,
+      color-mix(in srgb, #f4f8a6 70%, transparent) 0%,
+      color-mix(in srgb, #b8ff9c 52%, transparent) 28%,
+      color-mix(in srgb, #7fffe8 30%, transparent) 52%,
+      transparent 72%
+    );
+  filter: blur(3px);
+  opacity: 0.95;
+  pointer-events: none;
+  animation: humanhelp-refresh-frame-pulse 1.1s ease-in-out infinite;
+}
+
+[data-humanhelp-refresh-button][data-humanhelp-refresh-stale="true"] {
+  color: color-mix(in srgb, #7fffe8 88%, white 12%) !important;
+  border-color: color-mix(in srgb, #f4f8a6 88%, #7fffe8 12%) !important;
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      color-mix(in srgb, #7fffe8 26%, transparent) 0%,
+      color-mix(in srgb, var(--primary) 62%, var(--background) 38%) 56%,
+      color-mix(in srgb, var(--card) 82%, var(--background) 18%) 100%
+    ) !important;
+
+  text-shadow:
+    0 0 5px color-mix(in srgb, white 80%, transparent),
+    0 0 11px color-mix(in srgb, #7fffe8 95%, transparent);
+
+  box-shadow:
+    inset 0 0 10px color-mix(in srgb, white 28%, transparent),
+    inset 0 0 18px color-mix(in srgb, #7fffe8 42%, transparent),
+    0 0 0 1px color-mix(in srgb, white 38%, transparent),
+    0 0 0 2px color-mix(in srgb, #f4f8a6 96%, transparent),
+    0 0 9px color-mix(in srgb, #f4f8a6 96%, transparent),
+    0 0 18px color-mix(in srgb, #7fffe8 84%, transparent) !important;
+
+  animation: humanhelp-refresh-button-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes humanhelp-refresh-frame-pulse {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes humanhelp-refresh-button-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+
+  50% {
+    transform: scale(1.045);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-humanhelp-refresh-button-frame][data-humanhelp-refresh-stale="true"]::before,
+  [data-humanhelp-refresh-button][data-humanhelp-refresh-stale="true"] {
+    animation: none;
+  }
+}

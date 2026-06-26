@@ -1,0 +1,9 @@
+--add-opens=java.base/java.nio=ALL-UNNAMED
+-Dio.netty.tryReflectionSetAccessible=true
+-XX:-OmitStackTraceInFastThrow
+-XX:+CrashOnOutOfMemoryError
+-Dbiff.env.BIFF_PROFILE=dev
+--add-opens=java.base/java.nio=ALL-UNNAMED
+--enable-native-access=ALL-UNNAMED
+-Dio.netty.tryReflectionSetAccessible=true
+-Dio.netty.noUnsafe=false

@@ -1,0 +1,108 @@
+#+title: Gessokit
+#+subtitle: Starter kit and example app for Gesso
+#+options: toc:nil
+
+Gessokit is the starter project for Gesso.
+
+It contains a deps-new template for creating new Gesso apps, plus a working example app that demonstrates the intended project shape. The included Human Help app shows routing, HTMX forms, live fragments, SSE invalidation, toasts, theme building, tests, and Gesso Live continuity.
+
+* Usage
+
+Create a new app from the local template:
+
+#+begin_src sh
+git clone https://github.com/michaelmrose/net.humanhelp
+cd net.humanhelp
+
+bb to-template
+bb new ../myapp myapp
+
+cd ../myapp
+clojure -M:dev dev
+#+end_src
+
+For a dotted primary namespace:
+
+#+begin_src sh
+bb new ../humanhelp net.humanhelp
+#+end_src
+
+That creates source paths like:
+
+#+begin_src text
+src/net/humanhelp/...
+#+end_src
+
+* Development
+
+Run the dev server:
+
+#+begin_src sh
+clojure -M:dev dev
+#+end_src
+
+Build theme CSS:
+
+#+begin_src sh
+bb themes
+#+end_src
+
+Run tests:
+
+#+begin_src sh
+clojure -M:test
+#+end_src
+
+Regenerate the local deps-new template:
+
+#+begin_src sh
+bb to-template
+#+end_src
+
+Create a scratch project from the regenerated template:
+
+#+begin_src sh
+bb new ../scratch scratch
+#+end_src
+
+Generated projects should use the released Gesso Git dependency, not a sibling checkout.
+
+When developing Gesso and Gessokit together, clone them side by side and temporarily use a local root dependency:
+
+#+begin_src clojure
+michaelmrose/gesso {:local/root "../gesso"}
+#+end_src
+
+Before regenerating templates for release, switch back to the released Git coordinate:
+
+#+begin_src clojure
+michaelmrose/gesso
+{:git/url "https://github.com/michaelmrose/gesso.git"
+:git/tag "v0.2.0"
+:git/sha "3f22e0c3e3cd34fca9cbb5a03625e203d5b3ad37"}
+#+end_src
+
+* Release checklist
+
+#+begin_src sh
+bb themes
+clojure -M:test
+
+bb to-template
+rm -rf ../scratch-gessokit
+bb new ../scratch-gessokit scratch.gessokit
+
+cd ../scratch-gessokit
+clojure -M:test
+#+end_src
+
+Tag the release:
+
+#+begin_src sh
+git tag -a v1.0.0 -m "Gessokit 1.0.0"
+git push origin v1.0.0
+#+end_src
+
+* License
+
+FIXME

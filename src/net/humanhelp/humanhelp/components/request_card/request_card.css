@@ -1,0 +1,295 @@
+/* Human Help request cards live inside the generic Gesso accordion.
+   Generic accordion clipping is useful for plain accordions, but it clips the
+   selected-card glow. Keep this scoped to the Human Help board. */
+
+[data-humanhelp-board] [data-accordion-root] {
+  overflow: visible !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-accordion] {
+  overflow: visible !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-card] {
+  position: relative;
+  overflow: visible !important;
+}
+
+/* The current visual selection is the native details open state.
+   Do not style server-rendered selected attrs here; they can become stale
+   after the user opens another request locally. */
+[data-humanhelp-board] [data-humanhelp-request-card][open] {
+  position: relative;
+  z-index: 1;
+  overflow: visible !important;
+  border-color: var(--chart-4) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ring) 92%, white 8%),
+    0 0 0 5px color-mix(in srgb, var(--ring) 30%, transparent),
+    0 0 34px color-mix(in srgb, var(--ring) 38%, transparent),
+    var(--shadow-lg) !important;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-card][open] > summary {
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-card][open] [data-accordion-chevron] {
+  color: var(--chart-4) !important;
+  opacity: 1 !important;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-summary] {
+  background: transparent !important;
+  color: var(--foreground) !important;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-summary]:focus-visible {
+  outline: none;
+}
+
+/* Terminal/history cards are intentionally quieter than active work. */
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-terminal="true"] {
+  opacity: 0.82;
+}
+
+/* Recently completed/cancelled cards get one lightweight completion ring/glow,
+   then fade down until the model/view delayed prune refresh removes them.
+
+   The glow is intentionally ring-only: no radial-gradient/background fill, so
+   the card face does not become a gradient surface. Keep animation cheap:
+   opacity and transform on the card; opacity only on the ring pseudo-element. */
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-fading-terminal="true"] {
+  pointer-events: none;
+  opacity: 1;
+  animation: humanhelp-terminal-card-fade
+    var(--humanhelp-terminal-fade-ms, 10000ms)
+    linear
+    forwards;
+  will-change: opacity, transform;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-fading-terminal="true"]::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 1px solid color-mix(in srgb, var(--ring) 80%, transparent);
+  background: transparent;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--ring) 24%, transparent),
+    0 0 18px color-mix(in srgb, var(--ring) 36%, transparent),
+    0 0 34px color-mix(in srgb, var(--ring) 24%, transparent);
+  opacity: 0.95;
+  animation: humanhelp-terminal-ring-fade
+    var(--humanhelp-terminal-fade-ms, 10000ms)
+    ease-out
+    forwards;
+  will-change: opacity;
+}
+
+@keyframes humanhelp-terminal-card-fade {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0.34;
+    transform: translateY(-0.125rem);
+  }
+}
+
+@keyframes humanhelp-terminal-ring-fade {
+  0% {
+    opacity: 0.95;
+  }
+
+  10% {
+    opacity: 0.85;
+  }
+
+  35% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-fading-terminal="true"] {
+    animation: none;
+    opacity: 0.55;
+    transform: none;
+    will-change: auto;
+  }
+
+  [data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-fading-terminal="true"]::after {
+    animation: none;
+    opacity: 0.22;
+    will-change: auto;
+  }
+}
+
+/* Optimistic request action feedback.
+
+   Three phases:
+   1. Native press: CSS :active on the real button, instant and JS-independent.
+   2. JS press: gesso-live marks the form/button while the request starts.
+   3. Optimistic card: beforeRequest swaps in the optimistic server-rendered card. */
+
+[data-humanhelp-board] [data-humanhelp-request-action-form] button {
+  transition:
+    transform 80ms ease-out,
+    opacity 80ms ease-out,
+    filter 80ms ease-out,
+    box-shadow 80ms ease-out;
+  will-change: transform;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-action-form] button:active {
+  cursor: progress !important;
+  transform: translateY(2px) scale(0.965) !important;
+  box-shadow:
+    inset 0 3px 8px color-mix(in srgb, black 42%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--ring) 45%, transparent) !important;
+  filter: brightness(0.9) saturate(0.88) !important;
+}
+
+/* Optimistic request action feedback.
+
+   Three phases:
+
+   1. Native press:
+      CSS :active on the real action button. This is instant and does not
+      depend on JS or HTMX timing.
+
+   2. JS press:
+      gesso-live marks the source form/button while the request starts. This is
+      a short-lived "the click landed" affordance.
+
+   3. Optimistic card:
+      The card is rendered as the projected future state. It should mostly look
+      normal. Controls are visible and normal-looking, but disabled. A small
+      "Waiting to confirm…" line in the markup carries the caveat. */
+
+[data-humanhelp-board] [data-humanhelp-request-action-form] button {
+  transition:
+    transform 80ms ease-out,
+    opacity 80ms ease-out,
+    filter 80ms ease-out,
+    box-shadow 80ms ease-out;
+  will-change: transform;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-action-form] button:active {
+  transform: translateY(2px) scale(0.965) !important;
+  box-shadow:
+    inset 0 3px 8px color-mix(in srgb, black 42%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--ring) 45%, transparent) !important;
+  filter: brightness(0.9) saturate(0.88) !important;
+}
+
+/* JS press phase. Current temporary implementation stores optimistic attrs on
+   the form, so style the button inside that form as well as any trigger button
+   directly marked by JS. */
+[data-humanhelp-board] form[data-gesso-optimistic-pressed="true"] button,
+[data-humanhelp-board] button[data-gesso-optimistic-trigger="true"],
+[data-humanhelp-board] [role="button"][data-gesso-optimistic-trigger="true"] {
+  cursor: progress !important;
+  opacity: 0.9 !important;
+  transform: translateY(2px) scale(0.97) !important;
+  box-shadow:
+    inset 0 3px 8px color-mix(in srgb, black 36%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--ring) 38%, transparent) !important;
+  filter: brightness(0.94) saturate(0.9) !important;
+}
+
+[data-humanhelp-board] form[data-gesso-optimistic-pressed="true"] button::after,
+[data-humanhelp-board] button[data-gesso-optimistic-trigger="true"]::after,
+[data-humanhelp-board] [role="button"][data-gesso-optimistic-trigger="true"]::after {
+  content: "";
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-left: 0.5em;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  vertical-align: -0.08em;
+  animation: humanhelp-action-spin 650ms linear infinite;
+}
+
+/* Pressed card shell. Keep this very subtle; the button is the main affordance. */
+[data-humanhelp-board] [data-humanhelp-request-card][data-gesso-optimistic-pressed="true"] {
+  cursor: progress;
+}
+
+/* Optimistic/pending card phase. The projected card should read as the real
+   future state, not as a fake disabled placeholder. */
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-pending="true"],
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-optimistic="true"] {
+  cursor: default;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-optimistic="true"] {
+  border-color: color-mix(in srgb, var(--border) 80%, transparent) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-optimistic="true"] [data-humanhelp-request-summary] {
+  cursor: pointer;
+}
+
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-optimistic="true"] [data-humanhelp-request-actions],
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-pending="true"] [data-humanhelp-request-actions] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Keep projected controls visually normal even though they are disabled to
+   prevent nonsense second actions while the server confirms. */
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-optimistic="true"] [data-humanhelp-request-actions] button:disabled,
+[data-humanhelp-board] [data-humanhelp-request-card][data-humanhelp-request-pending="true"] [data-humanhelp-request-actions] button:disabled {
+  opacity: 1 !important;
+  filter: none !important;
+  cursor: default !important;
+  transform: none !important;
+  box-shadow: inherit;
+}
+
+@keyframes humanhelp-action-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-humanhelp-board] [data-humanhelp-request-action-form] button,
+  [data-humanhelp-board] form[data-gesso-optimistic-pressed="true"] button,
+  [data-humanhelp-board] button[data-gesso-optimistic-trigger="true"],
+  [data-humanhelp-board] [role="button"][data-gesso-optimistic-trigger="true"] {
+    transition: none;
+    transform: translateY(1px) !important;
+  }
+
+  [data-humanhelp-board] form[data-gesso-optimistic-pressed="true"] button::after,
+  [data-humanhelp-board] button[data-gesso-optimistic-trigger="true"]::after,
+  [data-humanhelp-board] [role="button"][data-gesso-optimistic-trigger="true"]::after {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.7;
+  }
+}
