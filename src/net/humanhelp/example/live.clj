@@ -1,4 +1,4 @@
-(ns net.humanhelp.humanhelp.live
+(ns net.humanhelp.example.live
   "Model-backed Gesso Live wiring for the Human Help analogue.
 
    This namespace owns the Human Help adapter over gesso.live:
@@ -20,8 +20,8 @@
    net.humanhelp.client-plumbing.
 
    Important load-boundary rule:
-   this namespace must not statically require net.humanhelp.humanhelp.views.
-   net.humanhelp.humanhelp.app needs both live and views, and the top-level app
+   this namespace must not statically require net.humanhelp.example.views.
+   net.humanhelp.example.app needs both live and views, and the top-level app
    loads the module during startup. A static live -> views edge creates a cyclic
    load dependency during reload. View renderer Vars and view-owned DOM id Vars
    are resolved lazily instead."
@@ -30,8 +30,8 @@
    [gesso.live.continuity :as continuity]
    [gesso.live.core :as live]
    [net.humanhelp.client-plumbing :as client-plumbing]
-   [net.humanhelp.humanhelp.model :as model]
-   [net.humanhelp.humanhelp.routes :as routes]))
+   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.routes :as routes]))
 
 ;; -----------------------------------------------------------------------------
 ;; Constants / render context
@@ -104,15 +104,15 @@
 
 (defn request-toolbar-dom-id
   []
-  (view-value 'net.humanhelp.humanhelp.views/request-toolbar-dom-id))
+  (view-value 'net.humanhelp.example.views/request-toolbar-dom-id))
 
 (defn request-list-dom-id
   []
-  (view-value 'net.humanhelp.humanhelp.views/request-list-dom-id))
+  (view-value 'net.humanhelp.example.views/request-list-dom-id))
 
 (defn board-state-form-id
   []
-  (view-value 'net.humanhelp.humanhelp.views/board-state-form-id))
+  (view-value 'net.humanhelp.example.views/board-state-form-id))
 
 (defn board-state-selector
   []
@@ -193,13 +193,13 @@
 (defn request-toolbar-render
   [data]
   (call-view
-   'net.humanhelp.humanhelp.views/request-toolbar-fragment
+   'net.humanhelp.example.views/request-toolbar-fragment
    data))
 
 (defn request-list-render
   [data]
   (call-view
-   'net.humanhelp.humanhelp.views/request-list-fragment
+   'net.humanhelp.example.views/request-list-fragment
    data))
 
 ;; -----------------------------------------------------------------------------

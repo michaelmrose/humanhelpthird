@@ -1,4 +1,4 @@
-(ns net.humanhelp.humanhelp.components.request-card.attr
+(ns net.humanhelp.example.components.request-card.attr
   (:require
    [clojure.string :as str]))
 

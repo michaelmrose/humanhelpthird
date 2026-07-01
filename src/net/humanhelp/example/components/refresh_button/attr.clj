@@ -1,4 +1,4 @@
-(ns net.humanhelp.humanhelp.components.refresh-button.attr)
+(ns net.humanhelp.example.components.refresh-button.attr)
 
 (defn button-attrs
   [stale?]

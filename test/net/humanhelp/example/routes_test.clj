@@ -1,8 +1,8 @@
-(ns net.humanhelp.humanhelp.routes-test
+(ns net.humanhelp.example.routes-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is]]
-   [net.humanhelp.humanhelp.routes :as routes])
+   [net.humanhelp.example.routes :as routes])
   (:import
    [java.net URLDecoder]))
 

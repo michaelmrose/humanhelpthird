@@ -1,11 +1,11 @@
-(ns net.humanhelp.humanhelp.continuity-test
+(ns net.humanhelp.example.continuity-test
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
-   [net.humanhelp.humanhelp.live :as human-live]
-   [net.humanhelp.humanhelp.routes :as routes]
-   [net.humanhelp.humanhelp.views :as views]))
+   [net.humanhelp.example.live :as human-live]
+   [net.humanhelp.example.routes :as routes]
+   [net.humanhelp.example.views :as views]))
 
 ;; -----------------------------------------------------------------------------
 ;; Hiccup helpers

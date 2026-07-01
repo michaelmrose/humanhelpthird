@@ -1,4 +1,4 @@
-(ns net.humanhelp.humanhelp.views
+(ns net.humanhelp.example.views
   "Human Help analogue UI.
 
    This namespace owns Hiccup rendering only.
@@ -14,10 +14,10 @@
    [clojure.string :as str]
    [gesso.core :as g]
    [net.humanhelp.client-plumbing :as client-plumbing]
-   [net.humanhelp.humanhelp.components.refresh-button.core :refer [refresh-button]]
-   [net.humanhelp.humanhelp.components.request-card.core :refer [request-card]]
-   [net.humanhelp.humanhelp.model :as model]
-   [net.humanhelp.humanhelp.routes :as routes]
+   [net.humanhelp.example.components.refresh-button.core :refer [refresh-button]]
+   [net.humanhelp.example.components.request-card.core :refer [request-card]]
+   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.routes :as routes]
    [net.humanhelp.ui :as ui]))
 
 ;; -----------------------------------------------------------------------------

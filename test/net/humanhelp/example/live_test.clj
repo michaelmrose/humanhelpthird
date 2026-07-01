@@ -1,13 +1,13 @@
-(ns net.humanhelp.humanhelp.live-test
+(ns net.humanhelp.example.live-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [gesso.live.core :as live]
    [net.humanhelp.client-plumbing :as client-plumbing]
-   [net.humanhelp.humanhelp.live :as hh-live]
-   [net.humanhelp.humanhelp.model :as model]
-   [net.humanhelp.humanhelp.routes :as routes]
-   [net.humanhelp.humanhelp.views :as views]
+   [net.humanhelp.example.live :as hh-live]
+   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.routes :as routes]
+   [net.humanhelp.example.views :as views]
    [xtdb.node :as xtn]))
 
 ;; -----------------------------------------------------------------------------

@@ -1,8 +1,8 @@
-(ns net.humanhelp.humanhelp.model-test
+(ns net.humanhelp.example.model-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [net.humanhelp.humanhelp.model :as model]
+   [net.humanhelp.example.model :as model]
    [malli.core :as m]
    [xtdb.node :as xtn]))
 

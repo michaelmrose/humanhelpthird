@@ -1,4 +1,4 @@
-(ns net.humanhelp.humanhelp.routes
+(ns net.humanhelp.example.routes
   "Route constants, route specs, route binding, and URL builders for the Human
    Help analogue.
 
@@ -24,7 +24,7 @@
 (def base-path
   "/app")
 
-;; Compatibility only. Prefer net.humanhelp.humanhelp.model/store-id for domain code.
+;; Compatibility only. Prefer net.humanhelp.example.model/store-id for domain code.
 (def store-id
   "demo-store")
 

@@ -7,7 +7,7 @@
    - replace this namespace with their own app code, or
    - keep this namespace as a thin adapter and point it at their own feature app."
   (:require
-   [net.humanhelp.humanhelp.app :as humanhelp]))
+   [net.humanhelp.example.app :as humanhelp]))
 
 (def module
   humanhelp/module)

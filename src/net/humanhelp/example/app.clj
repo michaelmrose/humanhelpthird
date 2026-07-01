@@ -1,16 +1,16 @@
-(ns net.humanhelp.humanhelp.app
+(ns net.humanhelp.example.app
   "HTTP boundary for the removable Human Help analogue app.
 
    This namespace assembles HTTP handlers from:
 
-   - net.humanhelp.humanhelp.live
-   - net.humanhelp.humanhelp.model
-   - net.humanhelp.humanhelp.routes
-   - net.humanhelp.humanhelp.views
+   - net.humanhelp.example.live
+   - net.humanhelp.example.model
+   - net.humanhelp.example.routes
+   - net.humanhelp.example.views
 
    It should not own generic Gesso Live plumbing. Human Help live panels,
    fragment rendering, stream responses, change constructors, and toast helpers
-   are delegated to net.humanhelp.humanhelp.live.
+   are delegated to net.humanhelp.example.live.
 
    It should not own Hiccup/OOB response shape beyond choosing which view helper
    to return. Board-state OOB rendering is delegated to views.clj."
@@ -19,10 +19,10 @@
    [clojure.string :as str]
    [gesso.core :as g]
    [net.humanhelp.client-plumbing :as client-plumbing]
-   [net.humanhelp.humanhelp.live :as app-live]
-   [net.humanhelp.humanhelp.model :as model]
-   [net.humanhelp.humanhelp.routes :as routes]
-   [net.humanhelp.humanhelp.views :as views]
+   [net.humanhelp.example.live :as app-live]
+   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.routes :as routes]
+   [net.humanhelp.example.views :as views]
    [net.humanhelp.middleware :as mid])
   (:import
    [java.util UUID]))

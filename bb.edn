@@ -111,6 +111,6 @@
        :output-file "resources/public/gesso/app-themes.css"
        :component-css-dirs [gesso-components-dir
                             "src/net/humanhelp/components"
-                            "src/net/humanhelp/humanhelp/components"
+                            "src/net/humanhelp/example/components"
                             "src/net/humanhelp/site/components"]}))}
   }}

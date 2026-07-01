@@ -1,9 +1,9 @@
-(ns net.humanhelp.humanhelp.components.request-card.core
+(ns net.humanhelp.example.components.request-card.core
   (:require
    [gesso.core :as g]
-   [net.humanhelp.humanhelp.components.request-card.attr :as attr]
-   [net.humanhelp.humanhelp.model :as model]
-   [net.humanhelp.humanhelp.routes :as routes]))
+   [net.humanhelp.example.components.request-card.attr :as attr]
+   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.routes :as routes]))
 
 ;; -----------------------------------------------------------------------------
 ;; Status Pill Rendering

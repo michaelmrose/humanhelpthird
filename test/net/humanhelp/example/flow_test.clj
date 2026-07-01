@@ -1,13 +1,13 @@
-(ns net.humanhelp.humanhelp.flow-test
+(ns net.humanhelp.example.flow-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
    [net.humanhelp.client-plumbing :as client-plumbing]
-   [net.humanhelp.humanhelp.app :as app]
-   [net.humanhelp.humanhelp.live :as app-live]
-   [net.humanhelp.humanhelp.model :as model]
-   [net.humanhelp.humanhelp.routes :as routes]
-   [net.humanhelp.humanhelp.views :as views]
+   [net.humanhelp.example.app :as app]
+   [net.humanhelp.example.live :as app-live]
+   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.routes :as routes]
+   [net.humanhelp.example.views :as views]
    [xtdb.node :as xtn]))
 
 ;; -----------------------------------------------------------------------------

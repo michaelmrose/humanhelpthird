@@ -1,4 +1,4 @@
-(ns net.humanhelp.humanhelp.model
+(ns net.humanhelp.example.model
   "Human Help domain, view-state, and XTDB-backed persistence boundary.
 
    This namespace owns the removable Human Help demo's model/service behavior:

@@ -1,11 +1,11 @@
-(ns net.humanhelp.humanhelp.views-test
+(ns net.humanhelp.example.views-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [net.humanhelp.client-plumbing :as client-plumbing]
-   [net.humanhelp.humanhelp.model :as model]
-   [net.humanhelp.humanhelp.routes :as routes]
-   [net.humanhelp.humanhelp.views :as views]
+   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.routes :as routes]
+   [net.humanhelp.example.views :as views]
    [net.humanhelp.ui :as ui]))
 
 ;; -----------------------------------------------------------------------------

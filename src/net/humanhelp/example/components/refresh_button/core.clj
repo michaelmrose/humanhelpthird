@@ -1,7 +1,7 @@
-(ns net.humanhelp.humanhelp.components.refresh-button.core
+(ns net.humanhelp.example.components.refresh-button.core
   (:require
    [gesso.core :as g]
-   [net.humanhelp.humanhelp.components.refresh-button.attr :as attr]))
+   [net.humanhelp.example.components.refresh-button.attr :as attr]))
 
 (defn refresh-button
   [{:keys [stale?]}]
