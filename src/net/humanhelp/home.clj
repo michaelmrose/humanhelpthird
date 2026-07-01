@@ -2,6 +2,7 @@
   (:require
    [com.biffweb :as biff]
    [gesso.core :as g]
+   [net.humanhelp.components.one-time-code.core :as one-time-code]
    [net.humanhelp.middleware :as mid]
    [net.humanhelp.settings :as settings]
    [net.humanhelp.ui :as ui]))
@@ -86,14 +87,11 @@
 
 (defn- code-input
   []
-  (g/input
+  (one-time-code/input
    {:id "code"
     :name "code"
-    :type "text"
-    :inputmode "numeric"
-    :autocomplete "one-time-code"
-    :placeholder "Enter code"
-    :class "w-full"}))
+    :length 6
+    :input-class "w-full"}))
 
 (defn- submit-button
   [{:keys [text site-key callback]}]
