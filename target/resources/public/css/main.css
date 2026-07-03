@@ -622,6 +622,10 @@ ul, ol {
   color: rgb(37 99 235 / var(--tw-text-opacity, 1));
 }
 
+.underline {
+  text-decoration-line: underline;
+}
+
 .opacity-50 {
   opacity: 0.5;
 }

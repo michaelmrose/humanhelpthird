@@ -1,18 +1,25 @@
 (ns net.humanhelp.home
   (:require
-   [com.biffweb :as biff]
    [gesso.core :as g]
-   [net.humanhelp.components.one-time-code.core :as one-time-code]
+   [net.humanhelp.components.phone-auth.core :as phone-auth]
+   [net.humanhelp.components.phone-auth.sms :as phone-auth.sms]
    [net.humanhelp.middleware :as mid]
-   [net.humanhelp.settings :as settings]
    [net.humanhelp.ui :as ui]))
 
-(defn- email-disabled-notice
-  []
-  (g/alert
-   {:content
-    (str "Until you add API keys for MailerSend and reCAPTCHA, we'll print your "
-         "sign-up link to the console. See config.edn.")}))
+(def phone-auth-id "phone-auth")
+(def phone-auth-send-action "/auth/phone/send-code")
+(def phone-auth-verify-action "/auth/phone/verify-code")
+(def phone-auth-change-href "/")
+
+(defn- request-param
+  [params k]
+  (or (get params k)
+      (get params (name k))
+      (get params (keyword k))))
+
+(defn- submitted-phone
+  [params]
+  (request-param params :phone))
 
 (defn- auth-shell
   [ctx title & body]
@@ -24,245 +31,95 @@
       :title title
       :content body})]))
 
-(defn- auth-copy
-  [& children]
-  (into
-   [:p {:class "font-body text-sm-theme leading-body"}]
-   children))
-
-(defn- auth-link
-  [{:keys [href]} & children]
-  (into
-   [:a {:href href
-        :class "link font-body weight-medium-theme"}]
-   children))
-
-(defn- email-error
-  [error]
-  (case error
-    "recaptcha"
-    (str "You failed the recaptcha test. Try again, "
-         "and make sure you aren't blocking scripts from Google.")
-
-    "invalid-email"
-    "Invalid email. Try again with a different address."
-
-    "send-failed"
-    (str "We weren't able to send an email to that address. "
-         "If the problem persists, try another address.")
-
-    "invalid-link"
-    "Invalid or expired link. Sign in to get a new link."
-
-    "not-signed-in"
-    "You must be signed in to view that page."
-
-    "There was an error."))
-
-(defn- verify-error
-  [error]
-  (case error
-    "incorrect-email" "Incorrect email address. Try again."
-    "There was an error."))
-
-(defn- code-error
-  [error]
-  (case error
-    "invalid-code" "Invalid code."
-    "There was an error."))
-
-(defn- email-input
-  ([]
-   (email-input {}))
-  ([attrs]
-   (g/input
+(defn- phone-auth-phone-panel
+  ([ctx]
+   (phone-auth-phone-panel ctx {}))
+  ([ctx opts]
+   (phone-auth/phone-panel
     (merge
-     {:id "email"
-      :name "email"
-      :type "email"
-      :autocomplete "email"
-      :placeholder "Enter your email address"
-      :class "w-full"}
-     attrs))))
+     {:ctx ctx
+      :id phone-auth-id
+      :title nil
+      :body "Enter your phone number to continue."
+      :phone-label "Phone number"
+      :phone-help "Enter a 10-digit US mobile number."
+      :submit-text "Continue"
+      :send-action phone-auth-send-action}
+     opts))))
 
-(defn- code-input
-  []
-  (one-time-code/input
-   {:id "code"
-    :name "code"
-    :length 6
-    :input-class "w-full"}))
+(defn- phone-auth-code-panel
+  [ctx opts]
+  (phone-auth/code-panel
+   (merge
+    {:ctx ctx
+     :id phone-auth-id
+     :title "Enter your code"
+     :submit-text "Continue"
+     :verify-action phone-auth-verify-action
+     :resend-action phone-auth-send-action
+     :change-href phone-auth-change-href
+     :change-text "Use a different phone number"}
+    opts)))
 
-(defn- submit-button
-  [{:keys [text site-key callback]}]
-  (g/button
-   {:text text
-    :class (cond-> "w-full"
-             site-key (str " g-recaptcha"))
-    :attrs (merge
-            {:type "submit"}
-            (when site-key
-              {:data-sitekey site-key
-               :data-callback callback}))}))
-
-(defn- recaptcha-footer
-  []
-  [:div {:class "content-stack-theme gap-field"}
-   biff/recaptcha-disclosure
-   (email-disabled-notice)])
+(defn phone-entry-page
+  [ctx]
+  (auth-shell
+   ctx
+   "Welcome to HumanHelp"
+   (phone-auth-phone-panel ctx)))
 
 (defn home-page
-  [{:keys [recaptcha/site-key params] :as ctx}]
-  (auth-shell
-   (assoc ctx ::ui/recaptcha true)
-   (str "Sign up for " settings/app-name)
-
-   (biff/form
-    {:action "/auth/send-link"
-     :id "signup"
-     :hidden {:on-error "/"}}
-
-    (biff/recaptcha-callback "submitSignup" "signup")
-
-    [:div {:class "form-theme"}
-     (g/field
-      {:for "email"
-       :label-text "Email address"
-       :description "We'll send you a sign-up link."
-       :error (some-> (:error params) email-error)
-       :control (email-input)})
-
-     (submit-button
-      {:text "Sign up"
-       :site-key site-key
-       :callback "submitSignup"})
-
-     (auth-copy
-      "Already have an account? "
-      (auth-link {:href "/signin"} "Sign in")
-      ".")
-
-     (recaptcha-footer)])))
-
-(defn link-sent
-  [{:keys [params] :as ctx}]
-  (auth-shell
-   ctx
-   "Check your inbox"
-
-   (auth-copy
-    "We've sent a sign-in link to "
-    [:span {:class "weight-semibold-theme"} (:email params)]
-    ".")))
-
-(defn verify-email-page
-  [{:keys [params] :as ctx}]
-  (auth-shell
-   ctx
-   (str "Sign up for " settings/app-name)
-
-   (biff/form
-    {:action "/auth/verify-link"
-     :hidden {:token (:token params)}}
-
-    [:div {:class "form-theme"}
-     (g/field
-      {:for "email"
-       :label-text "Confirm your email"
-       :description (str "It looks like you opened this link on a different device "
-                         "or browser than the one you signed up on.")
-       :error (some-> (:error params) verify-error)
-       :control (email-input {:autocomplete "email"})})
-
-     (g/button
-      {:text "Sign in"
-       :class "w-full"
-       :attrs {:type "submit"}})])))
+  [ctx]
+  (phone-entry-page ctx))
 
 (defn signin-page
-  [{:keys [recaptcha/site-key params] :as ctx}]
-  (auth-shell
-   (assoc ctx ::ui/recaptcha true)
-   (str "Sign in to " settings/app-name)
+  [ctx]
+  (phone-entry-page ctx))
 
-   (biff/form
-    {:action "/auth/send-code"
-     :id "signin"
-     :hidden {:on-error "/signin"}}
+(defn send-phone-code
+  [{:keys [params] :as ctx}]
+  (let [phone  (submitted-phone params)
+        result (phone-auth.sms/start-verification!
+                {:phone phone
+                 :length 6})]
+    (if (:ok? result)
+      (g/html-response
+       (phone-auth-code-panel
+        ctx
+        {:phone (:phone result)
+         :length (:length result 6)}))
 
-    (biff/recaptcha-callback "submitSignin" "signin")
+      (g/html-response
+       (phone-auth-phone-panel
+        ctx
+        {:phone phone
+         :phone-error (:error result "Could not send a code.")})))))
 
-    [:div {:class "form-theme"}
-     (g/field
-      {:for "email"
-       :label-text "Email address"
-       :description "We'll send you a sign-in code."
-       :error (some-> (:error params) email-error)
-       :control (email-input)})
+(defn verify-phone-code
+  [{:keys [params] :as ctx}]
+  (let [phone  (submitted-phone params)
+        code   (request-param params :code)
+        result (phone-auth.sms/check-verification!
+                {:phone phone
+                 :code code})]
+    (if (:ok? result)
+      (g/html-response
+       (phone-auth/success-panel
+        {:id phone-auth-id
+         :title "Phone verified"
+         :body (str "Mock phone auth succeeded for " (:phone result)
+                    ". Next we can wire this to real sign-in/session creation.")}))
 
-     (submit-button
-      {:text "Sign in"
-       :site-key site-key
-       :callback "submitSignin"})
-
-     (auth-copy
-      "Don't have an account yet? "
-      (auth-link {:href "/"} "Sign up")
-      ".")
-
-     (recaptcha-footer)])))
-
-(defn enter-code-page
-  [{:keys [recaptcha/site-key params] :as ctx}]
-  (auth-shell
-   (assoc ctx ::ui/recaptcha true)
-   "Enter your sign-in code"
-
-   (biff/form
-    {:action "/auth/verify-code"
-     :id "code-form"
-     :hidden {:email (:email params)}}
-
-    (biff/recaptcha-callback "submitCode" "code-form")
-
-    [:div {:class "form-theme"}
-     (g/field
-      {:for "code"
-       :label-text "Verification code"
-       :description [:<>
-                     "Enter the 6-digit code sent to "
-                     [:span {:class "weight-semibold-theme"} (:email params)]
-                     "."]
-       :error (some-> (:error params) code-error)
-       :control (code-input)})
-
-     (submit-button
-      {:text "Sign in"
-       :site-key site-key
-       :callback "submitCode"})])
-
-   (biff/form
-    {:action "/auth/send-code"
-     :id "signin"
-     :hidden {:email (:email params)
-              :on-error "/signin"}}
-
-    (biff/recaptcha-callback "submitSignin" "signin")
-
-    (g/button
-     {:variant :link
-      :text "Send another code"
-      :class (when site-key "g-recaptcha")
-      :attrs (merge
-              {:type "submit"}
-              (when site-key
-                {:data-sitekey site-key
-                 :data-callback "submitSignin"}))}))))
+      (g/html-response
+       (phone-auth-code-panel
+        ctx
+        {:phone (:phone result phone)
+         :length 6
+         :code-error (:error result "That code didn’t match.")})))))
 
 (def module
   {:routes [["" {:middleware [mid/wrap-redirect-signed-in]}
-             ["/"                  {:get home-page}]]
-            ["/link-sent"          {:get link-sent}]
-            ["/verify-link"        {:get verify-email-page}]
-            ["/signin"             {:get signin-page}]
-            ["/verify-code"        {:get enter-code-page}]]})
+             ["/" {:get home-page}]
+             ["/signin" {:get signin-page}]
+             ["/auth/phone/send-code" {:post send-phone-code}]
+             ["/auth/phone/verify-code" {:post verify-phone-code}]]]})

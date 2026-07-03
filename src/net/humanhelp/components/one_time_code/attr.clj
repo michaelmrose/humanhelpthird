@@ -2,7 +2,7 @@
   (:require
    [clojure.string :as str]))
 
-(def default-length 5)
+(def default-length 6)
 
 (defn class-names
   [& xs]
@@ -64,44 +64,24 @@
    label-attrs))
 
 (defn input-style
-  [length]
-  (str
-   "--one-time-code-length:" length ";"
-   "--one-time-code-cell:2.75rem;"
-   "--one-time-code-gap:var(--space-2,0.625rem);"
+  [_length]
+  {:inline-size "min(100%, 18rem)"
+   :min-block-size "var(--control-height)"
+   :padding-inline "var(--control-px,0.875rem)"
+   :padding-block "var(--control-py,0.625rem)"
 
-   "inline-size:calc((var(--one-time-code-cell) * var(--one-time-code-length))"
-   " + (var(--one-time-code-gap) * (var(--one-time-code-length) - 1)));"
-   "max-inline-size:100%;"
+   :font-family "var(--font-mono)"
+   :font-size "var(--text-2xl)"
+   :font-weight "var(--weight-semibold)"
+   :line-height "var(--leading-tight)"
+   :text-align "center"
 
-   "min-block-size:var(--control-height);"
-   "padding-inline:calc(var(--space-3,0.75rem) + 0.16ch);"
-   "padding-block:var(--control-py,0.625rem);"
-
-   "font-family:var(--font-mono);"
-   "font-size:var(--text-xl);"
-   "font-weight:var(--weight-semibold);"
-   "line-height:var(--leading-tight);"
-   "letter-spacing:0.72em;"
-   "text-align:left;"
-
-   "color:var(--foreground);"
-   "background-color:var(--card);"
-   "border:var(--border-width,1px) solid var(--input);"
-   "border-radius:var(--radius-md);"
-   "outline:none;"
-   "box-shadow:var(--shadow-xs,none);"
-
-   "background-image:"
-   "repeating-linear-gradient("
-   "90deg,"
-   "transparent 0,"
-   "transparent var(--one-time-code-cell),"
-   "var(--background) var(--one-time-code-cell),"
-   "var(--background) calc(var(--one-time-code-cell) + var(--one-time-code-gap))"
-   ");"
-   "background-origin:content-box;"
-   "background-clip:content-box;"))
+   :color "var(--foreground)"
+   :background-color "var(--card)"
+   :border "var(--border-width,1px) solid var(--input)"
+   :border-radius "var(--radius-md)"
+   :outline "none"
+   :box-shadow "var(--shadow-xs,none)"})
 
 (defn input-attrs
   [{:keys [id
@@ -137,7 +117,7 @@
       :data-one-time-code-length length
       :class (class-names
               "font-mono"
-              "text-xl-theme"
+              "text-2xl-theme"
               "leading-tight-theme"
               "weight-semibold-theme"
               "control-height-theme"
@@ -163,7 +143,7 @@
     :class (class-names
             "text-sm-theme"
             "leading-body")
-    :style "color:var(--muted-foreground);"}
+    :style {:color "var(--muted-foreground)"}}
    help-attrs))
 
 (defn error-attrs
@@ -175,5 +155,5 @@
             "text-sm-theme"
             "leading-body"
             "weight-medium-theme")
-    :style "color:var(--destructive);"}
+    :style {:color "var(--destructive)"}}
    error-attrs))
