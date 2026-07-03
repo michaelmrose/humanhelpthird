@@ -7,18 +7,6 @@
    [net.humanhelp.components.phone-auth.scripts :as scripts]
    [net.humanhelp.components.phone-auth.sms :as sms]))
 
-(def default-phone-schema
-  [:map
-   [:phone
-    [:string
-     {:min 12
-      :max 12
-      :gesso.html/pattern "[0-9]{3}-[0-9]{3}-[0-9]{4}"
-      :gesso.error/required "Enter your phone number."
-      :gesso.error/min "Enter a 10-digit US mobile number."
-      :gesso.error/max "Enter a 10-digit US mobile number."
-      :gesso.error/pattern "Enter a 10-digit US mobile number."}]]])
-
 (defn- param-name
   [k]
   (cond
@@ -96,8 +84,8 @@
            phone-placeholder
            phone-help
            phone-error
-           phone-schema
-           phone-field-key
+           phone-required-message
+           phone-invalid-message
            phone-input-attrs
 
            send-action
@@ -112,19 +100,20 @@
          phone-id "phone"
          phone-name "phone"
          phone-label "Phone number"
-         phone-schema default-phone-schema
-         phone-field-key :phone
+         phone-required-message "Enter your phone number."
+         phone-invalid-message "Enter your phone number."
          send-action "/auth/phone/send-code"
          send-method "post"
          submit-text "Continue"}}]
-  (let [form-id         (str id "-send-form")
-        phone-error-id  (str phone-id "-error")
-        validation-plan (g/field-plan phone-schema phone-field-key phone-error-id)
-        anti-forgery    (anti-forgery-node {:ctx ctx
-                                            :anti-forgery anti-forgery})]
+  (let [form-id      (str id "-send-form")
+        phone-err-id (str phone-id "-error")
+        anti-forgery (anti-forgery-node {:ctx ctx
+                                         :anti-forgery anti-forgery})]
     [:div (attr/panel-attrs {:id id
                              :class class
                              :attrs attrs})
+     (scripts/phone-format-script)
+
      [:div (attr/copy-attrs {})
       (when title
         [:h1 (attr/title-attrs {}) title])
@@ -155,8 +144,9 @@
                   :autofocus? true
                   :help phone-help
                   :error phone-error
-                  :validation-plan validation-plan
-                  :format-script (scripts/us-phone-format-script)
+                  :error-id phone-err-id
+                  :required-message phone-required-message
+                  :invalid-message phone-invalid-message
                   :attrs phone-input-attrs})]
 
         (when phone-help

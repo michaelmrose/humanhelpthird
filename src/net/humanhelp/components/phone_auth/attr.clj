@@ -1,7 +1,6 @@
 (ns net.humanhelp.components.phone-auth.attr
   (:require
-   [clojure.string :as str]
-   [gesso.hyperscript :refer [merge-script-attr]]))
+   [clojure.string :as str]))
 
 (defn class-names
   [& xs]
@@ -13,22 +12,24 @@
        (remove str/blank?)
        (str/join " ")))
 
+(defn clean-attrs
+  [attrs]
+  (into {}
+        (remove (comp nil? val))
+        attrs))
+
 (defn merge-attrs
   [& maps]
   (let [classes (->> maps
                      (keep :class)
-                     (apply class-names))]
-    (cond-> (apply merge (map #(dissoc % :class) maps))
+                     (apply class-names))
+        attrs   (->> maps
+                     (map #(dissoc % :class))
+                     (apply merge)
+                     clean-attrs)]
+    (cond-> attrs
       (not (str/blank? classes))
       (assoc :class classes))))
-
-(defn- combine-scripts
-  [& scripts]
-  (let [script (->> scripts
-                    (remove #(str/blank? (str (or % ""))))
-                    (str/join "\n\n"))]
-    (when-not (str/blank? script)
-      script)))
 
 (defn panel-attrs
   [{:keys [id class attrs]}]
@@ -138,48 +139,43 @@
            autocomplete
            help
            error
-           validation-plan
-           format-script
+           error-id
+           required-message
+           invalid-message
            class
            attrs]}]
-  (let [validation-attrs  (:attrs validation-plan)
-        validation-script (:script validation-plan)
-        caller-script     (:_ attrs)
-        script            (combine-scripts
-                           format-script
-                           validation-script
-                           caller-script)]
-    (merge-script-attr
-     (merge-attrs
-      {:id id
-       :name (or name "phone")
-       :type "tel"
-       :value (or value "")
-       :placeholder (or placeholder "123-456-7890")
-       :maxlength 12
-       :inputmode "numeric"
-       :autocomplete (or autocomplete "tel-national")
-       :spellcheck "false"
-       :autocapitalize "none"
-       :autocorrect "off"
-       :aria-invalid (when error "true")
-       :aria-describedby (described-by-id {:id id
-                                           :help help
-                                           :error? true})
-       :data-phone-auth-phone-input true
-       :data-phone-auth-format "us"
-       :class "control-height-theme radius-md border-theme font-mono"
-       :style (phone-input-style)}
-      validation-attrs
-      {:class class}
-      (when disabled?
-        {:disabled true})
-      (when readonly?
-        {:readonly true})
-      (when autofocus?
-        {:autofocus true})
-      (dissoc attrs :_))
-     script)))
+  (merge-attrs
+   {:id id
+    :name (or name "phone")
+    :type "tel"
+    :value (or value "")
+    :placeholder (or placeholder "123-456-7890")
+    :inputmode "numeric"
+    :autocomplete (or autocomplete "tel-national")
+    :spellcheck "false"
+    :autocapitalize "none"
+    :autocorrect "off"
+    :aria-invalid (when error "true")
+    :aria-describedby (described-by-id {:id id
+                                        :help help
+                                        :error? true})
+    :data-phone-auth-phone-input true
+    :data-phone-auth-format "us"
+    :data-phone-auth-error-id (or error-id (str id "-error"))
+    :data-phone-auth-required-message (or required-message "Enter your phone number.")
+    :data-phone-auth-invalid-message (or invalid-message "Enter your phone number.")
+    :class "control-height-theme radius-md border-theme font-mono"
+    :style (phone-input-style)}
+   {:class class}
+   (when error
+     {:data-touched "true"})
+   (when disabled?
+     {:disabled true})
+   (when readonly?
+     {:readonly true})
+   (when autofocus?
+     {:autofocus true})
+   attrs))
 
 (defn help-attrs
   [{:keys [id class attrs]}]
