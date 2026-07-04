@@ -1,8 +1,8 @@
 (ns net.humanhelp.auth.phone
   (:require
-   [com.biffweb :as biff]
+   [com.biffweb.experimental :as biffx]
    [net.humanhelp.components.phone-auth.sms :as phone-auth.sms]
-   [xtdb.api :as xt]))
+   [tick.core :as tick]))
 
 (defn- ctx-keys
   [ctx]
@@ -12,20 +12,11 @@
          sort
          vec)))
 
-(defn- request-db
+(defn- node
   [ctx]
-  (or (:biff/db ctx)
-      (some-> (:biff.xtdb/node ctx) xt/db)
+  (or (:biff/node ctx)
       (throw
-       (ex-info "Phone auth requires :biff/db or :biff.xtdb/node."
-                {:ctx-keys (ctx-keys ctx)}))))
-
-(defn- fresh-db
-  [ctx]
-  (or (some-> (:biff.xtdb/node ctx) xt/db)
-      (:biff/db ctx)
-      (throw
-       (ex-info "Phone auth requires :biff.xtdb/node or :biff/db."
+       (ex-info "Phone auth requires :biff/node."
                 {:ctx-keys (ctx-keys ctx)}))))
 
 (defn normalize-phone
@@ -37,71 +28,70 @@
   (phone-auth.sms/phone-display phone))
 
 (defn get-user-id
-  [db phone]
-  (biff/lookup-id db :user/phone phone))
+  [node phone]
+  (-> (biffx/q node
+               {:select :xt/id
+                :from :user
+                :where [:= :user/phone phone]})
+      first
+      :xt/id))
 
 (defn new-user-tx
-  [{:keys [phone phone-display]}]
-  [{:db/doc-type :user
-    :db.op/upsert {:user/phone phone}
-    :user/phone phone
-    :user/phone-display phone-display
-    :user/phone-verified-at :db/now
-    :user/joined-at :db/now}])
-
-(defn verified-existing-user-tx
-  [{:keys [user-id phone phone-display]}]
-  [{:db/doc-type :user
-    :db/op :update
-    :xt/id user-id
-    :user/phone phone
-    :user/phone-display phone-display
-    :user/phone-verified-at :db/now}])
+  [{:keys [user-id phone phone-display now]}]
+  [[:put-docs :user
+    {:xt/id user-id
+     :user/phone phone
+     :user/phone-display phone-display
+     :user/phone-verified-at now
+     :user/joined-at now}]
+   (biffx/assert-unique :user {:user/phone phone})])
 
 (defn complete-phone-signin!
   "Find or create a user for a verified phone number.
 
-  Input:
-    {:phone ...}
+  This function completes the identity part of phone auth, but deliberately does
+  not create a Ring response and does not mutate the session. The caller should
+  put the returned :user-id into the session as :uid.
 
   Returns:
+
     {:ok? true
      :user-id ...
      :phone \"1234567890\"
      :phone-display \"123-456-7890\"
      :new-user? true|false}
 
-  This function deliberately does not create a Ring response and does not mutate
-  the session. home.clj should use :user-id from this result to assoc :uid into
-  the session and redirect to /app."
+  or:
+
+    {:ok? false
+     :error ...}"
   [ctx {:keys [phone]}]
   (if-let [phone' (normalize-phone phone)]
-    (let [phone-display'  (phone-display phone')
-          db              (request-db ctx)
-          existing-user-id (get-user-id db phone')
-          new-user?       (nil? existing-user-id)
-          tx              (if existing-user-id
-                            (verified-existing-user-tx
-                             {:user-id existing-user-id
-                              :phone phone'
-                              :phone-display phone-display'})
-                            (new-user-tx
-                             {:phone phone'
-                              :phone-display phone-display'}))]
-      (biff/submit-tx ctx tx)
-      (let [user-id (or existing-user-id
-                        (get-user-id (fresh-db ctx) phone'))]
-        (if user-id
+    (let [node'            (node ctx)
+          phone-display'   (phone-display phone')
+          existing-user-id (get-user-id node' phone')]
+      (if existing-user-id
+        {:ok? true
+         :user-id existing-user-id
+         :phone phone'
+         :phone-display phone-display'
+         :new-user? false}
+
+        (let [user-id (random-uuid)
+              now     (tick/zoned-date-time)]
+          (biffx/submit-tx
+           ctx
+           (new-user-tx
+            {:user-id user-id
+             :phone phone'
+             :phone-display phone-display'
+             :now now}))
+
           {:ok? true
            :user-id user-id
            :phone phone'
            :phone-display phone-display'
-           :new-user? new-user?}
-
-          {:ok? false
-           :phone phone'
-           :phone-display phone-display'
-           :error "Could not finish signing in."})))
+           :new-user? true})))
 
     {:ok? false
      :error "Missing or invalid phone number."}))
