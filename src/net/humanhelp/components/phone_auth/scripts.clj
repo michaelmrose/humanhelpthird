@@ -14,8 +14,13 @@
     return String(value || '').replace(/\\D/g, '');
   }
 
+  function stripCommonExtension(value) {
+    return String(value || '').replace(/(?:\\s|,|;)*(?:ext\\.?|extension|x)\\s*\\d+\\s*$/i, '');
+  }
+
   function phoneDigits(value) {
-    var digits = rawDigits(value);
+    var text = stripCommonExtension(value);
+    var digits = rawDigits(text);
 
     if (digits.length === 11 && digits.charAt(0) === '1') {
       digits = digits.slice(1);
@@ -25,7 +30,7 @@
   }
 
   function formatDigits(digits) {
-    digits = String(digits || '').slice(0, 10);
+    digits = rawDigits(digits).slice(0, 10);
 
     if (digits.length === 0) return '';
     if (digits.length <= 2) return digits;
@@ -246,12 +251,8 @@
     return rawDigits(String(display.value || '').slice(start, end)).length;
   }
 
-  function insertedDigitCount(event) {
-    if (event.inputType === 'insertText') {
-      return /^\\d$/.test(event.data || '') ? 1 : 0;
-    }
-
-    return 0;
+  function incomingDigitCount(event) {
+    return rawDigits(event.data || '').length;
   }
 
   function prevent(event) {
@@ -262,7 +263,7 @@
     event.defaultPrevented = true;
   }
 
-  function handleBoundaryDelete(display, event) {
+  function deleteDigitNearHyphen(display, direction) {
     var value = display.value || '';
     var start = display.selectionStart == null ? value.length : display.selectionStart;
     var end = display.selectionEnd == null ? start : display.selectionEnd;
@@ -273,17 +274,15 @@
 
     var removeIndex = null;
 
-    if (event.inputType === 'deleteContentBackward' && value.charAt(start - 1) === '-') {
+    if (direction === 'backward' && value.charAt(start - 1) === '-') {
       removeIndex = digitCountBefore(value, start) - 1;
-    } else if (event.inputType === 'deleteContentForward' && value.charAt(start) === '-') {
+    } else if (direction === 'forward' && value.charAt(start) === '-') {
       removeIndex = digitCountBefore(value, start);
     }
 
     if (removeIndex == null || removeIndex < 0) {
       return false;
     }
-
-    prevent(event);
 
     var digits = phoneDigits(value);
     var nextDigits = removeDigitAt(digits, removeIndex);
@@ -297,6 +296,23 @@
     return true;
   }
 
+  function handleKeydown(event) {
+    var display = event.target;
+
+    if (!isDisplayInput(display)) {
+      return;
+    }
+
+    if (event.key === 'Backspace' && deleteDigitNearHyphen(display, 'backward')) {
+      prevent(event);
+      return;
+    }
+
+    if ((event.key === 'Delete' || event.key === 'Del') && deleteDigitNearHyphen(display, 'forward')) {
+      prevent(event);
+    }
+  }
+
   function handleBeforeInput(event) {
     var display = event.target;
 
@@ -304,19 +320,25 @@
       return;
     }
 
-    if (handleBoundaryDelete(display, event)) {
+    if (event.inputType === 'deleteContentBackward' && deleteDigitNearHyphen(display, 'backward')) {
+      prevent(event);
       return;
     }
 
-    if (event.inputType === 'insertText' && !/^\\d$/.test(event.data || '')) {
+    if (event.inputType === 'deleteContentForward' && deleteDigitNearHyphen(display, 'forward')) {
       prevent(event);
       return;
     }
 
     if (event.inputType === 'insertText') {
+      if (!/^\\d$/.test(event.data || '')) {
+        prevent(event);
+        return;
+      }
+
       var digits = phoneDigits(display.value);
       var selected = selectedDigitCount(display);
-      var inserted = insertedDigitCount(event);
+      var inserted = incomingDigitCount(event);
 
       if ((digits.length - selected + inserted) > 10) {
         prevent(event);
@@ -341,18 +363,25 @@
       return;
     }
 
-    prevent(event);
+    display.dataset.touched = 'true';
 
-    var clipboard = event.clipboardData || global.clipboardData;
-    var text = clipboard && clipboard.getData ? clipboard.getData('text') : '';
-    var digits = phoneDigits(text);
-    var formatted = formatDigits(digits);
+    global.setTimeout(function () {
+      sync(display, { caretToEnd: true, showError: true });
+    }, 0);
+  }
+
+  function handleDrop(event) {
+    var display = event.target;
+
+    if (!isDisplayInput(display)) {
+      return;
+    }
 
     display.dataset.touched = 'true';
-    display.value = formatted;
-    setHiddenValue(display, digits);
-    setCaretToEnd(display);
-    validate(display, true);
+
+    global.setTimeout(function () {
+      sync(display, { caretToEnd: true, showError: true });
+    }, 0);
   }
 
   function handleBlur(event) {
@@ -414,14 +443,14 @@
     }
   }
 
+  function displayInputs(root) {
+    return toArray((root || global.document).querySelectorAll('[data-phone-auth-phone-display]'));
+  }
+
   function init(root) {
     displayInputs(root || global.document).forEach(function (display) {
       sync(display, { preserveCaret: false, showError: false });
     });
-  }
-
-  function displayInputs(root) {
-    return toArray((root || global.document).querySelectorAll('[data-phone-auth-phone-display]'));
   }
 
   function install(doc) {
@@ -433,9 +462,11 @@
 
     installed = true;
 
-    doc.addEventListener('beforeinput', handleBeforeInput);
-    doc.addEventListener('input', handleInput);
-    doc.addEventListener('paste', handlePaste);
+    doc.addEventListener('keydown', handleKeydown, true);
+    doc.addEventListener('beforeinput', handleBeforeInput, true);
+    doc.addEventListener('input', handleInput, true);
+    doc.addEventListener('paste', handlePaste, true);
+    doc.addEventListener('drop', handleDrop, true);
     doc.addEventListener('blur', handleBlur, true);
     doc.addEventListener('invalid', handleInvalid, true);
     doc.addEventListener('submit', handleSubmit, true);
@@ -455,15 +486,21 @@
 
   var PhoneAuth = {
     rawDigits: rawDigits,
+    stripCommonExtension: stripCommonExtension,
     phoneDigits: phoneDigits,
     formatDigits: formatDigits,
     formattedPhone: formattedPhone,
+    digitCountBefore: digitCountBefore,
+    caretAfterDigitCount: caretAfterDigitCount,
     validationMessage: validationMessage,
     validate: validate,
     sync: sync,
+    deleteDigitNearHyphen: deleteDigitNearHyphen,
+    handleKeydown: handleKeydown,
     handleBeforeInput: handleBeforeInput,
     handleInput: handleInput,
     handlePaste: handlePaste,
+    handleDrop: handleDrop,
     handleBlur: handleBlur,
     handleInvalid: handleInvalid,
     handleSubmit: handleSubmit,
