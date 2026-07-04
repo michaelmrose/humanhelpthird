@@ -64,6 +64,26 @@
      :change-text "Use a different phone number"}
     opts)))
 
+(defn- code-sent-toast
+  [{:keys [phone phone-display]}]
+  (g/render-toast-oob
+   {:variant :info
+    :duration 4000
+    :title "Code sent"
+    :description (str "We sent a verification code to "
+                      (or phone-display phone "your phone")
+                      ".")}))
+
+(defn- code-sent-response
+  [ctx result]
+  (g/html-response
+   [:<>
+    (phone-auth-code-panel
+     ctx
+     {:phone (:phone result)
+      :length (:length result 6)})
+    (code-sent-toast result)]))
+
 (defn phone-entry-page
   [ctx]
   (auth-shell
@@ -86,11 +106,7 @@
                 {:phone phone
                  :length 6})]
     (if (:ok? result)
-      (g/html-response
-       (phone-auth-code-panel
-        ctx
-        {:phone (:phone result)
-         :length (:length result 6)}))
+      (code-sent-response ctx result)
 
       (g/html-response
        (phone-auth-phone-panel
