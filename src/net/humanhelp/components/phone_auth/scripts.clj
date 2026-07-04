@@ -1,9 +1,14 @@
 (ns net.humanhelp.components.phone-auth.scripts)
 
-(def phone-format-js
-  "(function(){
-  if (window.__humanHelpPhoneAuthInstalled) return;
-  window.__humanHelpPhoneAuthInstalled = true;
+(def phone-auth-js
+  "(function (global) {
+  'use strict';
+
+  var installed = false;
+
+  function toArray(xs) {
+    return Array.prototype.slice.call(xs || []);
+  }
 
   function rawDigits(value) {
     return String(value || '').replace(/\\D/g, '');
@@ -12,39 +17,27 @@
   function phoneDigits(value) {
     var digits = rawDigits(value);
 
-    if (digits.length > 10 && digits.charAt(0) === '1') {
+    if (digits.length === 11 && digits.charAt(0) === '1') {
       digits = digits.slice(1);
     }
 
     return digits.slice(0, 10);
   }
 
-  function formatDigits(digits, inputType) {
-    var deleting = inputType && inputType.indexOf('delete') === 0;
+  function formatDigits(digits) {
+    digits = String(digits || '').slice(0, 10);
 
-    if (digits.length === 0) {
-      return '';
-    }
-
-    if (digits.length <= 2) {
-      return digits;
-    }
-
-    if (digits.length === 3) {
-      return deleting ? digits : digits + '-';
-    }
-
-    if (digits.length <= 5) {
-      return digits.slice(0, 3) + '-' + digits.slice(3);
-    }
-
-    if (digits.length === 6) {
-      return deleting
-        ? digits.slice(0, 3) + '-' + digits.slice(3, 6)
-        : digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-';
-    }
+    if (digits.length === 0) return '';
+    if (digits.length <= 2) return digits;
+    if (digits.length === 3) return digits + '-';
+    if (digits.length <= 5) return digits.slice(0, 3) + '-' + digits.slice(3);
+    if (digits.length === 6) return digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-';
 
     return digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-' + digits.slice(6);
+  }
+
+  function formattedPhone(value) {
+    return formatDigits(phoneDigits(value));
   }
 
   function digitCountBefore(value, caret) {
@@ -64,11 +57,10 @@
 
     for (var i = 0; i < value.length; i++) {
       if (/\\d/.test(value.charAt(i))) {
-        seen++;
+        seen += 1;
 
         if (seen >= digitCount) {
-          if ((digitCount === 3 || digitCount === 6) &&
-              value.charAt(i + 1) === '-') {
+          if ((digitCount === 3 || digitCount === 6) && value.charAt(i + 1) === '-') {
             return i + 2;
           }
 
@@ -80,203 +72,417 @@
     return value.length;
   }
 
-  function errorElement(input) {
-    var id = input.dataset.phoneAuthErrorId;
-    return id ? document.getElementById(id) : null;
+  function removeDigitAt(digits, index) {
+    if (index < 0 || index >= digits.length) {
+      return digits;
+    }
+
+    return digits.slice(0, index) + digits.slice(index + 1);
   }
 
-  function message(input, key, fallback) {
-    return input.dataset[key] || fallback;
+  function setCaret(display, caret) {
+    try {
+      display.setSelectionRange(caret, caret);
+    } catch (_) {}
   }
 
-  function setError(input, text, show) {
-    var err = errorElement(input);
+  function setCaretToEnd(display) {
+    setCaret(display, String(display.value || '').length);
+  }
 
-    if (text) {
-      input.setCustomValidity(text);
-      input.setAttribute('aria-invalid', 'true');
+  function isDisplayInput(target) {
+    return Boolean(target && target.matches && target.matches('[data-phone-auth-phone-display]'));
+  }
 
-      if (show && err) {
-        err.textContent = text;
-        err.classList.remove('hidden');
+  function rootFor(display) {
+    if (display.closest) {
+      return display.closest('[data-phone-auth-panel]') || display.form || global.document;
+    }
+
+    return display.form || global.document;
+  }
+
+  function hiddenInput(display) {
+    var id = display.dataset && display.dataset.phoneAuthHiddenId;
+
+    if (id && global.document && global.document.getElementById) {
+      return global.document.getElementById(id);
+    }
+
+    var root = rootFor(display);
+
+    return root && root.querySelector ? root.querySelector('[data-phone-auth-phone-hidden]') : null;
+  }
+
+  function errorElement(display) {
+    var id = display.dataset && display.dataset.phoneAuthErrorId;
+
+    if (id && global.document && global.document.getElementById) {
+      return global.document.getElementById(id);
+    }
+
+    var root = rootFor(display);
+
+    return root && root.querySelector ? root.querySelector('[data-phone-auth-error]') : null;
+  }
+
+  function requiredMessage(display) {
+    return (display.dataset && display.dataset.phoneAuthRequiredMessage) ||
+      'Please enter a 10-digit US mobile number.';
+  }
+
+  function invalidMessage(display) {
+    return (display.dataset && display.dataset.phoneAuthInvalidMessage) ||
+      'Please enter a 10-digit US mobile number.';
+  }
+
+  function validationMessage(display, digits) {
+    if (digits.length === 0) {
+      return requiredMessage(display);
+    }
+
+    if (digits.length !== 10) {
+      return invalidMessage(display);
+    }
+
+    return '';
+  }
+
+  function setHiddenValue(display, digits) {
+    var hidden = hiddenInput(display);
+
+    if (hidden) {
+      hidden.value = digits;
+    }
+  }
+
+  function setDisplayValue(display, formatted) {
+    if (display.value !== formatted) {
+      display.value = formatted;
+    }
+  }
+
+  function setError(display, message, show) {
+    var error = errorElement(display);
+
+    if (message) {
+      if (display.setCustomValidity) {
+        display.setCustomValidity(message);
+      }
+
+      if (display.setAttribute) {
+        display.setAttribute('aria-invalid', 'true');
+      }
+
+      if (show && error) {
+        error.textContent = message;
+
+        if (error.classList && error.classList.remove) {
+          error.classList.remove('hidden');
+        }
       }
     } else {
-      input.setCustomValidity('');
-      input.setAttribute('aria-invalid', 'false');
+      if (display.setCustomValidity) {
+        display.setCustomValidity('');
+      }
 
-      if (err) {
-        err.textContent = '';
-        err.classList.add('hidden');
+      if (display.setAttribute) {
+        display.setAttribute('aria-invalid', 'false');
+      }
+
+      if (error) {
+        error.textContent = '';
+
+        if (error.classList && error.classList.add) {
+          error.classList.add('hidden');
+        }
       }
     }
   }
 
-  function validatePhone(input, show) {
-    var digits = phoneDigits(input.value);
-    var text = '';
+  function validate(display, show) {
+    var digits = phoneDigits(display.value);
+    var message = validationMessage(display, digits);
 
-    if (digits.length === 0) {
-      text = message(input,
-                     'phoneAuthRequiredMessage',
-                     'Enter your phone number.');
-    } else if (digits.length !== 10) {
-      text = message(input,
-                     'phoneAuthInvalidMessage',
-                     'Enter your phone number.');
-    }
+    setError(display, message, show || display.dataset.touched === 'true');
 
-    setError(input, text, show || input.dataset.touched === 'true');
-
-    return text === '';
+    return message === '';
   }
 
-  function formatPhone(input, inputType) {
-    if (!input || input.__phoneAuthFormatting) {
+  function sync(display, opts) {
+    opts = opts || {};
+
+    if (!display || display.__phoneAuthSyncing) {
       return;
     }
 
-    var before = input.value || '';
-    var caret = input.selectionStart == null ? before.length : input.selectionStart;
+    display.__phoneAuthSyncing = true;
+
+    var before = display.value || '';
+    var caret = display.selectionStart == null ? before.length : display.selectionStart;
     var wasAtEnd = caret === before.length;
     var digitPosition = digitCountBefore(before, caret);
     var digits = phoneDigits(before);
-    var after = formatDigits(digits, inputType);
+    var formatted = formatDigits(digits);
 
-    if (before !== after) {
-      input.__phoneAuthFormatting = true;
-      input.value = after;
+    setDisplayValue(display, formatted);
+    setHiddenValue(display, digits);
 
-      var nextCaret = caretAfterDigitCount(after, digitPosition, wasAtEnd);
-
-      try {
-        input.setSelectionRange(nextCaret, nextCaret);
-      } catch (_) {}
-
-      input.__phoneAuthFormatting = false;
+    if (opts.caretToEnd) {
+      setCaretToEnd(display);
+    } else if (opts.preserveCaret) {
+      setCaret(display, caretAfterDigitCount(formatted, digitPosition, wasAtEnd));
     }
 
-    return after;
+    validate(display, opts.showError);
+
+    display.__phoneAuthSyncing = false;
   }
 
-  function phoneInputFromEvent(event) {
-    var el = event.target;
+  function selectedDigitCount(display) {
+    var start = display.selectionStart == null ? 0 : display.selectionStart;
+    var end = display.selectionEnd == null ? start : display.selectionEnd;
 
-    if (!el || !el.matches) {
-      return null;
+    return rawDigits(String(display.value || '').slice(start, end)).length;
+  }
+
+  function insertedDigitCount(event) {
+    if (event.inputType === 'insertText') {
+      return /^\\d$/.test(event.data || '') ? 1 : 0;
     }
 
-    if (!el.matches('[data-phone-auth-format=\"us\"]')) {
-      return null;
+    return 0;
+  }
+
+  function prevent(event) {
+    if (event.preventDefault) {
+      event.preventDefault();
     }
 
-    return el;
+    event.defaultPrevented = true;
   }
 
-  function initInput(input) {
-    formatPhone(input, null);
-    validatePhone(input, false);
+  function handleBoundaryDelete(display, event) {
+    var value = display.value || '';
+    var start = display.selectionStart == null ? value.length : display.selectionStart;
+    var end = display.selectionEnd == null ? start : display.selectionEnd;
+
+    if (start !== end) {
+      return false;
+    }
+
+    var removeIndex = null;
+
+    if (event.inputType === 'deleteContentBackward' && value.charAt(start - 1) === '-') {
+      removeIndex = digitCountBefore(value, start) - 1;
+    } else if (event.inputType === 'deleteContentForward' && value.charAt(start) === '-') {
+      removeIndex = digitCountBefore(value, start);
+    }
+
+    if (removeIndex == null || removeIndex < 0) {
+      return false;
+    }
+
+    prevent(event);
+
+    var digits = phoneDigits(value);
+    var nextDigits = removeDigitAt(digits, removeIndex);
+    var formatted = formatDigits(nextDigits);
+
+    display.value = formatted;
+    setHiddenValue(display, nextDigits);
+    setCaret(display, caretAfterDigitCount(formatted, removeIndex, false));
+    validate(display, false);
+
+    return true;
   }
 
-  function initAll(root) {
-    root = root || document;
+  function handleBeforeInput(event) {
+    var display = event.target;
 
-    root.querySelectorAll('[data-phone-auth-format=\"us\"]').forEach(initInput);
-  }
-
-  document.addEventListener('input', function(event) {
-    var input = phoneInputFromEvent(event);
-
-    if (!input || input.__phoneAuthFormatting) {
+    if (!isDisplayInput(display)) {
       return;
     }
 
-    formatPhone(input, event.inputType || null);
-    validatePhone(input, false);
-  });
-
-  document.addEventListener('paste', function(event) {
-    var input = phoneInputFromEvent(event);
-
-    if (!input) {
+    if (handleBoundaryDelete(display, event)) {
       return;
     }
 
-    setTimeout(function() {
-      formatPhone(input, 'insertFromPaste');
-      input.dataset.touched = 'true';
-      validatePhone(input, true);
-    }, 0);
-  });
-
-  document.addEventListener('blur', function(event) {
-    var input = phoneInputFromEvent(event);
-
-    if (!input) {
+    if (event.inputType === 'insertText' && !/^\\d$/.test(event.data || '')) {
+      prevent(event);
       return;
     }
 
-    input.dataset.touched = 'true';
-    formatPhone(input, null);
-    validatePhone(input, true);
-  }, true);
+    if (event.inputType === 'insertText') {
+      var digits = phoneDigits(display.value);
+      var selected = selectedDigitCount(display);
+      var inserted = insertedDigitCount(event);
 
-  document.addEventListener('invalid', function(event) {
-    var input = phoneInputFromEvent(event);
+      if ((digits.length - selected + inserted) > 10) {
+        prevent(event);
+      }
+    }
+  }
 
-    if (!input) {
+  function handleInput(event) {
+    var display = event.target;
+
+    if (!isDisplayInput(display) || display.__phoneAuthSyncing) {
       return;
     }
 
-    input.dataset.touched = 'true';
-    formatPhone(input, null);
-    validatePhone(input, true);
-  }, true);
+    sync(display, { preserveCaret: true, showError: false });
+  }
 
-  document.addEventListener('submit', function(event) {
+  function handlePaste(event) {
+    var display = event.target;
+
+    if (!isDisplayInput(display)) {
+      return;
+    }
+
+    prevent(event);
+
+    var clipboard = event.clipboardData || global.clipboardData;
+    var text = clipboard && clipboard.getData ? clipboard.getData('text') : '';
+    var digits = phoneDigits(text);
+    var formatted = formatDigits(digits);
+
+    display.dataset.touched = 'true';
+    display.value = formatted;
+    setHiddenValue(display, digits);
+    setCaretToEnd(display);
+    validate(display, true);
+  }
+
+  function handleBlur(event) {
+    var display = event.target;
+
+    if (!isDisplayInput(display)) {
+      return;
+    }
+
+    display.dataset.touched = 'true';
+    sync(display, { preserveCaret: false, showError: true });
+  }
+
+  function handleInvalid(event) {
+    var display = event.target;
+
+    if (!isDisplayInput(display)) {
+      return;
+    }
+
+    display.dataset.touched = 'true';
+    sync(display, { preserveCaret: false, showError: true });
+  }
+
+  function handleSubmit(event) {
     var form = event.target;
 
     if (!form || !form.querySelectorAll) {
       return;
     }
 
-    var inputs = form.querySelectorAll('[data-phone-auth-format=\"us\"]');
+    var inputs = toArray(form.querySelectorAll('[data-phone-auth-phone-display]'));
 
     if (!inputs.length) {
       return;
     }
 
-    var valid = true;
+    var ok = true;
 
-    inputs.forEach(function(input) {
-      input.dataset.touched = 'true';
-      formatPhone(input, null);
+    inputs.forEach(function (display) {
+      display.dataset.touched = 'true';
+      sync(display, { preserveCaret: false, showError: true });
 
-      if (!validatePhone(input, true)) {
-        valid = false;
+      if (!validate(display, true)) {
+        ok = false;
       }
     });
 
-    if (!valid) {
-      event.preventDefault();
+    if (!ok) {
+      prevent(event);
 
       if (inputs[0].reportValidity) {
         inputs[0].reportValidity();
       }
 
-      inputs[0].focus();
+      if (inputs[0].focus) {
+        inputs[0].focus();
+      }
     }
-  }, true);
+  }
 
-  document.addEventListener('DOMContentLoaded', function() {
-    initAll(document);
-  });
+  function init(root) {
+    displayInputs(root || global.document).forEach(function (display) {
+      sync(display, { preserveCaret: false, showError: false });
+    });
+  }
 
-  document.addEventListener('htmx:afterSwap', function(event) {
-    initAll(event.target || document);
-  });
-})();")
+  function displayInputs(root) {
+    return toArray((root || global.document).querySelectorAll('[data-phone-auth-phone-display]'));
+  }
 
-(defn phone-format-script
+  function install(doc) {
+    doc = doc || global.document;
+
+    if (!doc || installed) {
+      return;
+    }
+
+    installed = true;
+
+    doc.addEventListener('beforeinput', handleBeforeInput);
+    doc.addEventListener('input', handleInput);
+    doc.addEventListener('paste', handlePaste);
+    doc.addEventListener('blur', handleBlur, true);
+    doc.addEventListener('invalid', handleInvalid, true);
+    doc.addEventListener('submit', handleSubmit, true);
+
+    if (doc.readyState === 'loading') {
+      doc.addEventListener('DOMContentLoaded', function () {
+        init(doc);
+      });
+    } else {
+      init(doc);
+    }
+
+    doc.addEventListener('htmx:afterSwap', function (event) {
+      init(event.target || doc);
+    });
+  }
+
+  var PhoneAuth = {
+    rawDigits: rawDigits,
+    phoneDigits: phoneDigits,
+    formatDigits: formatDigits,
+    formattedPhone: formattedPhone,
+    validationMessage: validationMessage,
+    validate: validate,
+    sync: sync,
+    handleBeforeInput: handleBeforeInput,
+    handleInput: handleInput,
+    handlePaste: handlePaste,
+    handleBlur: handleBlur,
+    handleInvalid: handleInvalid,
+    handleSubmit: handleSubmit,
+    install: install
+  };
+
+  global.HumanHelpPhoneAuth = PhoneAuth;
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = PhoneAuth;
+  }
+
+  if (global.document) {
+    install(global.document);
+  }
+})(typeof window !== 'undefined' ? window : globalThis);
+")
+
+(defn phone-auth-script
   []
   [:script {:dangerouslySetInnerHTML
-            {:__html phone-format-js}}])
+            {:__html phone-auth-js}}])

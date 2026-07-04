@@ -49,25 +49,37 @@
   [x]
   (str/blank? (str (or x ""))))
 
-(defn- phone-display-value
+(defn- phone-hidden-value
   [phone]
   (or (sms/normalize-phone phone)
+      ""))
+
+(defn- phone-display-value
+  [phone]
+  (or (sms/phone-display phone)
       (when-not (blankish? phone)
         (str/trim (str phone)))
       ""))
 
-(defn- phone-display
+(defn- phone-display-text
   [phone]
-  (let [value (phone-display-value phone)]
-    (if (blankish? value)
-      "your phone"
-      value)))
+  (or (sms/phone-display phone)
+      (when-not (blankish? phone)
+        (str/trim (str phone)))
+      "your phone"))
 
 (defn- default-code-message
   [phone length]
-  (str "We sent a " length "-digit code to " (phone-display phone) "."))
+  (str "We sent a " length "-digit code to " (phone-display-text phone) "."))
 
 (defn phone-panel
+  "Render the phone entry step.
+
+  The visible phone input is display-only and has no name. The hidden phone
+  input is the submitted value and contains only 10 numeric digits.
+
+  This component owns reusable UI only. The app still owns routes, user lookup,
+  sessions, redirects, and persistence."
   [{:keys [id
            class
            attrs
@@ -78,7 +90,8 @@
            body
 
            phone
-           phone-id
+           phone-display-id
+           phone-hidden-id
            phone-name
            phone-label
            phone-placeholder
@@ -86,7 +99,8 @@
            phone-error
            phone-required-message
            phone-invalid-message
-           phone-input-attrs
+           phone-display-attrs
+           phone-hidden-attrs
 
            send-action
            send-method
@@ -97,22 +111,23 @@
     :or {id "phone-auth"
          title "Sign in with your phone"
          body "Enter your phone number and we’ll send you a verification code."
-         phone-id "phone"
+         phone-display-id "phone-display"
+         phone-hidden-id "phone"
          phone-name "phone"
          phone-label "Phone number"
-         phone-required-message "Enter your phone number."
-         phone-invalid-message "Enter your phone number."
+         phone-required-message "Please enter a 10-digit US mobile number."
+         phone-invalid-message "Please enter a 10-digit US mobile number."
          send-action "/auth/phone/send-code"
          send-method "post"
          submit-text "Continue"}}]
-  (let [form-id      (str id "-send-form")
-        phone-err-id (str phone-id "-error")
-        anti-forgery (anti-forgery-node {:ctx ctx
-                                         :anti-forgery anti-forgery})]
+  (let [phone-help-id  (str phone-display-id "-help")
+        phone-error-id (str phone-display-id "-error")
+        anti-forgery   (anti-forgery-node {:ctx ctx
+                                           :anti-forgery anti-forgery})]
     [:div (attr/panel-attrs {:id id
                              :class class
                              :attrs attrs})
-     (scripts/phone-format-script)
+     (scripts/phone-auth-script)
 
      [:div (attr/copy-attrs {})
       (when title
@@ -122,7 +137,7 @@
 
      (form-node
       (attr/form-attrs
-       {:id form-id
+       {:id (str id "-send-form")
         :method send-method
         :action send-action
         :attrs (merge
@@ -132,37 +147,51 @@
                 send-attrs)})
       anti-forgery
       hidden
-      [[:div (attr/field-attrs {})
-        [:label (attr/label-attrs {:id phone-id})
-         phone-label]
+      [[:div {:class "form-theme"}
+        (g/field
+         {:for phone-display-id
+          :label-text phone-label
+          :description phone-help
+          :error phone-error
+          :control
+          [:div (attr/field-control-attrs {})
+           [:input (attr/phone-display-input-attrs
+                    {:id phone-display-id
+                     :value (phone-display-value phone)
+                     :placeholder phone-placeholder
+                     :hidden-id phone-hidden-id
+                     :error-id phone-error-id
+                     :help-id (when phone-help phone-help-id)
+                     :required-message phone-required-message
+                     :invalid-message phone-invalid-message
+                     :autofocus? true
+                     :attrs phone-display-attrs})]
 
-        [:input (attr/phone-input-attrs
-                 {:id phone-id
-                  :name phone-name
-                  :value (phone-display-value phone)
-                  :placeholder phone-placeholder
-                  :autofocus? true
-                  :help phone-help
-                  :error phone-error
-                  :error-id phone-err-id
-                  :required-message phone-required-message
-                  :invalid-message phone-invalid-message
-                  :attrs phone-input-attrs})]
+           [:input (attr/phone-hidden-input-attrs
+                    {:id phone-hidden-id
+                     :name phone-name
+                     :value (phone-hidden-value phone)
+                     :attrs phone-hidden-attrs})]
 
-        (when phone-help
-          [:p (attr/help-attrs {:id phone-id}) phone-help])
+           (when phone-help
+             [:p (attr/help-attrs {:id phone-help-id})
+              phone-help])
 
-        [:p (attr/error-attrs {:id phone-id
-                               :hidden? (nil? phone-error)})
-         (or phone-error "")]]
+           [:p (attr/error-attrs {:id phone-error-id
+                                  :hidden? (nil? phone-error)})
+            (or phone-error "")]]})
 
-       (g/button
-        {:text submit-text
-         :variant :primary
-         :attrs {:type "submit"
-                 :style (attr/submit-style)}})])]))
+        (g/button
+         {:text submit-text
+          :variant :primary
+          :attrs {:type "submit"
+                  :style (attr/submit-style)}})]])]))
 
 (defn code-panel
+  "Render the code entry step.
+
+  The phone value passed here should be the canonical 10-digit value whenever
+  possible. It is submitted as a hidden field with the verification code."
   [{:keys [id
            class
            attrs
@@ -213,12 +242,12 @@
          change-text "Use a different phone number"
          change? true
          submit-text "Continue"}}]
-  (let [verify-form-id (str id "-verify-form")
+  (let [phone'         (phone-hidden-value phone)
+        verify-form-id (str id "-verify-form")
         resend-form-id (str id "-resend-form")
-        normalized     (sms/normalize-phone phone)
         hidden-fields  (cond-> (or hidden {})
-                         normalized
-                         (assoc phone-name normalized))
+                         (not (blankish? phone'))
+                         (assoc phone-name phone'))
         anti-forgery   (anti-forgery-node {:ctx ctx
                                            :anti-forgery anti-forgery})]
     [:div (attr/panel-attrs {:id id
@@ -228,7 +257,7 @@
       (when title
         [:h1 (attr/title-attrs {}) title])
       [:p (attr/body-attrs {})
-       (default-code-message normalized length)]]
+       (default-code-message phone' length)]]
 
      (form-node
       (attr/form-attrs
@@ -242,16 +271,23 @@
                 verify-attrs)})
       anti-forgery
       hidden-fields
-      [(one-time-code/input
-        {:id code-id
-         :name code-name
-         :label code-label
-         :help code-help
-         :error code-error
-         :length length
-         :required? true
-         :autofocus? true
-         :input-class "w-full"})])
+      [[:div {:class "form-theme"}
+        (one-time-code/input
+         {:id code-id
+          :name code-name
+          :label code-label
+          :help code-help
+          :error code-error
+          :length length
+          :required? true
+          :autofocus? true
+          :input-class "w-full"})
+
+        (g/button
+         {:text submit-text
+          :variant :primary
+          :attrs {:type "submit"
+                  :style (attr/submit-style)}})]])
 
      [:div (attr/action-row-attrs {})
       (when resend?
@@ -275,14 +311,7 @@
 
       (when change?
         [:a (attr/link-attrs {:href change-href})
-         change-text])]
-
-     (g/button
-      {:text submit-text
-       :variant :primary
-       :attrs {:type "submit"
-               :form verify-form-id
-               :style (attr/submit-style)}})]))
+         change-text])]]))
 
 (defn success-panel
   [{:keys [id class attrs title body]

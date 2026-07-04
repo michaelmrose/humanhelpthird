@@ -85,32 +85,23 @@
    {:class class}
    attrs))
 
-(defn field-attrs
+(defn field-control-attrs
   [{:keys [class attrs]}]
   (merge-attrs
-   {:data-phone-auth-field true
+   {:data-phone-auth-field-control true
     :class "content-stack-theme gap-field"}
    {:class class}
    attrs))
 
-(defn label-attrs
-  [{:keys [id class attrs]}]
-  (merge-attrs
-   {:for id
-    :data-phone-auth-label true
-    :class "font-heading text-sm-theme leading-tight-theme tracking-tight-theme weight-medium-theme"}
-   {:class class}
-   attrs))
-
 (defn described-by-id
-  [{:keys [id help error?]}]
+  [{:keys [help-id error-id]}]
   (let [ids (cond-> []
-              help   (conj (str id "-help"))
-              error? (conj (str id "-error")))]
+              help-id  (conj help-id)
+              error-id (conj error-id))]
     (when (seq ids)
       (str/join " " ids))))
 
-(defn phone-input-style
+(defn phone-display-style
   []
   {:inline-size "100%"
    :min-block-size "var(--control-height)"
@@ -128,25 +119,23 @@
    :outline "none"
    :box-shadow "var(--shadow-xs,none)"})
 
-(defn phone-input-attrs
+(defn phone-display-input-attrs
   [{:keys [id
-           name
            value
            placeholder
+           hidden-id
+           error-id
+           help-id
+           required-message
+           invalid-message
            disabled?
            readonly?
            autofocus?
            autocomplete
-           help
-           error
-           error-id
-           required-message
-           invalid-message
            class
            attrs]}]
   (merge-attrs
    {:id id
-    :name (or name "phone")
     :type "tel"
     :value (or value "")
     :placeholder (or placeholder "123-456-7890")
@@ -155,20 +144,19 @@
     :spellcheck "false"
     :autocapitalize "none"
     :autocorrect "off"
-    :aria-invalid (when error "true")
-    :aria-describedby (described-by-id {:id id
-                                        :help help
-                                        :error? true})
-    :data-phone-auth-phone-input true
-    :data-phone-auth-format "us"
-    :data-phone-auth-error-id (or error-id (str id "-error"))
-    :data-phone-auth-required-message (or required-message "Enter your phone number.")
-    :data-phone-auth-invalid-message (or invalid-message "Enter your phone number.")
+    :aria-invalid "false"
+    :aria-describedby (described-by-id {:help-id help-id
+                                        :error-id error-id})
+    :data-phone-auth-phone-display true
+    :data-phone-auth-hidden-id hidden-id
+    :data-phone-auth-error-id error-id
+    :data-phone-auth-required-message (or required-message
+                                          "Please enter a 10-digit US mobile number.")
+    :data-phone-auth-invalid-message (or invalid-message
+                                         "Please enter a 10-digit US mobile number.")
     :class "control-height-theme radius-md border-theme font-mono"
-    :style (phone-input-style)}
+    :style (phone-display-style)}
    {:class class}
-   (when error
-     {:data-touched "true"})
    (when disabled?
      {:disabled true})
    (when readonly?
@@ -177,10 +165,20 @@
      {:autofocus true})
    attrs))
 
+(defn phone-hidden-input-attrs
+  [{:keys [id name value attrs]}]
+  (merge-attrs
+   {:id id
+    :name (or name "phone")
+    :type "hidden"
+    :value (or value "")
+    :data-phone-auth-phone-hidden true}
+   attrs))
+
 (defn help-attrs
   [{:keys [id class attrs]}]
   (merge-attrs
-   {:id (str id "-help")
+   {:id id
     :data-phone-auth-help true
     :class "text-sm-theme leading-body"
     :style {:color "var(--muted-foreground)"}}
@@ -190,7 +188,7 @@
 (defn error-attrs
   [{:keys [id hidden? class attrs]}]
   (merge-attrs
-   {:id (str id "-error")
+   {:id id
     :data-phone-auth-error true
     :role "alert"
     :class (class-names
@@ -239,13 +237,12 @@
    :cursor "pointer"})
 
 (defn link-button-attrs
-  [{:keys [form class attrs]}]
+  [{:keys [class attrs]}]
   (merge-attrs
-   (cond-> {:type "submit"
-            :data-phone-auth-link-button true
-            :class "text-sm-theme leading-body"
-            :style (link-button-style)}
-     form (assoc :form form))
+   {:type "submit"
+    :data-phone-auth-link-button true
+    :class "text-sm-theme leading-body"
+    :style (link-button-style)}
    {:class class}
    attrs))
 
