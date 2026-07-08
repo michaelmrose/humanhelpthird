@@ -1,6 +1,7 @@
 (ns net.humanhelp.home
   (:require
    [gesso.core :as g]
+   [net.humanhelp.auth.phone :as auth.phone]
    [net.humanhelp.components.phone-auth.core :as phone-auth]
    [net.humanhelp.components.phone-auth.sms :as phone-auth.sms]
    [net.humanhelp.middleware :as mid]
@@ -10,12 +11,24 @@
 (def phone-auth-send-action "/auth/phone/send-code")
 (def phone-auth-verify-action "/auth/phone/verify-code")
 (def phone-auth-change-href "/")
+(def app-path "/app")
 
 (defn- request-param
   [params k]
   (or (get params k)
       (get params (name k))
       (get params (keyword k))))
+
+(defn- request-header
+  [ctx k]
+  (let [headers (:headers ctx)]
+    (or (get headers k)
+        (get headers (name k))
+        (get headers (clojure.string/lower-case (name k))))))
+
+(defn- htmx-request?
+  [ctx]
+  (= "true" (request-header ctx :hx-request)))
 
 (defn- submitted-phone
   [params]
@@ -84,6 +97,19 @@
       :length (:length result 6)})
     (code-sent-toast result)]))
 
+(defn- signed-in-response
+  [ctx {:keys [user-id]}]
+  (let [session' (assoc (or (:session ctx) {}) :uid user-id)]
+    (if (htmx-request? ctx)
+      {:status 200
+       :headers {"HX-Redirect" app-path}
+       :session session'
+       :body ""}
+
+      {:status 303
+       :headers {"location" app-path}
+       :session session'})))
+
 (defn phone-entry-page
   [ctx]
   (auth-shell
@@ -122,13 +148,19 @@
                 {:phone phone
                  :code code})]
     (if (:ok? result)
-      (g/html-response
-       (phone-auth/success-panel
-        {:id phone-auth-id
-         :title "Phone verified"
-         :body (str "Mock phone auth succeeded for "
-                    (:phone-display result (:phone result))
-                    ". Next we can wire this to real sign-in/session creation.")}))
+      (let [signin-result (auth.phone/complete-phone-signin!
+                           ctx
+                           {:phone (:phone result phone)})]
+        (if (:ok? signin-result)
+          (signed-in-response ctx signin-result)
+
+          (g/html-response
+           (phone-auth-code-panel
+            ctx
+            {:phone (:phone result phone)
+             :length 6
+             :code-error (:error signin-result
+                                  "Could not finish signing in. Try again.")}))))
 
       (g/html-response
        (phone-auth-code-panel

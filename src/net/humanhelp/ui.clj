@@ -299,14 +299,79 @@
     [:span {:class "font-heading text-md-theme leading-heading tracking-heading weight-semibold-theme"}
      text]]))
 
+(defn- present-string
+  [x]
+  (let [s (some-> x str clojure.string/trim)]
+    (when (seq s)
+      s)))
+
+(defn- digits-only
+  [x]
+  (->> (str (or x ""))
+       (filter #(Character/isDigit ^char %))
+       (apply str)))
+
+(defn- canonical-phone-digits
+  [phone]
+  (let [digits (digits-only phone)]
+    (cond
+      (= 10 (count digits))
+      digits
+
+      (and (= 11 (count digits))
+           (clojure.string/starts-with? digits "1"))
+      (subs digits 1)
+
+      :else
+      nil)))
+
+(defn- format-us-phone
+  [phone]
+  (when-let [digits (canonical-phone-digits phone)]
+    (str (subs digits 0 3)
+         "-"
+         (subs digits 3 6)
+         "-"
+         (subs digits 6 10))))
+
+(defn- account-id
+  [user]
+  (or (:user/id user)
+      (:xt/id user)
+      (:uid user)))
+
 (defn- account-email
   [user]
-  (:user/email user))
+  (present-string (:user/email user)))
+
+(defn- account-phone
+  [user]
+  (or (present-string (:user/phone-display user))
+      (some-> (:user/phone user) format-us-phone)
+      (present-string (:phone-display user))
+      (some-> (:phone user) format-us-phone)))
+
+(defn- signed-in-user?
+  [user]
+  (boolean
+   (or (account-id user)
+       (account-email user)
+       (account-phone user))))
 
 (defn- account-label
   [user]
-  (or (account-email user)
-      "Not signed in"))
+  (cond
+    (account-email user)
+    (account-email user)
+
+    (account-phone user)
+    (account-phone user)
+
+    (signed-in-user? user)
+    "Signed in"
+
+    :else
+    "Not signed in"))
 
 (defn logout-form
   []
@@ -320,9 +385,8 @@
 
 (defn user-menu
   [user]
-  (let [email      (account-email user)
-        label      (account-label user)
-        signed-in? (some? email)]
+  (let [label      (account-label user)
+        signed-in? (signed-in-user? user)]
     (g/dropdown-menu
      {}
      (g/dropdown-menu-trigger
