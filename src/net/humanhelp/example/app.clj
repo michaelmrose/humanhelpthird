@@ -153,33 +153,74 @@
     (get-in ctx [:session :email])
     (get-in ctx [:identity :email])]))
 
-(defn- user-email-from-db
+(defn- user-phone-from-ctx
   [ctx]
-  (let [conn (:biff/conn ctx)
+  (some
+   identity
+   [(:user/phone ctx)
+    (:user/phone (:user ctx))
+    (get-in ctx [:user :phone])
+    (get-in ctx [:session :phone])]))
+
+(defn- user-phone-display-from-ctx
+  [ctx]
+  (some
+   identity
+   [(:user/phone-display ctx)
+    (:user/phone-display (:user ctx))
+    (get-in ctx [:user :phone-display])
+    (get-in ctx [:session :phone-display])]))
+
+(defn- user-record-from-db
+  [ctx]
+  (let [node (:biff/node ctx)
         uid  (->uuid (session-uid ctx))]
-    (when (and conn uid)
+    (when (and node uid)
       (try
-        (some-> (biffx/q conn
-                         {:select [:user/email]
-                          :from :user
-                          :where [:= :xt/id uid]})
-                first
-                :user/email)
-        (catch Exception _
+        (first
+         (biffx/q node
+                  {:select [:xt/id
+                            :user/email
+                            :user/phone
+                            :user/phone-display
+                            :user/phone-verified-at
+                            :user/joined-at]
+                   :from :user
+                   :where [:= :xt/id uid]}))
+        (catch Exception e
+          (println "[humanhelp] current-user lookup failed"
+                   {:message (.getMessage e)
+                    :uid uid})
           nil)))))
 
-(defn- current-user-email
-  "Return only a real display email, never a UUID/id fallback."
-  [ctx]
-  (or (user-email-from-ctx ctx)
-      (user-email-from-db ctx)))
+(defn- current-user-id
+  [ctx user-record]
+  (or (:xt/id user-record)
+      (session-uid ctx)
+      (client-plumbing/current-user-id ctx)))
 
 (defn- current-user
   [ctx]
-  (let [email (current-user-email ctx)]
-    (cond-> {:user/id (client-plumbing/current-user-id ctx)}
+  (let [user-record    (user-record-from-db ctx)
+        user-id        (current-user-id ctx user-record)
+        email          (or (user-email-from-ctx ctx)
+                           (:user/email user-record))
+        phone          (or (user-phone-from-ctx ctx)
+                           (:user/phone user-record))
+        phone-display  (or (user-phone-display-from-ctx ctx)
+                           (:user/phone-display user-record))]
+    (cond-> {:user/id user-id}
+      (:xt/id user-record)
+      (assoc :xt/id (:xt/id user-record))
+
       email
-      (assoc :user/email email))))
+      (assoc :user/email email)
+
+      phone
+      (assoc :user/phone phone)
+
+      phone-display
+      (assoc :user/phone-display phone-display))))
 
 ;; -----------------------------------------------------------------------------
 ;; Live boundary
