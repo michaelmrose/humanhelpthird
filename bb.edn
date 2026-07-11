@@ -1,20 +1,156 @@
 {:paths ["src" "resources"]
 
- :requires ([babashka.fs :as fs]
-            [clojure.string :as str])
-
- :deps
- {michaelmrose/gesso
-  {:git/url "https://github.com/michaelmrose/gesso.git"
-   :git/tag "v0.2.0"
-   :git/sha "3f22e0c3e3cd34fca9cbb5a03625e203d5b3ad37"}}
-
  :tasks
- {to-template
+ {:requires ([babashka.deps :as deps]
+             [babashka.fs :as fs]
+             [clojure.string :as str])
+
+  :init
+  (do
+    (def remote-gesso-deps
+      '{:deps
+        {michaelmrose/gesso
+         {:git/url "https://github.com/michaelmrose/gesso.git"
+          :git/tag "v0.2.1"
+          :git/sha "1e6e2fe043bde3e0368420ce4aa41ade450df959"
+}}})
+
+    (def local-gesso-deps
+      '{:deps
+        {michaelmrose/gesso
+         {:local/root "../gesso"}}})
+
+    (defn gesso-mode
+      [args]
+      (let [args (vec args)]
+        (cond
+          (empty? args)
+          :remote
+
+          (= ["local"] args)
+          :local
+
+          :else
+          (throw
+           (ex-info
+            "Expected no argument or the single argument: local"
+            {:args args
+             :usage ["bb themes [local]"
+                     "bb dev [local]"]})))))
+
+    (defn add-gesso!
+      [mode]
+      (case mode
+        :remote
+        (do
+          (println "Using pinned remote Gesso v0.2.1.")
+          (deps/add-deps remote-gesso-deps))
+
+        :local
+        (do
+          (println "Using local Gesso from ../gesso.")
+          (deps/add-deps local-gesso-deps))))
+
+    (defn dir?
+      [path]
+      (and path
+           (fs/exists? path)
+           (fs/directory? path)))
+
+    (defn build-themes!
+      [args]
+      (let [mode (gesso-mode args)]
+        (add-gesso! mode)
+
+        (let [gesso-path
+              (-> (with-out-str
+                    ((requiring-resolve 'gesso.build.find-path/-main)
+                     "gesso"))
+                  str/trim)
+
+              ;; Accept any of these from gesso.build.find-path:
+              ;;   repo root:  .../gesso
+              ;;   src root:   .../gesso/src
+              ;;   ns dir:     .../gesso/src/gesso
+              candidate-src-roots
+              (let [p gesso-path
+                    parent (some-> p fs/parent str)
+                    grandparent (some-> p fs/parent fs/parent str)]
+                [(when (dir? (str p "/gesso"))
+                   p)
+                 (when (dir? (str p "/src/gesso"))
+                   (str p "/src"))
+                 (when (dir? (str parent "/gesso"))
+                   parent)
+                 (when (dir? (str grandparent "/src/gesso"))
+                   (str grandparent "/src"))])
+
+              gesso-src-root
+              (first (filter dir? candidate-src-roots))
+
+              gesso-components-dir
+              (when gesso-src-root
+                (str gesso-src-root "/gesso/components"))]
+
+          (when-not gesso-src-root
+            (throw
+             (ex-info
+              "Could not locate Gesso source root from gesso.build.find-path output."
+              {:gesso-path gesso-path
+               :candidate-src-roots candidate-src-roots})))
+
+          (when-not (dir? gesso-components-dir)
+            (throw
+             (ex-info
+              "Could not locate Gesso component CSS directory."
+              {:gesso-path gesso-path
+               :gesso-src-root gesso-src-root
+               :gesso-components-dir gesso-components-dir})))
+
+          ((requiring-resolve 'gesso.build.themes/build!)
+           {:input-dir "resources/themes"
+            :output-file "resources/public/gesso/app-themes.css"
+            :component-css-dirs
+            [gesso-components-dir
+             "src/net/humanhelp/components"
+             "src/net/humanhelp/example/components"
+             "src/net/humanhelp/site/components"]}))
+
+        mode))
+
+    (defn start-dev!
+      [args]
+      (let [mode (build-themes! args)]
+        (case mode
+          :remote
+          (shell "clj" "-M:dev" "dev")
+
+          :local
+          (shell "clj" "-M:local-gesso:dev" "dev"))))
+
+    (defn split-local-test-arg
+      [args]
+      (let [args (vec args)]
+        {:local? (boolean (some #{"local"} args))
+         :args (vec (remove #{"local"} args))}))
+
+    (defn run-tests!
+      [args]
+      (let [{:keys [local? args]}
+            (split-local-test-arg args)
+
+            alias
+            (if local?
+              "-M:local-gesso:test"
+              "-M:test")]
+        (apply shell
+               (into ["clj" alias] args)))))
+
+  to-template
   {:doc "Regenerate the deps-new template project from this repo."
    :task
    (let [template-dir "gesso-template-deps-new"
-         source-primary-ns "net.humanhelp"
+         source-primary-ns "humanehelp"
          template-name "local/gesso-template-deps-new"]
      (shell "rm" "-rf" (str "../" template-dir))
      (shell "bb" "to-template.clj"
@@ -35,82 +171,32 @@
          (println)
          (println "Examples:")
          (println "  bb new ../gargle gargle")
-         (println "  bb new ../humanhelp net.humanhelp"))
+         (println "  bb new ../humanhelp net.whatever"))
        (System/exit 1))
 
      (shell "clojure"
-            "-Sdeps" "{:deps {local/template {:local/root \"../gesso-template-deps-new\"}}}"
-            "-Tnew" "create"
-            ":template" "local/gesso-template-deps-new"
-            ":name" primary-ns
-            ":target-dir" target-dir))}
-
-  dev
-  {:doc "Build themes, then start the dev server."
-   :task
-   (do
-     (shell "bb" "themes")
-     (shell "clj" "-M:dev" "dev"))}
+            "-Sdeps"
+            "{:deps {local/template {:local/root \"../gesso-template-deps-new\"}}}"
+            "-Tnew"
+            "create"
+            ":template"
+            "local/gesso-template-deps-new"
+            ":name"
+            primary-ns
+            ":target-dir"
+            target-dir))}
 
   themes
-  {:doc "Build theme CSS from Gessokit and Gesso component CSS."
-   :requires ([babashka.fs :as fs]
-              [clojure.string :as str])
+  {:doc "Build theme CSS. Pass 'local' to use ../gesso instead of pinned remote Gesso."
    :task
-   (let [gesso-path
-         (-> (shell {:out :string}
-                    "bb" "-m" "gesso.build.find-path" "gesso")
-             :out
-             str/trim)
+   (build-themes! *command-line-args*)}
 
-         dir?
-         (fn [path]
-           (and path
-                (fs/exists? path)
-                (fs/directory? path)))
+  dev
+  {:doc "Build themes and start the dev server. Pass 'local' to use ../gesso."
+   :task
+   (start-dev! *command-line-args*)}
 
-         ;; Accept any of these from gesso.build.find-path:
-         ;;   repo root:  .../gesso
-         ;;   src root:   .../gesso/src
-         ;;   ns dir:     .../gesso/src/gesso
-         candidate-src-roots
-         (let [p gesso-path
-               parent (some-> p fs/parent str)
-               grandparent (some-> p fs/parent fs/parent str)]
-           [(when (dir? (str p "/gesso"))
-              p)
-            (when (dir? (str p "/src/gesso"))
-              (str p "/src"))
-            (when (dir? (str parent "/gesso"))
-              parent)
-            (when (dir? (str grandparent "/src/gesso"))
-              (str grandparent "/src"))])
-
-         gesso-src-root
-         (first (filter dir? candidate-src-roots))
-
-         gesso-components-dir
-         (when gesso-src-root
-           (str gesso-src-root "/gesso/components"))]
-
-     (when-not gesso-src-root
-       (throw
-         (ex-info "Could not locate Gesso source root from gesso.build.find-path output."
-                  {:gesso-path gesso-path
-                   :candidate-src-roots candidate-src-roots})))
-
-     (when-not (dir? gesso-components-dir)
-       (throw
-         (ex-info "Could not locate Gesso component CSS directory."
-                  {:gesso-path gesso-path
-                   :gesso-src-root gesso-src-root
-                   :gesso-components-dir gesso-components-dir})))
-
-     ((requiring-resolve 'gesso.build.themes/build!)
-      {:input-dir "resources/themes"
-       :output-file "resources/public/gesso/app-themes.css"
-       :component-css-dirs [gesso-components-dir
-                            "src/net/humanhelp/components"
-                            "src/net/humanhelp/example/components"
-                            "src/net/humanhelp/site/components"]}))}
-  }}
+  test
+  {:doc "Run tests. A standalone 'local' token selects ../gesso; all other arguments are forwarded to clj -M:test."
+   :task
+   (run-tests! *command-line-args*)}}}
