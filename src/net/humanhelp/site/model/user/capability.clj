@@ -5,21 +5,19 @@
    It is primarily used when the request owner does not have a signed-in user
    identity.
 
-   A capability may optionally be associated with a user, but request access is
+   A capability may optionally be associated with a user, but access is
    granted by possession of the bearer token rather than by that association.
 
    Only a cryptographic hash of the bearer token is persisted. Raw tokens,
-   token generation, constant-time token verification, authorization, and
-   persistence belong outside this namespace.
+   token generation, constant-time verification, authorization, and persistence
+   belong outside this namespace.
 
-   Revocation and expiration are terminal. A replacement capability must be
-   created when access needs to be restored."
+   Revocation and expiration are terminal. Restoring access requires creation
+   of a replacement capability."
   (:require
-   [net.humanhelp.schema.common :as schema.common]
+   [net.humanhelp.schema.common :as common]
    [net.humanhelp.site.model.common :as model.common]
-   [tick.core :as tick])
-  (:import
-   [java.time ZonedDateTime]))
+   [tick.core :as tick]))
 
 ;; =============================================================================
 ;; Identity and limits
@@ -86,36 +84,11 @@
 ;; General helpers
 ;; =============================================================================
 
-(defn zdt-value?
-  [value]
-  (tick/zoned-date-time? value))
-
 (defn error-message
   [error]
   (get action-error-messages
        error
        "Request access could not be updated."))
-
-(defn- zdt<
-  [a b]
-  (and
-   (zdt-value? a)
-   (zdt-value? b)
-   (.isBefore ^ZonedDateTime a
-              ^ZonedDateTime b)))
-
-(defn- optional-between?
-  [start value end]
-  (or
-   (nil? value)
-   (and
-    (model.common/timestamp<=
-     start
-     value)
-
-    (model.common/timestamp<=
-     value
-     end))))
 
 (defn valid-change-time?
   [capability now]
@@ -129,7 +102,10 @@
   [value]
   (and
    (string? value)
-   (schema.common/non-blank-string? value)
+
+   (common/non-blank-string?
+    value)
+
    (<= token-hash-min
        (count value)
        token-hash-max)))
@@ -180,6 +156,7 @@
   [capability request-id]
   (and
    (uuid? request-id)
+
    (= request-id
       (:request-capability/request capability))))
 
@@ -187,6 +164,7 @@
   [capability user-id]
   (and
    (uuid? user-id)
+
    (= user-id
       (:request-capability/user capability))))
 
@@ -194,12 +172,14 @@
   "Returns true when now is at or after the capability expiration time."
   [capability now]
   (and
-   (zdt-value? now)
-   (zdt-value?
+   (tick/zoned-date-time?
+    now)
+
+   (tick/zoned-date-time?
     (:request-capability/expires-at capability))
 
    (not
-    (zdt<
+    (model.common/timestamp<
      now
      (:request-capability/expires-at capability)))))
 
@@ -210,14 +190,17 @@
   (and
    (active? capability)
 
-   (zdt-value? now)
+   (tick/zoned-date-time?
+    now)
 
    (model.common/timestamp<=
     (:request-capability/created-at capability)
     now)
 
    (not
-    (expired-at? capability now))))
+    (expired-at?
+     capability
+     now))))
 
 (defn next-status
   [capability action]
@@ -248,30 +231,32 @@
     updated-at)
 
    ;; A capability must have a non-empty usable lifetime.
-   (zdt<
+   (model.common/timestamp<
     created-at
     expires-at)
 
-   (optional-between?
+   (model.common/optional-between?
     created-at
     last-used-at
     updated-at)
 
-   (optional-between?
+   (model.common/optional-between?
     created-at
     revoked-at
     updated-at)
 
-   ;; Successful use and revocation can happen only before expiration.
+   ;; Successful use and revocation must occur before expiration.
    (or
     (nil? last-used-at)
-    (zdt<
+
+    (model.common/timestamp<
      last-used-at
      expires-at))
 
    (or
     (nil? revoked-at)
-    (zdt<
+
+    (model.common/timestamp<
      revoked-at
      expires-at))))
 
@@ -291,8 +276,9 @@
      (and
       (nil? revoked-at)
 
-      ;; Every mutation of an active capability must happen before expiry.
-      (zdt<
+      ;; An active document records only mutations made before expiration.
+      ;; Passing wall-clock time does not mutate the persisted status.
+      (model.common/timestamp<
        updated-at
        expires-at))
 
@@ -303,7 +289,8 @@
      (and
       (nil? revoked-at)
 
-      ;; Materializing expiration records an update at or after expires-at.
+      ;; Explicitly materializing expiration updates the document at or after
+      ;; its expiration time.
       (model.common/timestamp<=
        expires-at
        updated-at))
@@ -329,10 +316,37 @@
    (valid-token-hash?
     (:request-capability/token-hash capability))
 
-   (lifecycle-consistent? capability)))
+   (nat-int?
+    (:request-capability/revision capability))
+
+   (tick/zoned-date-time?
+    (:request-capability/created-at capability))
+
+   (tick/zoned-date-time?
+    (:request-capability/updated-at capability))
+
+   (tick/zoned-date-time?
+    (:request-capability/expires-at capability))
+
+   (or
+    (nil?
+     (:request-capability/last-used-at capability))
+
+    (tick/zoned-date-time?
+     (:request-capability/last-used-at capability)))
+
+   (or
+    (nil?
+     (:request-capability/revoked-at capability))
+
+    (tick/zoned-date-time?
+     (:request-capability/revoked-at capability)))
+
+   (lifecycle-consistent?
+    capability)))
 
 ;; =============================================================================
-;; Input validation
+;; Creation validation
 ;; =============================================================================
 
 (defn create-input-errors
@@ -365,28 +379,37 @@
      "A valid user UUID is required.")
 
     (not
-     (valid-token-hash? token-hash))
+     (valid-token-hash?
+      token-hash))
     (assoc
      :token-hash
      "A valid request-capability token hash is required.")
 
     (not
-     (zdt-value? now))
+     (tick/zoned-date-time?
+      now))
     (assoc
      :now
      "A valid capability creation time is required.")
 
     (not
-     (zdt-value? expires-at))
+     (tick/zoned-date-time?
+      expires-at))
     (assoc
      :expires-at
      "A valid capability expiration time is required.")
 
     (and
-     (zdt-value? now)
-     (zdt-value? expires-at)
+     (tick/zoned-date-time?
+      now)
+
+     (tick/zoned-date-time?
+      expires-at)
+
      (not
-      (zdt< now expires-at)))
+      (model.common/timestamp<
+       now
+       expires-at)))
     (assoc
      :expires-at
      "The capability expiration time must be after its creation time.")))
@@ -395,14 +418,6 @@
   [input]
   (empty?
    (create-input-errors input)))
-
-(defn- throw-invalid!
-  [message errors input]
-  (model.common/throw-invalid!
-   :request-capability/invalid-input
-   message
-   errors
-   input))
 
 ;; =============================================================================
 ;; Capability construction
@@ -418,22 +433,40 @@
      expires-at]
     :as input}]
   (let [errors
-        (create-input-errors input)]
-    (when (seq errors)
-      (throw-invalid!
+        (create-input-errors
+         input)]
+    (when
+     (seq errors)
+      (model.common/throw-invalid!
+       :request-capability/invalid-input
        "Cannot create request capability."
        errors
        input))
 
     (cond->
-     {:xt/id id
-      :request-capability/request request-id
-      :request-capability/token-hash token-hash
-      :request-capability/status :active
-      :request-capability/revision 0
-      :request-capability/created-at now
-      :request-capability/updated-at now
-      :request-capability/expires-at expires-at}
+     {:xt/id
+      id
+
+      :request-capability/request
+      request-id
+
+      :request-capability/token-hash
+      token-hash
+
+      :request-capability/status
+      :active
+
+      :request-capability/revision
+      0
+
+      :request-capability/created-at
+      now
+
+      :request-capability/updated-at
+      now
+
+      :request-capability/expires-at
+      expires-at}
 
       user-id
       (assoc
@@ -441,18 +474,10 @@
        user-id))))
 
 ;; =============================================================================
-;; Capability updates
+;; Successful-use recording
 ;; =============================================================================
 
-(defn- bump-revision
-  [capability now]
-  (model.common/bump-revision
-   capability
-   :request-capability/revision
-   :request-capability/updated-at
-   now))
-
-(defn terminal-error
+(defn- terminal-error
   [capability]
   (case
    (:request-capability/status capability)
@@ -468,9 +493,9 @@
 (defn record-use-doc
   "Records a successful use of the capability.
 
-   Calling code should invoke this only after securely verifying the presented
-   bearer token. Whether every use should be persisted or uses should be
-   sampled is an application-level policy."
+   Calling code must invoke this only after securely verifying the presented
+   bearer token. Whether every use should be persisted or sampled is an
+   application policy."
   [capability now]
   (cond
     (not
@@ -480,25 +505,36 @@
      (terminal-error capability)}
 
     (not
-     (valid-change-time? capability now))
+     (valid-change-time?
+      capability
+      now))
     {:ok? false
-     :error :request-capability/invalid-time}
+     :error
+     :request-capability/invalid-time}
 
-    (expired-at? capability now)
+    (expired-at?
+     capability
+     now)
     {:ok? false
-     :error :request-capability/expired}
+     :error
+     :request-capability/expired}
 
     :else
     {:ok? true
+
      :request-capability
      (-> capability
          (assoc
           :request-capability/last-used-at
           now)
-         (bump-revision now))}))
+
+         (model.common/bump-revision
+          :request-capability/revision
+          :request-capability/updated-at
+          now))}))
 
 ;; =============================================================================
-;; Capability lifecycle transitions
+;; Lifecycle transitions
 ;; =============================================================================
 
 (defn revoke-capability-doc
@@ -511,16 +547,31 @@
      (terminal-error capability)}
 
     (not
-     (valid-change-time? capability now))
+     (valid-change-time?
+      capability
+      now))
     {:ok? false
-     :error :request-capability/invalid-time}
+     :error
+     :request-capability/invalid-time}
 
-    (expired-at? capability now)
+    (expired-at?
+     capability
+     now)
     {:ok? false
-     :error :request-capability/expired}
+     :error
+     :request-capability/expired}
+
+    (not
+     (can-transition?
+      capability
+      :revoke))
+    {:ok? false
+     :error
+     :request-capability/not-revocable}
 
     :else
     {:ok? true
+
      :request-capability
      (-> capability
          (assoc
@@ -529,7 +580,11 @@
 
           :request-capability/revoked-at
           now)
-         (bump-revision now))}))
+
+         (model.common/bump-revision
+          :request-capability/revision
+          :request-capability/updated-at
+          now))}))
 
 (defn expire-capability-doc
   [capability now]
@@ -541,25 +596,45 @@
      (terminal-error capability)}
 
     (not
-     (valid-change-time? capability now))
+     (valid-change-time?
+      capability
+      now))
     {:ok? false
-     :error :request-capability/invalid-time}
+     :error
+     :request-capability/invalid-time}
 
     (not
-     (expired-at? capability now))
+     (expired-at?
+      capability
+      now))
     {:ok? false
-     :error :request-capability/not-expired}
+     :error
+     :request-capability/not-expired}
+
+    (not
+     (can-transition?
+      capability
+      :expire))
+    {:ok? false
+     :error
+     :request-capability/not-active}
 
     :else
     {:ok? true
+
      :request-capability
      (-> capability
          (assoc
           :request-capability/status
           :expired)
+
          (dissoc
           :request-capability/revoked-at)
-         (bump-revision now))}))
+
+         (model.common/bump-revision
+          :request-capability/revision
+          :request-capability/updated-at
+          now))}))
 
 ;; =============================================================================
 ;; Version descriptions
@@ -580,17 +655,28 @@
    (:request-capability/updated-at capability)})
 
 ;; =============================================================================
-;; Public capability description
+;; Public model description
 ;; =============================================================================
 
 (def model
-  {:entity-type entity-type
+  {:entity-type
+   entity-type
 
    :limits
-   {:token-hash-min token-hash-min
-    :token-hash-max token-hash-max}
+   {:token-hash-min
+    token-hash-min
 
-   :statuses status-order
-   :active-statuses active-statuses
-   :terminal-statuses terminal-statuses
-   :allowed-transitions allowed-transitions})
+    :token-hash-max
+    token-hash-max}
+
+   :statuses
+   status-order
+
+   :active-statuses
+   active-statuses
+
+   :terminal-statuses
+   terminal-statuses
+
+   :allowed-transitions
+   allowed-transitions})

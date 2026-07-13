@@ -1,23 +1,18 @@
-(ns net.humanhelp.site.model.user.role
+(ns net.humanhelp.site.model.model.user.role
   "Pure domain rules for staff role assignments.
 
-   A role assignment grants authority through an organization membership.
+   A role assignment grants one role through one organization membership. It
+   may apply throughout the organization or be scoped to one location.
 
-   An assignment with :role-assignment/location applies only to that location.
-   An assignment without a location applies throughout the membership's
-   organization.
+   Roles are intentionally not treated as a numeric hierarchy. Admin,
+   supervisor, and helper express different authority sets; callers should test
+   for the exact capability they require.
 
-   Revocation is terminal. Restoring authority creates a new assignment rather
-   than reactivating the old one, preserving an unambiguous audit history.
-
-   This namespace does not verify that the membership or location exists, that
-   the location belongs to the membership's organization, or that the actor may
-   grant the requested role. Those checks belong to Graph and FX."
+   Revocation is terminal. Restoring the same authority requires creation of a
+   new role assignment."
   (:require
-   [tick.core :as tick])
-  (:import
-   [java.time ZonedDateTime]
-   [java.util UUID]))
+   [net.humanhelp.site.model.common :as model.common]
+   [tick.core :as tick]))
 
 ;; =============================================================================
 ;; Identity
@@ -38,9 +33,11 @@
 (def roles
   (set role-order))
 
-;; Roles are intentionally treated as named authorities rather than a numeric
-;; hierarchy. Whether one role implies another should be expressed as derived
-;; permission facts instead of being assumed here.
+(defn role?
+  [value]
+  (contains?
+   roles
+   value))
 
 ;; =============================================================================
 ;; Lifecycle
@@ -65,28 +62,23 @@
 
 (def action-error-messages
   {:role-assignment/invalid-input
-   "Some role information needs to be corrected."
+   "Some role-assignment information needs to be corrected."
 
    :role-assignment/invalid-time
    "The role assignment could not be changed because its timestamp was invalid."
 
-   :role-assignment/not-revocable
-   "The role assignment cannot be revoked from its current state."
+   :role-assignment/not-active
+   "The role assignment is not active."
 
    :role-assignment/revoked
-   "The role assignment has already been revoked."})
+   "The role assignment has been revoked."
+
+   :role-assignment/not-revocable
+   "The role assignment cannot be revoked from its current state."})
 
 ;; =============================================================================
 ;; General helpers
 ;; =============================================================================
-
-(defn uuid-value?
-  [value]
-  (instance? UUID value))
-
-(defn zdt-value?
-  [value]
-  (tick/zoned-date-time? value))
 
 (defn error-message
   [error]
@@ -94,45 +86,23 @@
        error
        "The role assignment could not be updated."))
 
-(defn- zdt<=
-  [a b]
-  (and
-   (zdt-value? a)
-   (zdt-value? b)
-   (not
-    (.isAfter ^ZonedDateTime a
-              ^ZonedDateTime b))))
-
-(defn- optional-between?
-  [start value end]
-  (or
-   (nil? value)
-   (and
-    (zdt<= start value)
-    (zdt<= value end))))
-
 (defn valid-change-time?
   [assignment now]
-  (and
-   (zdt-value? now)
-   (zdt<=
-    (:role-assignment/created-at assignment)
-    now)
-   (zdt<=
-    (:role-assignment/updated-at assignment)
-    now)))
+  (model.common/valid-change-time?
+   assignment
+   :role-assignment/created-at
+   :role-assignment/updated-at
+   now))
 
 ;; =============================================================================
 ;; Domain predicates
 ;; =============================================================================
 
-(defn role?
-  [value]
-  (contains? roles value))
-
 (defn status?
   [value]
-  (contains? statuses value))
+  (contains?
+   statuses
+   value))
 
 (defn active?
   [assignment]
@@ -150,7 +120,16 @@
    terminal-statuses
    (:role-assignment/status assignment)))
 
+(defn belongs-to-membership?
+  [assignment membership-id]
+  (and
+   (uuid? membership-id)
+
+   (= membership-id
+      (:role-assignment/membership assignment))))
+
 (defn organization-wide?
+  "Returns true when the assignment applies throughout its organization."
   [assignment]
   (nil?
    (:role-assignment/location assignment)))
@@ -160,46 +139,47 @@
   (some?
    (:role-assignment/location assignment)))
 
-(defn belongs-to-membership?
-  [assignment membership-id]
-  (and
-   (uuid-value? membership-id)
-   (= membership-id
-      (:role-assignment/membership assignment))))
-
 (defn grants-role?
-  [assignment role]
+  [assignment expected-role]
   (and
-   (active? assignment)
-   (= role
+   (role? expected-role)
+
+   (= expected-role
       (:role-assignment/role assignment))))
 
 (defn applies-to-location?
-  "Returns true when an active assignment applies to location-id.
+  "Returns true when assignment applies at location-id.
 
-   Organization-wide assignments apply to every location in the organization.
-   The caller remains responsible for proving that location-id belongs to the
-   membership's organization."
+   Organization-wide assignments apply to every location. A scoped assignment
+   applies only to its matching location."
   [assignment location-id]
   (and
-   (active? assignment)
-   (uuid-value? location-id)
+   (uuid? location-id)
+
    (or
     (organization-wide? assignment)
+
     (= location-id
        (:role-assignment/location assignment)))))
 
 (defn grants-role-at-location?
-  [assignment role location-id]
+  [assignment expected-role location-id]
   (and
-   (grants-role? assignment role)
-   (applies-to-location? assignment location-id)))
+   (active? assignment)
+
+   (grants-role?
+    assignment
+    expected-role)
+
+   (applies-to-location?
+    assignment
+    location-id)))
 
 (defn assignment-key
-  "Returns the natural uniqueness key for a role assignment.
+  "Returns the natural identity of a role assignment.
 
-   Graph or persistence code should prevent more than one active assignment
-   with the same membership, role, and optional location scope."
+   Persistence should reject another current assignment with the same
+   membership, role, and location."
   [assignment]
   [(:role-assignment/membership assignment)
    (:role-assignment/role assignment)
@@ -227,8 +207,11 @@
      updated-at
      ended-at]}]
   (and
-   (zdt<= created-at updated-at)
-   (optional-between?
+   (model.common/timestamp<=
+    created-at
+    updated-at)
+
+   (model.common/optional-between?
     created-at
     ended-at
     updated-at)))
@@ -254,10 +237,10 @@
 (defn document-consistent?
   [assignment]
   (and
-   (uuid-value?
+   (uuid?
     (:xt/id assignment))
 
-   (uuid-value?
+   (uuid?
     (:role-assignment/membership assignment))
 
    (role?
@@ -267,13 +250,29 @@
     (nil?
      (:role-assignment/location assignment))
 
-    (uuid-value?
+    (uuid?
      (:role-assignment/location assignment)))
+
+   (nat-int?
+    (:role-assignment/revision assignment))
+
+   (tick/zoned-date-time?
+    (:role-assignment/created-at assignment))
+
+   (tick/zoned-date-time?
+    (:role-assignment/updated-at assignment))
+
+   (or
+    (nil?
+     (:role-assignment/ended-at assignment))
+
+    (tick/zoned-date-time?
+     (:role-assignment/ended-at assignment)))
 
    (lifecycle-consistent? assignment)))
 
 ;; =============================================================================
-;; Input validation
+;; Creation validation
 ;; =============================================================================
 
 (defn create-input-errors
@@ -284,29 +283,34 @@
      location-id
      now]}]
   (cond-> {}
-    (not (uuid-value? id))
+    (not
+     (uuid? id))
     (assoc
      :id
      "A role-assignment UUID is required.")
 
-    (not (uuid-value? membership-id))
+    (not
+     (uuid? membership-id))
     (assoc
      :membership-id
      "A valid membership UUID is required.")
 
-    (not (role? role))
+    (not
+     (role? role))
     (assoc
      :role
      "Choose a valid staff role.")
 
     (and
      (some? location-id)
-     (not (uuid-value? location-id)))
+     (not
+      (uuid? location-id)))
     (assoc
      :location-id
      "Choose a valid location.")
 
-    (not (zdt-value? now))
+    (not
+     (tick/zoned-date-time? now))
     (assoc
      :now
      "A valid role-assignment creation time is required.")))
@@ -315,15 +319,6 @@
   [input]
   (empty?
    (create-input-errors input)))
-
-(defn- throw-invalid!
-  [message errors input]
-  (throw
-   (ex-info
-    message
-    {:error/type :role-assignment/invalid-input
-     :errors errors
-     :input input})))
 
 ;; =============================================================================
 ;; Role-assignment construction
@@ -339,20 +334,35 @@
     :as input}]
   (let [errors
         (create-input-errors input)]
-    (when (seq errors)
-      (throw-invalid!
+    (when
+     (seq errors)
+      (model.common/throw-invalid!
+       :role-assignment/invalid-input
        "Cannot create role assignment."
        errors
        input))
 
     (cond->
-     {:xt/id id
-      :role-assignment/membership membership-id
-      :role-assignment/role role
-      :role-assignment/status :active
-      :role-assignment/revision 0
-      :role-assignment/created-at now
-      :role-assignment/updated-at now}
+     {:xt/id
+      id
+
+      :role-assignment/membership
+      membership-id
+
+      :role-assignment/role
+      role
+
+      :role-assignment/status
+      :active
+
+      :role-assignment/revision
+      0
+
+      :role-assignment/created-at
+      now
+
+      :role-assignment/updated-at
+      now}
 
       location-id
       (assoc
@@ -360,53 +370,47 @@
        location-id))))
 
 ;; =============================================================================
-;; Role-assignment lifecycle transitions
+;; Lifecycle transitions
 ;; =============================================================================
-
-(defn- bump-revision
-  [assignment now]
-  (-> assignment
-      (update
-       :role-assignment/revision
-       (fnil inc 0))
-      (assoc
-       :role-assignment/updated-at
-       now)))
-
-(defn transition-role-assignment
-  [assignment action now]
-  (let [status'
-        (next-status assignment action)]
-    (cond
-      (nil? status')
-      {:ok? false
-       :error
-       (if (revoked? assignment)
-         :role-assignment/revoked
-         :role-assignment/not-revocable)}
-
-      (not
-       (valid-change-time? assignment now))
-      {:ok? false
-       :error :role-assignment/invalid-time}
-
-      :else
-      {:ok? true
-       :role-assignment
-       (case action
-         :revoke
-         (-> assignment
-             (assoc
-              :role-assignment/status status'
-              :role-assignment/ended-at now)
-             (bump-revision now)))})))
 
 (defn revoke-role-assignment-doc
   [assignment now]
-  (transition-role-assignment
-   assignment
-   :revoke
-   now))
+  (cond
+    (revoked? assignment)
+    {:ok? false
+     :error
+     :role-assignment/revoked}
+
+    (not
+     (valid-change-time? assignment now))
+    {:ok? false
+     :error
+     :role-assignment/invalid-time}
+
+    (not
+     (can-transition?
+      assignment
+      :revoke))
+    {:ok? false
+     :error
+     :role-assignment/not-revocable}
+
+    :else
+    {:ok? true
+
+     :role-assignment
+     (-> assignment
+         (assoc
+          :role-assignment/status
+          :revoked
+
+          :role-assignment/ended-at
+          now)
+
+         (model.common/bump-revision
+          :role-assignment/revision
+          :role-assignment/updated-at
+          now))}))
 
 ;; =============================================================================
 ;; Version descriptions
@@ -427,13 +431,24 @@
    (:role-assignment/updated-at assignment)})
 
 ;; =============================================================================
-;; Public role description
+;; Public model description
 ;; =============================================================================
 
 (def model
-  {:entity-type entity-type
-   :roles role-order
-   :statuses status-order
-   :active-statuses active-statuses
-   :terminal-statuses terminal-statuses
-   :allowed-transitions allowed-transitions})
+  {:entity-type
+   entity-type
+
+   :roles
+   role-order
+
+   :statuses
+   status-order
+
+   :active-statuses
+   active-statuses
+
+   :terminal-statuses
+   terminal-statuses
+
+   :allowed-transitions
+   allowed-transitions})

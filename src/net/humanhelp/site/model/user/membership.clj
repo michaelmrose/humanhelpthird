@@ -1,18 +1,21 @@
 (ns net.humanhelp.site.model.user.membership
   "Pure domain rules for organization memberships.
 
-   A membership connects one user to one organization. It does not itself grant
-   helper, supervisor, or admin authority; those permissions are represented by
-   role-assignment documents attached to the membership.
+   A membership connects one user identity to one organization. It does not
+   itself grant staff authority; helper, supervisor, and admin authority are
+   attached separately through role assignments.
 
-   This namespace validates and transitions membership documents. Verifying that
-   the referenced user and organization exist, preventing duplicate memberships,
-   and authorizing membership changes belong to Graph and FX."
+   A user should have at most one active or suspended membership for a given
+   organization. Enforcing that uniqueness requires an atomic persistence
+   check and therefore belongs to the commit implementation rather than this
+   pure namespace.
+
+   Revocation is terminal. A revoked relationship remains available as
+   historical data, while restoring access requires creation of a new
+   membership."
   (:require
-   [tick.core :as tick])
-  (:import
-   [java.time ZonedDateTime]
-   [java.util UUID]))
+   [net.humanhelp.site.model.common :as model.common]
+   [tick.core :as tick]))
 
 ;; =============================================================================
 ;; Identity
@@ -59,6 +62,15 @@
    :membership/invalid-time
    "The membership could not be changed because its timestamp was invalid."
 
+   :membership/not-active
+   "The membership is not active."
+
+   :membership/not-suspended
+   "The membership is not suspended."
+
+   :membership/revoked
+   "The membership has been revoked."
+
    :membership/not-suspendable
    "The membership cannot be suspended from its current state."
 
@@ -66,22 +78,11 @@
    "The membership cannot be reactivated from its current state."
 
    :membership/not-revocable
-   "The membership cannot be revoked from its current state."
-
-   :membership/revoked
-   "The membership has been revoked."})
+   "The membership cannot be revoked from its current state."})
 
 ;; =============================================================================
 ;; General helpers
 ;; =============================================================================
-
-(defn uuid-value?
-  [value]
-  (instance? UUID value))
-
-(defn zdt-value?
-  [value]
-  (tick/zoned-date-time? value))
 
 (defn error-message
   [error]
@@ -89,33 +90,13 @@
        error
        "The membership could not be updated."))
 
-(defn- zdt<=
-  [a b]
-  (and
-   (zdt-value? a)
-   (zdt-value? b)
-   (not
-    (.isAfter ^ZonedDateTime a
-              ^ZonedDateTime b))))
-
-(defn- optional-between?
-  [start value end]
-  (or
-   (nil? value)
-   (and
-    (zdt<= start value)
-    (zdt<= value end))))
-
 (defn valid-change-time?
   [membership now]
-  (and
-   (zdt-value? now)
-   (zdt<=
-    (:membership/created-at membership)
-    now)
-   (zdt<=
-    (:membership/updated-at membership)
-    now)))
+  (model.common/valid-change-time?
+   membership
+   :membership/created-at
+   :membership/updated-at
+   now))
 
 ;; =============================================================================
 ;; Domain predicates
@@ -123,7 +104,9 @@
 
 (defn status?
   [value]
-  (contains? statuses value))
+  (contains?
+   statuses
+   value))
 
 (defn active?
   [membership]
@@ -149,28 +132,35 @@
 (defn belongs-to-user?
   [membership user-id]
   (and
-   (uuid-value? user-id)
+   (uuid? user-id)
+
    (= user-id
       (:membership/user membership))))
 
 (defn belongs-to-organization?
   [membership organization-id]
   (and
-   (uuid-value? organization-id)
+   (uuid? organization-id)
+
    (= organization-id
       (:membership/organization membership))))
 
 (defn belongs-to?
   [membership user-id organization-id]
   (and
-   (belongs-to-user? membership user-id)
-   (belongs-to-organization? membership organization-id)))
+   (belongs-to-user?
+    membership
+    user-id)
+
+   (belongs-to-organization?
+    membership
+    organization-id)))
 
 (defn membership-key
-  "Returns the natural uniqueness key for a membership.
+  "Returns the natural identity of an organization membership.
 
-   Graph or persistence code should use this to prevent more than one current
-   membership relationship for the same user and organization."
+   Persistence should reject creation of another current membership with the
+   same key."
   [membership]
   [(:membership/user membership)
    (:membership/organization membership)])
@@ -197,8 +187,11 @@
      updated-at
      ended-at]}]
   (and
-   (zdt<= created-at updated-at)
-   (optional-between?
+   (model.common/timestamp<=
+    created-at
+    updated-at)
+
+   (model.common/optional-between?
     created-at
     ended-at
     updated-at)))
@@ -227,19 +220,35 @@
 (defn document-consistent?
   [membership]
   (and
-   (uuid-value?
+   (uuid?
     (:xt/id membership))
 
-   (uuid-value?
+   (uuid?
     (:membership/user membership))
 
-   (uuid-value?
+   (uuid?
     (:membership/organization membership))
+
+   (nat-int?
+    (:membership/revision membership))
+
+   (tick/zoned-date-time?
+    (:membership/created-at membership))
+
+   (tick/zoned-date-time?
+    (:membership/updated-at membership))
+
+   (or
+    (nil?
+     (:membership/ended-at membership))
+
+    (tick/zoned-date-time?
+     (:membership/ended-at membership)))
 
    (lifecycle-consistent? membership)))
 
 ;; =============================================================================
-;; Input validation
+;; Creation validation
 ;; =============================================================================
 
 (defn create-input-errors
@@ -249,22 +258,26 @@
      organization-id
      now]}]
   (cond-> {}
-    (not (uuid-value? id))
+    (not
+     (uuid? id))
     (assoc
      :id
      "A membership UUID is required.")
 
-    (not (uuid-value? user-id))
+    (not
+     (uuid? user-id))
     (assoc
      :user-id
      "A valid user UUID is required.")
 
-    (not (uuid-value? organization-id))
+    (not
+     (uuid? organization-id))
     (assoc
      :organization-id
      "A valid organization UUID is required.")
 
-    (not (zdt-value? now))
+    (not
+     (tick/zoned-date-time? now))
     (assoc
      :now
      "A valid membership creation time is required.")))
@@ -273,15 +286,6 @@
   [input]
   (empty?
    (create-input-errors input)))
-
-(defn- throw-invalid!
-  [message errors input]
-  (throw
-   (ex-info
-    message
-    {:error/type :membership/invalid-input
-     :errors errors
-     :input input})))
 
 ;; =============================================================================
 ;; Membership construction
@@ -296,109 +300,113 @@
     :as input}]
   (let [errors
         (create-input-errors input)]
-    (when (seq errors)
-      (throw-invalid!
+    (when
+     (seq errors)
+      (model.common/throw-invalid!
+       :membership/invalid-input
        "Cannot create membership."
        errors
        input))
 
-    {:xt/id id
-     :membership/user user-id
-     :membership/organization organization-id
-     :membership/status :active
-     :membership/revision 0
-     :membership/created-at now
-     :membership/updated-at now}))
+    {:xt/id
+     id
+
+     :membership/user
+     user-id
+
+     :membership/organization
+     organization-id
+
+     :membership/status
+     :active
+
+     :membership/revision
+     0
+
+     :membership/created-at
+     now
+
+     :membership/updated-at
+     now}))
 
 ;; =============================================================================
-;; Membership lifecycle transitions
+;; Lifecycle transitions
 ;; =============================================================================
-
-(defn- bump-revision
-  [membership now]
-  (-> membership
-      (update
-       :membership/revision
-       (fnil inc 0))
-      (assoc
-       :membership/updated-at now)))
 
 (defn- transition-error
-  [action]
-  (case action
-    :suspend
+  [membership action]
+  (cond
+    (revoked? membership)
+    :membership/revoked
+
+    (= action :suspend)
     :membership/not-suspendable
 
-    :reactivate
+    (= action :reactivate)
     :membership/not-reactivatable
 
-    :revoke
+    (= action :revoke)
     :membership/not-revocable
 
+    :else
     :membership/invalid-input))
 
 (defn transition-membership
   [membership action now]
-  (let [status'
-        (next-status membership action)]
-    (cond
-      (nil? status')
-      {:ok? false
-       :error
-       (transition-error action)}
+  (cond
+    (not
+     (valid-change-time? membership now))
+    {:ok? false
+     :error
+     :membership/invalid-time}
 
-      (not
-       (valid-change-time? membership now))
-      {:ok? false
-       :error :membership/invalid-time}
+    (not
+     (can-transition? membership action))
+    {:ok? false
+     :error
+     (transition-error
+      membership
+      action)}
 
-      :else
-      {:ok? true
-       :membership
-       (case action
-         :suspend
-         (-> membership
-             (assoc
-              :membership/status status')
-             (dissoc
-              :membership/ended-at)
-             (bump-revision now))
+    :else
+    {:ok? true
 
-         :reactivate
-         (-> membership
-             (assoc
-              :membership/status status')
-             (dissoc
-              :membership/ended-at)
-             (bump-revision now))
+     :membership
+     (-> (case action
+           :suspend
+           (-> membership
+               (assoc
+                :membership/status
+                :suspended)
 
-         :revoke
-         (-> membership
-             (assoc
-              :membership/status status'
-              :membership/ended-at now)
-             (bump-revision now)))})))
+               (dissoc
+                :membership/ended-at))
 
-(defn suspend-membership-doc
-  [membership now]
-  (transition-membership
-   membership
-   :suspend
-   now))
+           :reactivate
+           (-> membership
+               (assoc
+                :membership/status
+                :active)
 
-(defn reactivate-membership-doc
-  [membership now]
-  (transition-membership
-   membership
-   :reactivate
-   now))
+               (dissoc
+                :membership/ended-at))
 
-(defn revoke-membership-doc
-  [membership now]
-  (transition-membership
-   membership
-   :revoke
-   now))
+           :revoke
+           (assoc
+            membership
+
+            :membership/status
+            :revoked
+
+            :membership/ended-at
+            now)
+
+           membership)
+
+         (model.common/bump-revision
+          :membership/revision
+          :membership/updated-at
+          now))}))
 
 ;; =============================================================================
 ;; Version descriptions
@@ -419,12 +427,21 @@
    (:membership/updated-at membership)})
 
 ;; =============================================================================
-;; Public membership description
+;; Public model description
 ;; =============================================================================
 
 (def model
-  {:entity-type entity-type
-   :statuses status-order
-   :active-statuses active-statuses
-   :terminal-statuses terminal-statuses
-   :allowed-transitions allowed-transitions})
+  {:entity-type
+   entity-type
+
+   :statuses
+   status-order
+
+   :active-statuses
+   active-statuses
+
+   :terminal-statuses
+   terminal-statuses
+
+   :allowed-transitions
+   allowed-transitions})

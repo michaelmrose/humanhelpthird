@@ -1,23 +1,19 @@
 (ns net.humanhelp.site.model.user.identity
-  "Pure domain rules for the canonical HumanHelp user identity.
+  "Pure domain rules for HumanHelp user identities.
 
-   A user is a durable identity. Being signed in is session state, not a field
-   on the user document.
-
-   A customer is not a user status or role. Customer behavior is derived by
-   Graph from the absence of applicable organization memberships and role
+   A user is the canonical identity used by customers and staff. Staff
+   authority is attached separately through organization memberships and role
    assignments.
 
-   This namespace owns only the user document itself. Organization membership,
-   staff roles, invitations, and request capabilities live in their respective
-   user-model namespaces."
+   A user may be identified by phone, email, or both. Phone-authenticated users
+   record when their phone number was verified.
+
+   This namespace performs no database reads, persistence, authorization, or
+   external verification."
   (:require
    [clojure.string :as str]
-   [net.humanhelp.schema.common :as common]
-   [tick.core :as tick])
-  (:import
-   [java.time ZonedDateTime]
-   [java.util UUID]))
+   [net.humanhelp.site.model.common :as model.common]
+   [tick.core :as tick]))
 
 ;; =============================================================================
 ;; Identity and limits
@@ -30,16 +26,10 @@
   320)
 
 (def display-name-max
-  120)
-
-(def phone-digits-count
-  10)
-
-(def phone-display-max
-  20)
+  80)
 
 ;; =============================================================================
-;; Account lifecycle
+;; Lifecycle
 ;; =============================================================================
 
 (def status-order
@@ -77,152 +67,165 @@
    "The user could not be changed because its timestamp was invalid."
 
    :user/not-active
-   "The user account is not active."
+   "The user is not active."
 
-   :user/not-suspendable
-   "The user account cannot be suspended from its current state."
-
-   :user/not-reactivatable
-   "The user account cannot be reactivated from its current state."
-
-   :user/not-deletable
-   "The user account cannot be deleted from its current state."
+   :user/not-suspended
+   "The user is not suspended."
 
    :user/deleted
-   "The user account has been deleted."})
+   "The user has been deleted."
+
+   :user/not-suspendable
+   "The user cannot be suspended from its current state."
+
+   :user/not-reactivatable
+   "The user cannot be reactivated from its current state."
+
+   :user/not-deletable
+   "The user cannot be deleted from its current state."
+
+   :user/profile-not-editable
+   "The user's profile cannot be edited from its current state."})
 
 ;; =============================================================================
 ;; General helpers
 ;; =============================================================================
 
-(defn uuid-value?
-  [value]
-  (instance? UUID value))
-
-(defn zdt-value?
-  [value]
-  (tick/zoned-date-time? value))
-
 (defn error-message
   [error]
   (get action-error-messages
        error
-       "The user account could not be updated."))
-
-(defn without-nils
-  [m]
-  (into {}
-        (remove (comp nil? val))
-        m))
+       "The user could not be updated."))
 
 (defn- trim-to-nil
   [value]
-  (if (string? value)
-    (let [value (str/trim value)]
-      (when-not (str/blank? value)
-        value))
-    value))
-
-(defn- zdt<=
-  [a b]
-  (and (zdt-value? a)
-       (zdt-value? b)
-       (not (.isAfter ^ZonedDateTime a
-                      ^ZonedDateTime b))))
-
-(defn- optional-between?
-  [start value end]
-  (or (nil? value)
-      (and (zdt<= start value)
-           (zdt<= value end))))
+  (when (some? value)
+    (let [value
+          (str/trim
+           (str value))]
+      (when-not
+       (str/blank? value)
+        value))))
 
 (defn valid-change-time?
   [user now]
-  (and (zdt-value? now)
-       (zdt<= (:user/joined-at user)
-              now)
-       (zdt<= (:user/updated-at user)
-              now)))
+  (model.common/valid-change-time?
+   user
+   :user/joined-at
+   :user/updated-at
+   now))
 
 ;; =============================================================================
-;; Phone and profile normalization
+;; Contact normalization
 ;; =============================================================================
 
 (defn normalize-phone
-  "Normalizes a US phone number to ten decimal digits.
+  "Normalizes a US phone number to ten digits.
 
-   Formatting characters are discarded. An eleven-digit number beginning with
-   1 is normalized by removing the country-code digit. Other lengths remain
-   unchanged so input validation can report an error."
+   An eleven-digit number beginning with country code 1 is accepted. Other
+   lengths return nil."
   [value]
-  (when-some [value (trim-to-nil value)]
-    (if-not (string? value)
-      value
-      (let [digits
-            (str/replace value
-                         #"[^0-9]"
-                         "")]
-        (if (and (= 11 (count digits))
-                 (str/starts-with? digits "1"))
-          (subs digits 1)
-          digits)))))
+  (when-some [value
+              (trim-to-nil value)]
+    (let [digits
+          (str/replace value
+                       #"\D"
+                       "")
+
+          digits
+          (if
+           (and
+            (= 11
+               (count digits))
+
+            (str/starts-with?
+             digits
+             "1"))
+
+            (subs digits 1)
+
+            digits)]
+      (when
+       (= 10
+          (count digits))
+        digits))))
 
 (defn valid-phone?
   [value]
-  (and (string? value)
-       (= phone-digits-count
-          (count value))
-       (boolean
-        (re-matches #"[0-9]{10}"
-                    value))))
+  (some?
+   (normalize-phone value)))
 
 (defn phone-display
-  "Formats a canonical ten-digit phone number as 555-555-5555."
-  [phone]
-  (when (valid-phone? phone)
-    (str (subs phone 0 3)
-         "-"
-         (subs phone 3 6)
-         "-"
-         (subs phone 6 10))))
+  "Formats a normalized ten-digit phone number as 555-555-5555."
+  [value]
+  (when-some [phone
+              (normalize-phone value)]
+    (str
+     (subs phone 0 3)
+     "-"
+     (subs phone 3 6)
+     "-"
+     (subs phone 6 10))))
 
 (defn normalize-email
   [value]
-  (trim-to-nil value))
+  (some-> value
+          trim-to-nil
+          str/lower-case))
+
+(defn valid-email?
+  [value]
+  (let [email
+        (normalize-email value)]
+    (and
+     (string? email)
+
+     (<=
+      (count email)
+      email-max)
+
+     (boolean
+      (re-matches
+       #"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+       email)))))
 
 (defn normalize-display-name
   [value]
   (trim-to-nil value))
 
+;; =============================================================================
+;; Input normalization
+;; =============================================================================
+
 (defn normalize-create-input
   [input]
   (let [input
-        (or input {})
+        (or input {})]
+    (cond-> input
+      (contains? input :phone)
+      (update
+       :phone
+       normalize-phone)
 
-        phone
-        (normalize-phone
-         (:phone input))
+      (contains? input :email)
+      (update
+       :email
+       normalize-email)
 
-        supplied-phone-display
-        (trim-to-nil
-         (:phone-display input))]
-    (-> input
-        (assoc :phone phone
-               :email
-               (normalize-email
-                (:email input))
-               :display-name
-               (normalize-display-name
-                (:display-name input))
-               :phone-display
-               (or supplied-phone-display
-                   (phone-display phone))))))
+      (contains? input :display-name)
+      (update
+       :display-name
+       normalize-display-name))))
 
 (defn normalize-profile-input
   [input]
-  (-> (or input {})
-      (update :display-name
-              normalize-display-name)))
+  (let [input
+        (or input {})]
+    (cond-> input
+      (contains? input :display-name)
+      (update
+       :display-name
+       normalize-display-name))))
 
 ;; =============================================================================
 ;; Domain predicates
@@ -230,7 +233,9 @@
 
 (defn status?
   [value]
-  (contains? statuses value))
+  (contains?
+   statuses
+   value))
 
 (defn active?
   [user]
@@ -249,18 +254,37 @@
 
 (defn terminal?
   [user]
-  (contains? terminal-statuses
-             (:user/status user)))
+  (contains?
+   terminal-statuses
+   (:user/status user)))
 
-(defn profile-editable?
+(defn phone-verified?
   [user]
-  (active? user))
+  (some?
+   (:user/phone-verified-at user)))
+
+(defn has-phone?
+  [user]
+  (some?
+   (:user/phone user)))
+
+(defn has-email?
+  [user]
+  (some?
+   (:user/email user)))
+
+(defn has-contact-method?
+  [user]
+  (or
+   (has-phone? user)
+   (has-email? user)))
 
 (defn next-status
   [user action]
-  (get allowed-transitions
-       [(:user/status user)
-        action]))
+  (get
+   allowed-transitions
+   [(:user/status user)
+    action]))
 
 (defn can-transition?
   [user action]
@@ -271,23 +295,58 @@
 ;; Document invariants
 ;; =============================================================================
 
-(defn contact-consistent?
+(defn contact-methods-consistent?
   [{:user/keys
-    [email
-     phone
+    [phone
      phone-display
-     phone-verified-at]}]
+     phone-verified-at
+     email]}]
   (and
-   ;; Every user must have at least one durable means of identification.
-   (or (some? email)
-       (some? phone))
+   ;; A user must have at least one durable identity value.
+   (or
+    (some? phone)
+    (some? email))
 
-   ;; Phone-derived fields cannot exist without a phone.
-   (or (nil? phone-display)
-       (some? phone))
+   ;; Phone display and verification cannot exist without a phone.
+   (if
+    (some? phone)
 
-   (or (nil? phone-verified-at)
-       (some? phone))))
+     (and
+      (valid-phone? phone)
+
+      (= phone
+         (normalize-phone phone))
+
+      (= phone-display
+         (phone-display phone)))
+
+     (and
+      (nil? phone-display)
+      (nil? phone-verified-at)))
+
+   (or
+    (nil? email)
+    (and
+     (valid-email? email)
+
+     (= email
+        (normalize-email email))))))
+
+(defn profile-consistent?
+  [{:user/keys
+    [display-name]}]
+  (or
+   (nil? display-name)
+
+   (and
+    (string? display-name)
+
+    (= display-name
+       (normalize-display-name display-name))
+
+    (<=
+     (count display-name)
+     display-name-max))))
 
 (defn lifecycle-times-consistent?
   [{:user/keys
@@ -297,11 +356,12 @@
      suspended-at
      deleted-at]}]
   (and
-   (zdt<= joined-at
-          updated-at)
+   (model.common/timestamp<=
+    joined-at
+    updated-at)
 
    (every?
-    #(optional-between?
+    #(model.common/optional-between?
       joined-at
       %
       updated-at)
@@ -309,10 +369,13 @@
      suspended-at
      deleted-at])
 
-   (or (nil? suspended-at)
-       (nil? deleted-at)
-       (zdt<= suspended-at
-              deleted-at))))
+   ;; A user deleted while suspended retains suspended-at.
+   (or
+    (nil? suspended-at)
+    (nil? deleted-at)
+    (model.common/timestamp<=
+     suspended-at
+     deleted-at))))
 
 (defn lifecycle-consistent?
   [{:user/keys
@@ -326,12 +389,14 @@
 
    (case status
      :active
-     (and (nil? suspended-at)
-          (nil? deleted-at))
+     (and
+      (nil? suspended-at)
+      (nil? deleted-at))
 
      :suspended
-     (and (some? suspended-at)
-          (nil? deleted-at))
+     (and
+      (some? suspended-at)
+      (nil? deleted-at))
 
      :deleted
      (some? deleted-at)
@@ -341,153 +406,180 @@
 (defn document-consistent?
   [user]
   (and
-   (uuid-value?
+   (uuid?
     (:xt/id user))
 
-   (contact-consistent? user)
+   (nat-int?
+    (:user/revision user))
+
+   (tick/zoned-date-time?
+    (:user/joined-at user))
+
+   (tick/zoned-date-time?
+    (:user/updated-at user))
+
+   (or
+    (nil?
+     (:user/phone-verified-at user))
+
+    (tick/zoned-date-time?
+     (:user/phone-verified-at user)))
+
+   (or
+    (nil?
+     (:user/suspended-at user))
+
+    (tick/zoned-date-time?
+     (:user/suspended-at user)))
+
+   (or
+    (nil?
+     (:user/deleted-at user))
+
+    (tick/zoned-date-time?
+     (:user/deleted-at user)))
+
+   (contact-methods-consistent? user)
+   (profile-consistent? user)
    (lifecycle-consistent? user)))
 
 ;; =============================================================================
-;; Input validation
+;; Creation validation
 ;; =============================================================================
 
 (defn create-input-errors
   [input]
-  (let [{:keys
+  (let [raw-input
+        (or input {})
+
+        raw-phone
+        (:phone raw-input)
+
+        raw-email
+        (:email raw-input)
+
+        {:keys
          [id
-          email
           phone
-          phone-display
+          email
           display-name
           phone-verified-at
           now]}
-        (normalize-create-input input)]
+        (normalize-create-input raw-input)]
     (cond-> {}
-      (not (uuid-value? id))
+      (not
+       (uuid? id))
       (assoc
        :id
        "A user UUID is required.")
 
-      (and (nil? email)
-           (nil? phone))
+      (and
+       (nil? phone)
+       (nil? email))
       (assoc
        :contact
        "A phone number or email address is required.")
 
-      (and (some? email)
-           (not (string? email)))
-      (assoc
-       :email
-       "Enter a valid email address.")
-
-      (and (string? email)
-           (> (count email)
-              email-max))
-      (assoc
-       :email
-       (str "Use "
-            email-max
-            " characters or fewer."))
-
-      (and (some? phone)
-           (not (valid-phone? phone)))
+      (and
+       (some? raw-phone)
+       (nil? phone))
       (assoc
        :phone
        "Enter a valid ten-digit US phone number.")
 
-      (and (some? phone-display)
-           (not (string? phone-display)))
+      (and
+       (some? raw-email)
+       (not
+        (valid-email? raw-email)))
       (assoc
-       :phone-display
-       "Enter a valid display phone number.")
+       :email
+       "Enter a valid email address.")
 
-      (and (string? phone-display)
-           (> (count phone-display)
-              phone-display-max))
-      (assoc
-       :phone-display
-       (str "Use "
-            phone-display-max
-            " characters or fewer."))
-
-      (and (some? display-name)
-           (not (string? display-name)))
+      (and
+       (some? display-name)
+       (> (count display-name)
+          display-name-max))
       (assoc
        :display-name
-       "Enter a valid display name.")
+       (str
+        "Use "
+        display-name-max
+        " characters or fewer."))
 
-      (and (string? display-name)
-           (> (count display-name)
-              display-name-max))
+      (not
+       (tick/zoned-date-time? now))
       (assoc
-       :display-name
-       (str "Use "
-            display-name-max
-            " characters or fewer."))
+       :now
+       "A valid user creation time is required.")
 
-      (and (some? phone-verified-at)
-           (nil? phone))
-      (assoc
-       :phone-verified-at
-       "A phone verification time requires a phone number.")
-
-      (and (some? phone-verified-at)
-           (not (zdt-value? phone-verified-at)))
+      (and
+       (some? phone-verified-at)
+       (not
+        (tick/zoned-date-time?
+         phone-verified-at)))
       (assoc
        :phone-verified-at
        "A valid phone verification time is required.")
 
-      (not (zdt-value? now))
-      (assoc
-       :now
-       "A valid account creation time is required.")
-
-      (and (zdt-value? phone-verified-at)
-           (zdt-value? now)
-           (not (zdt<= phone-verified-at
-                       now)))
+      (and
+       (some? phone-verified-at)
+       (nil? phone))
       (assoc
        :phone-verified-at
-       "The phone verification time cannot be in the future."))))
+       "A phone cannot be verified when no phone number is present.")
 
-(defn profile-input-errors
-  [input]
-  (let [{:keys [display-name]}
-        (normalize-profile-input input)]
-    (cond-> {}
-      (and (some? display-name)
-           (not (string? display-name)))
+      (and
+       (tick/zoned-date-time? phone-verified-at)
+       (tick/zoned-date-time? now)
+       (not
+        (model.common/timestamp<=
+         phone-verified-at
+         now)))
       (assoc
-       :display-name
-       "Enter a valid display name.")
-
-      (and (string? display-name)
-           (> (count display-name)
-              display-name-max))
-      (assoc
-       :display-name
-       (str "Use "
-            display-name-max
-            " characters or fewer.")))))
+       :phone-verified-at
+       "The phone verification time cannot be after user creation."))))
 
 (defn valid-create-input?
   [input]
   (empty?
    (create-input-errors input)))
 
+;; =============================================================================
+;; Profile validation
+;; =============================================================================
+
+(defn profile-input-errors
+  [input]
+  (let [raw-input
+        (or input {})
+
+        {:keys
+         [display-name]}
+        (normalize-profile-input raw-input)]
+    (cond-> {}
+      (not
+       (contains?
+        raw-input
+        :display-name))
+      (assoc
+       :display-name
+       "Provide a display name to update.")
+
+      (and
+       (some? display-name)
+       (> (count display-name)
+          display-name-max))
+      (assoc
+       :display-name
+       (str
+        "Use "
+        display-name-max
+        " characters or fewer.")))))
+
 (defn valid-profile-input?
   [input]
   (empty?
    (profile-input-errors input)))
-
-(defn- throw-invalid!
-  [message errors input]
-  (throw
-   (ex-info
-    message
-    {:error/type :user/invalid-input
-     :errors errors
-     :input input})))
 
 ;; =============================================================================
 ;; User construction
@@ -496,25 +588,25 @@
 (defn new-user
   [{:keys
     [id
-     email
      phone
-     phone-display
+     email
      display-name
      phone-verified-at
      now]
     :as input}]
   (let [{:keys
-         [email
-          phone
-          phone-display
+         [phone
+          email
           display-name]
         :as normalized}
         (normalize-create-input input)
 
         errors
         (create-input-errors normalized)]
-    (when (seq errors)
-      (throw-invalid!
+    (when
+     (seq errors)
+      (model.common/throw-invalid!
+       :user/invalid-input
        "Cannot create user."
        errors
        input))
@@ -526,171 +618,167 @@
       :user/joined-at now
       :user/updated-at now}
 
-      email
-      (assoc
-       :user/email email)
-
       phone
       (assoc
-       :user/phone phone)
+       :user/phone
+       phone
 
-      phone-display
+       :user/phone-display
+       (phone-display phone))
+
+      email
       (assoc
-       :user/phone-display phone-display)
+       :user/email
+       email)
 
       display-name
       (assoc
-       :user/display-name display-name)
+       :user/display-name
+       display-name)
 
       phone-verified-at
       (assoc
-       :user/phone-verified-at phone-verified-at))))
+       :user/phone-verified-at
+       phone-verified-at))))
 
 (defn new-verified-phone-user
-  "Creates a new active user whose phone number was verified at now."
+  "Creates a user whose phone was verified at creation time."
   [{:keys [now]
     :as input}]
   (new-user
    (assoc input
-          :phone-verified-at now)))
+          :phone-verified-at
+          now)))
 
 ;; =============================================================================
-;; User updates
+;; Profile updates
 ;; =============================================================================
-
-(defn- bump-revision
-  [user now]
-  (-> user
-      (update
-       :user/revision
-       (fnil inc 0))
-      (assoc
-       :user/updated-at now)))
 
 (defn edit-profile-doc
-  "Updates the user's optional display name.
-
-   Phone and email changes are deliberately excluded. Changing authentication
-   identifiers requires a separate verified workflow."
   [user input now]
-  (let [{:keys [display-name]
-         :as input}
+  (let [input
         (normalize-profile-input input)
 
         errors
         (profile-input-errors input)]
     (cond
-      (not (profile-editable? user))
+      (deleted? user)
       {:ok? false
-       :error
-       (if (deleted? user)
-         :user/deleted
-         :user/not-active)}
+       :error :user/deleted}
+
+      (not
+       (active? user))
+      {:ok? false
+       :error :user/profile-not-editable}
+
+      (not
+       (valid-change-time? user now))
+      {:ok? false
+       :error :user/invalid-time}
 
       (seq errors)
       {:ok? false
        :error :user/invalid-input
        :errors errors}
 
-      (not (valid-change-time? user now))
-      {:ok? false
-       :error :user/invalid-time}
-
       :else
       {:ok? true
        :user
-       (cond->
-        (-> user
-            (dissoc
-             :user/display-name)
-            (bump-revision now))
+       (-> user
+           ((fn [user]
+              (if-some [display-name
+                        (:display-name input)]
 
-         display-name
-         (assoc
-          :user/display-name
-          display-name))})))
+                (assoc
+                 user
+                 :user/display-name
+                 display-name)
+
+                (dissoc
+                 user
+                 :user/display-name))))
+           (model.common/bump-revision
+            :user/revision
+            :user/updated-at
+            now))})))
 
 ;; =============================================================================
-;; Account lifecycle transitions
+;; Lifecycle transitions
 ;; =============================================================================
 
 (defn- transition-error
-  [action]
-  (case action
-    :suspend
+  [user action]
+  (cond
+    (deleted? user)
+    :user/deleted
+
+    (= action :suspend)
     :user/not-suspendable
 
-    :reactivate
+    (= action :reactivate)
     :user/not-reactivatable
 
-    :delete
+    (= action :delete)
     :user/not-deletable
 
-    :user/not-active))
+    :else
+    :user/invalid-input))
 
 (defn transition-user
   [user action now]
-  (let [status'
-        (next-status user action)]
-    (cond
-      (nil? status')
-      {:ok? false
-       :error
-       (transition-error action)}
+  (cond
+    (not
+     (valid-change-time? user now))
+    {:ok? false
+     :error :user/invalid-time}
 
-      (not (valid-change-time? user now))
-      {:ok? false
-       :error :user/invalid-time}
+    (not
+     (can-transition? user action))
+    {:ok? false
+     :error
+     (transition-error
+      user
+      action)}
 
-      :else
-      {:ok? true
-       :user
-       (case action
-         :suspend
-         (-> user
-             (assoc
-              :user/status status'
-              :user/suspended-at now)
-             (dissoc
-              :user/deleted-at)
-             (bump-revision now))
+    :else
+    {:ok? true
+     :user
+     (-> (case action
+           :suspend
+           (-> user
+               (assoc
+                :user/status
+                :suspended
 
-         :reactivate
-         (-> user
-             (assoc
-              :user/status status')
-             (dissoc
-              :user/suspended-at
-              :user/deleted-at)
-             (bump-revision now))
+                :user/suspended-at
+                now)
+               (dissoc
+                :user/deleted-at))
 
-         :delete
-         (-> user
-             (assoc
-              :user/status status'
-              :user/deleted-at now)
-             (bump-revision now)))})))
+           :reactivate
+           (-> user
+               (assoc
+                :user/status
+                :active)
+               (dissoc
+                :user/suspended-at
+                :user/deleted-at))
 
-(defn suspend-user-doc
-  [user now]
-  (transition-user
-   user
-   :suspend
-   now))
+           :delete
+           (-> user
+               (assoc
+                :user/status
+                :deleted
 
-(defn reactivate-user-doc
-  [user now]
-  (transition-user
-   user
-   :reactivate
-   now))
+                :user/deleted-at
+                now))
 
-(defn delete-user-doc
-  [user now]
-  (transition-user
-   user
-   :delete
-   now))
+           user)
+
+         (model.common/bump-revision
+          :user/revision
+          :user/updated-at
+          now))}))
 
 ;; =============================================================================
 ;; Version descriptions
@@ -711,22 +799,28 @@
    (:user/updated-at user)})
 
 ;; =============================================================================
-;; Public identity description
+;; Public model description
 ;; =============================================================================
 
 (def model
-  {:entity-type entity-type
+  {:entity-type
+   entity-type
 
    :limits
-   {:email email-max
-    :display-name display-name-max
-    :phone-digits phone-digits-count
-    :phone-display phone-display-max}
+   {:email
+    email-max
 
-   :statuses status-order
+    :display-name
+    display-name-max}
 
-   :active-statuses active-statuses
+   :statuses
+   status-order
 
-   :terminal-statuses terminal-statuses
+   :active-statuses
+   active-statuses
 
-   :allowed-transitions allowed-transitions})
+   :terminal-statuses
+   terminal-statuses
+
+   :allowed-transitions
+   allowed-transitions})
