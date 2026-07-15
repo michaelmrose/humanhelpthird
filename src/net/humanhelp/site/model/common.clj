@@ -1,23 +1,4 @@
 (ns net.humanhelp.site.model.common
-  "Shared mechanics for persisted HumanHelp model documents.
-
-   This namespace defines conventions shared by the User, Organization,
-   Request, and future persisted models:
-
-   - model-input cardinality checks
-   - persisted timestamp ordering
-   - versioned-document metadata
-   - mutation-time validation
-   - revision updates
-   - structured domain-validation failures
-   - model command descriptions
-
-   Persisted lifecycle timestamps use java.time.Instant. Local business concepts
-   such as operating hours, local dates, and time zones should be represented
-   explicitly rather than encoded in persisted event timestamps.
-
-   Entity-specific statuses, transitions, authorization, normalization,
-   presentation, collection helpers, and string utilities do not belong here."
   (:import
    [java.time Instant]))
 
@@ -30,9 +11,10 @@
   (throw
    (ex-info
     message
-    (assoc data
-           :error/type
-           error-type))))
+    (assoc
+     data
+     :error/type
+     error-type))))
 
 ;; =============================================================================
 ;; Model-input mechanics
@@ -43,14 +25,18 @@
   [& values]
   (= 1
      (count
-      (filter some? values))))
+      (filter
+       some?
+       values))))
 
 (defn at-most-one-present?
   "Returns true when zero or one supplied values are non-nil."
   [& values]
   (<=
    (count
-    (filter some? values))
+    (filter
+     some?
+     values))
    1))
 
 ;; =============================================================================
@@ -70,22 +56,32 @@
   "Returns true when a and b are timestamps and a is not after b."
   [a b]
   (and
-   (timestamp-value? a)
-   (timestamp-value? b)
+   (timestamp-value?
+    a)
+
+   (timestamp-value?
+    b)
 
    (not
     (pos?
-     (compare a b)))))
+     (compare
+      a
+      b)))))
 
 (defn timestamp<
   "Returns true when a and b are timestamps and a is before b."
   [a b]
   (and
-   (timestamp-value? a)
-   (timestamp-value? b)
+   (timestamp-value?
+    a)
+
+   (timestamp-value?
+    b)
 
    (neg?
-    (compare a b))))
+    (compare
+     a
+     b))))
 
 (defn timestamps-ordered?
   "Returns true when every supplied timestamp is at or after the preceding one.
@@ -108,14 +104,20 @@
   "Returns true when value falls inclusively between start and end."
   [start value end]
   (and
-   (timestamp<= start value)
-   (timestamp<= value end)))
+   (timestamp<=
+    start
+    value)
+
+   (timestamp<=
+    value
+    end)))
 
 (defn optional-between?
   "Returns true when value is nil or falls inclusively between start and end."
   [start value end]
   (or
-   (nil? value)
+   (nil?
+    value)
 
    (between?
     start
@@ -123,17 +125,19 @@
     end)))
 
 ;; =============================================================================
-;; Domain validation
+;; Domain-validation failures
 ;; =============================================================================
 
 (defn throw-invalid!
   "Throws the standard exception used when domain input cannot construct or
    update a valid model document.
 
+   errors should be a structured map suitable for programmatic handling.
+
    context is optional and should contain only information that is safe and
-   useful for diagnosing the failure. Callers should not automatically place
-   credentials, bearer tokens, unredacted messages, or arbitrary request input
-   in exception data."
+   useful for diagnosing the failure. Callers should not automatically include
+   credentials, raw bearer tokens, unredacted messages, or arbitrary HTTP
+   input."
   ([error-type message errors]
    (throw-invalid!
     error-type
@@ -149,7 +153,8 @@
      {:errors
       errors}
 
-      (some? context)
+      (some?
+       context)
       (assoc
        :context
        context)))))
@@ -169,9 +174,14 @@
      created-at-key
      updated-at-key]}]
   (and
-   (keyword? revision-key)
-   (keyword? created-at-key)
-   (keyword? updated-at-key)
+   (keyword?
+    revision-key)
+
+   (keyword?
+    created-at-key)
+
+   (keyword?
+    updated-at-key)
 
    (= 3
       (count
@@ -197,30 +207,44 @@
      updated-at-key]
     :as metadata}]
   (and
-   (map? document)
-   (valid-version-metadata? metadata)
+   (map?
+    document)
+
+   (valid-version-metadata?
+    metadata)
 
    (uuid?
     (:xt/id document))
 
    (nat-int?
-    (get document revision-key))
+    (get
+     document
+     revision-key))
 
    (timestamp-value?
-    (get document created-at-key))
+    (get
+     document
+     created-at-key))
 
    (timestamp-value?
-    (get document updated-at-key))
+    (get
+     document
+     updated-at-key))
 
    (timestamp<=
-    (get document created-at-key)
-    (get document updated-at-key))))
+    (get
+     document
+     created-at-key)
+
+    (get
+     document
+     updated-at-key))))
 
 (defn valid-change-time?
   "Returns true when now is a valid mutation time for document.
 
-   The document must already satisfy the shared versioned-document conventions,
-   and now must be at or after its most recent update time."
+   The document must satisfy the shared versioned-document conventions, and now
+   must be at or after its most recent update time."
   [document
    {:keys
     [updated-at-key]
@@ -235,13 +259,16 @@
     now)
 
    (timestamp<=
-    (get document updated-at-key)
+    (get
+     document
+     updated-at-key)
+
     now)))
 
 (defn version-update-consistent?
   "Returns true when after is a valid next version of before.
 
-   This checks only shared version mechanics:
+   This checks shared version mechanics only:
 
    - both documents satisfy the same metadata convention
    - document identity is unchanged
@@ -266,19 +293,37 @@
     after
     metadata)
 
-   (= (:xt/id before)
-      (:xt/id after))
+   (=
+    (:xt/id before)
+    (:xt/id after))
 
-   (= (get before created-at-key)
-      (get after created-at-key))
+   (=
+    (get
+     before
+     created-at-key)
 
-   (= (inc
-       (get before revision-key))
-      (get after revision-key))
+    (get
+     after
+     created-at-key))
+
+   (=
+    (inc
+     (get
+      before
+      revision-key))
+
+    (get
+     after
+     revision-key))
 
    (timestamp<=
-    (get before updated-at-key)
-    (get after updated-at-key))))
+    (get
+     before
+     updated-at-key)
+
+    (get
+     after
+     updated-at-key))))
 
 ;; =============================================================================
 ;; Versioned-document operations
@@ -287,9 +332,9 @@
 (defn bump-revision
   "Returns document with its revision incremented and update time set to now.
 
-   Unlike the previous implementation, this function does not manufacture a
-   missing revision. The supplied document and mutation time must already
-   satisfy the shared version conventions."
+   The supplied document and mutation time must already satisfy the shared
+   version conventions. A missing revision is rejected rather than silently
+   manufactured."
   [document
    {:keys
     [revision-key
@@ -352,13 +397,17 @@
    revision-key
 
    :model/revision
-   (get document revision-key)
+   (get
+    document
+    revision-key)
 
    :model/updated-at-key
    updated-at-key
 
    :model/updated-at
-   (get document updated-at-key)})
+   (get
+    document
+    updated-at-key)})
 
 ;; =============================================================================
 ;; Model command descriptions
@@ -375,7 +424,8 @@
     [revision-key]
     :as metadata}]
   (when-not
-   (keyword? entity-type)
+   (keyword?
+    entity-type)
     (fail!
      :model/invalid-entity-type
      "A model command requires a keyword entity type."
@@ -389,7 +439,9 @@
      metadata)
 
     (zero?
-     (get document revision-key)))
+     (get
+      document
+      revision-key)))
     (fail!
      :model/invalid-create-command
      "Cannot create a command from an invalid initial document."
@@ -426,7 +478,8 @@
    after
    metadata]
   (when-not
-   (keyword? entity-type)
+   (keyword?
+    entity-type)
     (fail!
      :model/invalid-entity-type
      "A model command requires a keyword entity type."
@@ -435,7 +488,9 @@
 
   (when-not
    (and
-    (keyword? operation)
+    (keyword?
+     operation)
+
     (not=
      :create
      operation))
