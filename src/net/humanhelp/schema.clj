@@ -1,29 +1,56 @@
 (ns net.humanhelp.schema
-  (:require [tick.core :as tick]))
+  "Application-wide Malli schema registry.
 
-(def ? {:optional true})
+   Shared primitives and model-owned schema registries are assembled here and
+   contributed to Biff through module.
+
+   Model schema namespaces may require net.humanhelp.schema.common, but must not
+   require this namespace. That preserves the dependency direction:
+
+     schema.common
+       -> model schemas
+         -> application schema assembly"
+  (:require
+   [com.biffweb :as biff]
+   [net.humanhelp.schema.common :as common]
+   [net.humanhelp.site.model.request.schema :as request.schema]
+   [net.humanhelp.site.model.user.schema :as user.schema]))
+
+;; =============================================================================
+;; Application-owned schemas
+;; =============================================================================
+
+(def app-schema
+  {:msg
+   [:map
+    {:closed true}
+
+    [:xt/id
+     ::common/id]
+
+    [:msg/user
+     ::common/id]
+
+    [:msg/content
+     [:string {:max 10000}]]
+
+    [:msg/sent-at
+     ::common/zdt]]})
+
+;; =============================================================================
+;; Complete application registry
+;; =============================================================================
 
 (def schema
-  {::string [:string {:max 1000}]
-   ::phone-digits [:string {:min 10 :max 10}]
-   ::phone-display [:string {:max 20}]
-   ::zdt    [:fn tick/zoned-date-time?]
+  (biff/safe-merge
+   common/schema
+   user.schema/schema
+   request.schema/schema
+   app-schema))
 
-   :user [:map {:closed true}
-          [:xt/id                  :uuid]
-          [:user/email             ? ::string]
-          [:user/phone             ? ::phone-digits]
-          [:user/phone-display     ? ::phone-display]
-          [:user/phone-verified-at ? ::zdt]
-          [:user/joined-at         ::zdt]
-          [:user/foo               ? ::string]
-          [:user/bar               ? ::string]]
-
-   :msg [:map {:closed true}
-         [:xt/id       :uuid]
-         [:msg/user    :uuid]
-         [:msg/content [:string {:max 10000}]]
-         [:msg/sent-at ::zdt]]})
+;; =============================================================================
+;; Biff module
+;; =============================================================================
 
 (def module
   {:schema schema})
