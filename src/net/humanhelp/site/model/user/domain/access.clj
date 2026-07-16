@@ -193,25 +193,51 @@
   [user membership role-assignments applicable-scopes]
   (into
    #{}
-   (map
-    role/assigned-role)
+   (map role/assigned-role)
    (effective-assignments
     user
     membership
     role-assignments
     applicable-scopes)))
 
-(defn has-role?
+(defn effective-assignment-for-role
+  "Returns one effective assignment granting expected-role, or nil.
+
+   Write workflows that rely on the assignment should retain the returned
+   document and recheck its expected version at commit time."
   [user membership role-assignments applicable-scopes expected-role]
-  (and
+  (when
    (user.common/role?
     expected-role)
-   (contains?
-    (effective-roles
-     user
-     membership
-     role-assignments
-     applicable-scopes)
+    (some
+     #(when
+       (= expected-role
+          (role/assigned-role %))
+        %)
+     (effective-assignments
+      user
+      membership
+      role-assignments
+      applicable-scopes))))
+
+(defn administrator-assignment
+  "Returns one effective administrator assignment, or nil."
+  [user membership role-assignments applicable-scopes]
+  (effective-assignment-for-role
+   user
+   membership
+   role-assignments
+   applicable-scopes
+   :admin))
+
+(defn has-role?
+  [user membership role-assignments applicable-scopes expected-role]
+  (boolean
+   (effective-assignment-for-role
+    user
+    membership
+    role-assignments
+    applicable-scopes
     expected-role)))
 
 (defn helper?
@@ -251,3 +277,147 @@
      membership
      role-assignments
      applicable-scopes))))
+
+;; =============================================================================
+;; Public access contexts and capabilities
+;; =============================================================================
+
+(def invite-helper-to-location-capability
+  :user/invite-helper-to-location)
+
+(def capabilities
+  "Capabilities currently emitted in a public User access context."
+  #{invite-helper-to-location-capability})
+
+(defn capability?
+  [value]
+  (contains? capabilities value))
+
+(defn- capabilities-for-roles
+  [roles]
+  (cond-> #{}
+    (contains? roles :admin)
+    (conj invite-helper-to-location-capability)))
+
+(defn access-context
+  "Returns a compact, consumer-facing access value for one organization scope.
+
+   Unlike User Graph access facts, this result contains no User, Membership, or
+   Role Assignment documents. It is safe for views and other models to consume
+   without depending on User's internal Graph shape.
+
+   `organization-id` and `applicable-scopes` must come from a trusted
+   Organization read. Invalid or mismatched documents fail closed: the result
+   contains no membership, roles, or capabilities."
+  [user membership role-assignments applicable-scopes organization-id]
+  (when
+   (and
+    (identity/document-consistent? user)
+    (uuid? organization-id)
+    (applicable-scopes? applicable-scopes))
+    (let [organization-membership?
+          (and
+           (access-enabled-membership?
+            user
+            membership)
+           (membership/for-organization?
+            membership
+            organization-id))
+
+          effective-assignments
+          (if
+           organization-membership?
+            (effective-assignments
+             user
+             membership
+             role-assignments
+             applicable-scopes)
+            [])
+
+          roles
+          (into
+           #{}
+           (map role/assigned-role)
+           effective-assignments)
+
+          capability-set
+          (capabilities-for-roles roles)]
+      {:user/id (:xt/id user)
+       :user/active? (identity/active? user)
+       :organization/id organization-id
+       :membership/id
+       (when organization-membership?
+         (:xt/id membership))
+       :membership/active?
+       (boolean organization-membership?)
+       :user/effective-roles roles
+       :user/capabilities capability-set
+       :user/helper? (contains? roles :helper)
+       :user/supervisor? (contains? roles :supervisor)
+       :user/admin? (contains? roles :admin)
+       :user/staff? (boolean (seq roles))})))
+
+(defn access-context?
+  "Returns true for the stable, document-free public access-context shape."
+  [value]
+  (and
+   (map? value)
+   (uuid? (:user/id value))
+   (boolean? (:user/active? value))
+   (uuid? (:organization/id value))
+   (or
+    (nil? (:membership/id value))
+    (uuid? (:membership/id value)))
+   (boolean? (:membership/active? value))
+   (set? (:user/effective-roles value))
+   (every?
+    user.common/role?
+    (:user/effective-roles value))
+   (set? (:user/capabilities value))
+   (every?
+    capability?
+    (:user/capabilities value))
+   (boolean? (:user/helper? value))
+   (boolean? (:user/supervisor? value))
+   (boolean? (:user/admin? value))
+   (boolean? (:user/staff? value))
+   (= (:user/helper? value)
+      (contains?
+       (:user/effective-roles value)
+       :helper))
+   (= (:user/supervisor? value)
+      (contains?
+       (:user/effective-roles value)
+       :supervisor))
+   (= (:user/admin? value)
+      (contains?
+       (:user/effective-roles value)
+       :admin))
+   (= (:user/staff? value)
+      (boolean
+       (seq
+        (:user/effective-roles value))))
+   (= (:membership/active? value)
+      (some?
+       (:membership/id value)))
+   (= (:user/capabilities value)
+      (capabilities-for-roles
+       (:user/effective-roles value)))))
+
+(defn has-capability?
+  [access-context expected-capability]
+  (and
+   (access-context? access-context)
+   (capability? expected-capability)
+   (contains?
+    (:user/capabilities access-context)
+    expected-capability)))
+
+(defn can-invite-helper?
+  "Returns true when this access context may display the helper-invitation UI.
+
+   The write workflow must still reload and reauthorize against current data."
+  [access-context]
+  (has-capability?
+   access-context
+   invite-helper-to-location-capability))
