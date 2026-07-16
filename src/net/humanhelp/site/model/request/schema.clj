@@ -1,292 +1,351 @@
 (ns net.humanhelp.site.model.request.schema
-  "Malli schemas for the request model.
+  "Malli schemas for persisted Request documents and Request Graph values.
 
-   This registry describes persisted request documents, Graph attributes,
-   request commands, and FX-machine working values.
+   The closed Request table schema describes the exact persisted document
+   shape. Complete cross-field truth remains owned by request.domain.core and
+   is applied as the final document predicate.
 
-   Request document invariants remain owned by request.domain and are included
-   in the document schema so documents loaded from storage or produced by
-   transitions are checked against the same rules."
+   This registry also defines Request-owned value objects and scalar attributes
+   that Request Graph resolvers may consume or produce. It deliberately does
+   not describe User access contexts, Organization scope contexts, FX-machine
+   working state, transaction plans, or Gesso Live changes."
   (:require
-   [net.humanhelp.schema.common :as common]
-   [net.humanhelp.site.model.request.domain :as request]))
-
-(def ?
-  common/?)
+   [net.humanhelp.site.model.common :as model.common]
+   [net.humanhelp.site.model.request.domain.core :as request]))
 
 ;; =============================================================================
-;; Reusable request schemas
+;; Shared scalar schemas
 ;; =============================================================================
 
-(def request-status-schema
-  [:enum
-   :open
-   :claimed
-   :on-the-way
-   :done
-   :cancelled])
+(def instant-schema
+  [:fn
+   {:error/message "must be a java.time.Instant"}
+   model.common/timestamp-value?])
 
-(def request-operation-schema
-  [:enum
-   :create
-   :edit
-   :claim
-   :unclaim
-   :mark-on-the-way
-   :cancel
-   :done])
+(def revision-schema
+  [:int {:min 0}])
 
-(def request-title-schema
+(def reason-schema
+  [:fn
+   {:error/message "must be a qualified keyword"}
+   qualified-keyword?])
+
+;; =============================================================================
+;; Requestor values
+;; =============================================================================
+
+(def requestor-type-schema
+  [:fn
+   {:error/message "must be user or capability"}
+   request/requestor-type?])
+
+(def requestor-reference-schema
   [:and
-   [:string
-    {:min 1
-     :max request/title-max}]
-   [:fn common/non-blank-string?]])
+   [:map {:closed true}
+    [:requestor/type
+     requestor-type-schema]
 
-(def request-details-schema
-  [:and
-   [:string
-    {:min 1
-     :max request/details-max}]
-   [:fn common/non-blank-string?]])
+    [:requestor/id
+     :uuid]]
 
-(def request-store-area-text-schema
+   [:fn
+    {:error/message
+     "must be a valid Request requestor reference"}
+    request/requestor-reference?]])
+
+;; =============================================================================
+;; Customer-editable content
+;; =============================================================================
+
+(def title-schema
+  [:fn
+   {:error/message
+    (str
+     "must be canonical non-blank text of at most "
+     request/title-max
+     " characters")}
+   request/title?])
+
+(def details-schema
+  [:fn
+   {:error/message
+    (str
+     "must be canonical non-blank text of at most "
+     request/details-max
+     " characters")}
+   (fn [value]
+     (and
+      (string? value)
+      (request/details? value)))])
+
+(def location-detail-schema
+  [:fn
+   {:error/message
+    (str
+     "must be canonical non-blank text of at most "
+     request/location-detail-max
+     " characters")}
+   (fn [value]
+     (and
+      (string? value)
+      (request/location-detail? value)))])
+
+(def content-schema
   [:and
-   [:string
-    {:min 1
-     :max request/store-area-text-max}]
-   [:fn common/non-blank-string?]])
+   [:map {:closed true}
+    [:title
+     title-schema]
+
+    [:details
+     [:maybe details-schema]]
+
+    [:location-detail
+     [:maybe location-detail-schema]]]
+
+   [:fn
+    {:error/message
+     "must be a canonical Request content value"}
+    request/content?]])
+
+;; =============================================================================
+;; Lifecycle values
+;; =============================================================================
+
+(def status-schema
+  [:fn
+   {:error/message
+    "must be open, claimed, on-the-way, done, or cancelled"}
+   request/status?])
+
+(def operation-schema
+  [:fn
+   {:error/message
+    "must be a supported Request operation"}
+   request/operation?])
+
+;; =============================================================================
+;; Request expected-version guard
+;; =============================================================================
+
+(def expected-version-schema
+  [:map {:closed true}
+   [:model/id
+    :uuid]
+
+   [:model/revision-key
+    [:= :request/revision]]
+
+   [:model/revision
+    revision-schema]
+
+   [:model/updated-at-key
+    [:= :request/updated-at]]
+
+   [:model/updated-at
+    instant-schema]])
+
+;; =============================================================================
+;; Persisted Request document
+;; =============================================================================
 
 (def request-document-schema
   [:and
-
-   [:map
-    {:closed true}
-
+   [:map {:closed true}
     [:xt/id
-     ::common/id]
+     :uuid]
 
-    [:request/store
-     ::common/id]
+    [:request/organization
+     :uuid]
 
-    [:request/user
-     ?
-     ::common/id]
+    [:request/location
+     :uuid]
 
-    [:request/capability
-     ?
-     ::common/id]
+    [:request/requestor-type
+     requestor-type-schema]
 
-    [:request/store-area
-     ?
-     ::common/id]
-
-    [:request/store-area-text
-     ?
-     request-store-area-text-schema]
+    [:request/requestor-id
+     :uuid]
 
     [:request/title
-     request-title-schema]
+     title-schema]
 
     [:request/details
-     ?
-     request-details-schema]
+     {:optional true}
+     details-schema]
+
+    [:request/location-detail
+     {:optional true}
+     location-detail-schema]
 
     [:request/status
-     request-status-schema]
+     status-schema]
 
     [:request/revision
-     ::common/revision]
-
-    [:request/claimed-by
-     ?
-     ::common/id]
+     revision-schema]
 
     [:request/created-at
-     ::common/instant]
+     instant-schema]
 
     [:request/updated-at
-     ::common/instant]
+     instant-schema]
+
+    [:request/helper
+     {:optional true}
+     :uuid]
 
     [:request/claimed-at
-     ?
-     ::common/instant]
+     {:optional true}
+     instant-schema]
 
     [:request/on-the-way-at
-     ?
-     ::common/instant]
-
-    [:request/edited-at
-     ?
-     ::common/instant]
+     {:optional true}
+     instant-schema]
 
     [:request/completed-at
-     ?
-     ::common/instant]
+     {:optional true}
+     instant-schema]
 
     [:request/cancelled-at
-     ?
-     ::common/instant]]
+     {:optional true}
+     instant-schema]
 
-   [:fn request/requestor-consistent?]
-   [:fn request/location-consistent?]
-   [:fn request/lifecycle-consistent?]])
+    [:request/cancellation-reason
+     {:optional true}
+     reason-schema]]
 
-(def request-expected-version-schema
-  [:map
-   {:closed true}
-
-   [:request/id
-    ::common/id]
-
-   [:request/revision
-    ::common/revision]
-
-   [:request/status
-    request-status-schema]
-
-   [:request/updated-at
-    ::common/instant]])
-
-(def request-create-command-schema
-  [:map
-   {:closed true}
-
-   [:request/operation
-    [:= :create]]
-
-   [:request/id
-    ::common/id]
-
-   [:request/after
-    request-document-schema]])
-
-(def request-update-command-schema
-  [:map
-   {:closed true}
-
-   [:request/operation
-    [:enum
-     :edit
-     :claim
-     :unclaim
-     :mark-on-the-way
-     :cancel
-     :done]]
-
-   [:request/id
-    ::common/id]
-
-   [:request/expected
-    request-expected-version-schema]
-
-   [:request/before
-    request-document-schema]
-
-   [:request/after
-    request-document-schema]])
-
-(def request-command-schema
-  [:or
-   request-create-command-schema
-   request-update-command-schema])
+   [:fn
+    {:error/message
+     "The Request ownership, content, assignment, or lifecycle fields are inconsistent."}
+    request/request-consistent?]])
 
 ;; =============================================================================
-;; Schema registry
+;; Biff/Malli registry contribution
 ;; =============================================================================
 
 (def schema
-  {;; ==========================================================================
-   ;; Persisted request document
-   ;; ==========================================================================
+  "Malli schemas contributed by the Request model.
 
-   :request/status
-   request-status-schema
+   :request validates complete persisted Request documents. Other entries
+   validate Request-owned Graph inputs and outputs."
+  {::instant
+   instant-schema
 
-   :request/operation
-   request-operation-schema
+   ::revision
+   revision-schema
 
-   :request/title
-   request-title-schema
+   ::reason
+   reason-schema
 
-   :request/details
-   request-details-schema
+   ::requestor-type
+   requestor-type-schema
 
-   :request/store-area-text
-   request-store-area-text-schema
+   ::requestor-reference
+   requestor-reference-schema
 
-   :request/revision
-   ::common/revision
+   ::title
+   title-schema
 
-   :request/created-at
-   ::common/instant
+   ::details
+   details-schema
 
-   :request/updated-at
-   ::common/instant
+   ::location-detail
+   location-detail-schema
 
-   :request/claimed-at
-   ::common/instant
+   ::content
+   content-schema
 
-   :request/on-the-way-at
-   ::common/instant
+   ::status
+   status-schema
 
-   :request/edited-at
-   ::common/instant
+   ::operation
+   operation-schema
 
-   :request/completed-at
-   ::common/instant
+   ::expected-version
+   expected-version-schema
 
-   :request/cancelled-at
-   ::common/instant
+   ;; Requestor value attributes
+   :requestor/type
+   requestor-type-schema
 
-   :request
-   request-document-schema
+   :requestor/id
+   :uuid
 
-   :request/document
-   :request
-
-   :request/doc
-   :request
-
-   ;; ==========================================================================
-   ;; Request references and projected stored fields
-   ;; ==========================================================================
-
+   ;; Request lookup and identity
    :request/id
-   ::common/id
-
-   :request/store-id
-   ::common/id
-
-   :request/user-id
-   ::common/id
-
-   :request/capability-id
-   ::common/id
-
-   :request/store-area-id
-   ::common/id
-
-   :request/claimed-by-id
-   ::common/id
-
-   ;; ==========================================================================
-   ;; Request lookup facts
-   ;; ==========================================================================
+   :uuid
 
    :request/found?
    :boolean
 
-   ;; ==========================================================================
-   ;; Lifecycle facts
-   ;; ==========================================================================
+   :request/organization
+   :uuid
 
-   :request/active?
-   :boolean
+   :request/organization-id
+   :uuid
 
-   :request/terminal?
-   :boolean
+   :request/location
+   :uuid
 
+   :request/location-id
+   :uuid
+
+   :request/requestor-type
+   requestor-type-schema
+
+   :request/requestor-id
+   :uuid
+
+   :request/requestor
+   requestor-reference-schema
+
+   ;; Request content
+   :request/title
+   title-schema
+
+   :request/details
+   details-schema
+
+   :request/location-detail
+   location-detail-schema
+
+   ;; Request lifecycle and version
+   :request/status
+   status-schema
+
+   :request/operation
+   operation-schema
+
+   :request/revision
+   revision-schema
+
+   :request/created-at
+   instant-schema
+
+   :request/updated-at
+   instant-schema
+
+   :request/helper
+   :uuid
+
+   :request/claimed-at
+   instant-schema
+
+   :request/on-the-way-at
+   instant-schema
+
+   :request/completed-at
+   instant-schema
+
+   :request/cancelled-at
+   instant-schema
+
+   :request/cancellation-reason
+   reason-schema
+
+   :request/expected-version
+   expected-version-schema
+
+   ;; Pure lifecycle facts
    :request/open?
    :boolean
 
@@ -302,13 +361,13 @@
    :request/cancelled?
    :boolean
 
+   :request/active?
+   :boolean
+
+   :request/terminal?
+   :boolean
+
    :request/editable?
-   :boolean
-
-   :request/cancellable?
-   :boolean
-
-   :request/markable-done?
    :boolean
 
    :request/claimable?
@@ -320,100 +379,21 @@
    :request/markable-on-the-way?
    :boolean
 
-   :request/progress-stage
-   [:enum
-    :created
-    :claimed
-    :on-the-way
-    :done
-    :cancelled]
-
-   :request/progress-index
-   [:int
-    {:min 0
-     :max 3}]
-
-   ;; ==========================================================================
-   ;; Current-actor and assignment facts
-   ;; ==========================================================================
-
-   ;; This remains here until employee identity and authorization are moved
-   ;; fully into the user model.
-   :current-employee/id
-   ::common/id
-
-   :request/owned-by-current-actor?
+   :request/completable?
    :boolean
 
-   :request/assigned?
+   :request/cancellable?
    :boolean
 
-   :request/assigned-to-current-employee?
+   :request/has-helper?
    :boolean
 
-   ;; ==========================================================================
-   ;; Derived request permissions
-   ;; ==========================================================================
-
-   :request/can-edit?
+   :request/actively-assigned?
    :boolean
 
-   :request/can-cancel?
-   :boolean
+   ;; Complete Request document
+   :request/doc
+   request-document-schema
 
-   :request/can-mark-done?
-   :boolean
-
-   ;; ==========================================================================
-   ;; Command descriptions
-   ;; ==========================================================================
-
-   :request/expected-version
-   request-expected-version-schema
-
-   :request/expected
-   :request/expected-version
-
-   :request/create-command
-   request-create-command-schema
-
-   :request/update-command
-   request-update-command-schema
-
-   :request/command
-   request-command-schema
-
-   :request/before
    :request
-
-   :request/after
-   :request
-
-   ;; ==========================================================================
-   ;; FX inputs and working values
-   ;; ==========================================================================
-
-   ;; These values intentionally remain permissive. Invalid user input must
-   ;; reach request.domain so it can produce field-level validation errors
-   ;; instead of being rejected by generic FX validation first.
-   :request/create-input
-   'map?
-
-   :request/edit-input
-   'map?
-
-   :request/input
-   'map?
-
-   ;; Customer and employee Graph queries return different fact maps, and
-   ;; missing requests legitimately return only :request/found?.
-   :request/facts
-   'map?
-
-   :request/next-seed
-   :int
-
-   ;; Commit handlers may return an XTDB transaction result, a custom CAS
-   ;; result, or another backend-specific value.
-   :request/commit-result
-   :any})
+   request-document-schema})
