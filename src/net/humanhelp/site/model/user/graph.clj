@@ -262,22 +262,11 @@
 ;; XTDB reads
 ;; =============================================================================
 
-(defn- queryable-from-ctx
-  [ctx]
-  (or
-   (:biff/conn ctx)
-   (:biff/db ctx)
-   (:biff/node ctx)
-   (:xtdb/node ctx)
-   (throw
-    (ex-info
-     "User Graph requires :biff/conn, :biff/db, :biff/node, or :xtdb/node."
-     {:error/type :user.graph/missing-queryable
-      :ctx-keys (when (map? ctx) (set (keys ctx)))}))))
-
 (defn- q
   [ctx query]
-  (biffx/q (queryable-from-ctx ctx) query))
+  (biffx/q
+   (:biff/conn ctx)
+   query))
 
 (defn- load-by-id
   [ctx table columns id]
