@@ -4,15 +4,31 @@
    Model-specific FX namespaces submit transaction plans through
    `transact-effect`:
 
-     {:commands   [...]
-      :assertions [...]
-      :changes    [...]
-      :emit       :async}
+     {:commands               [...]
+      :authorization-versions [...]
+      :assertions             [...]
+      :changes                [...]
+      :emit                   :async}
+
+   An authorization-version guard has this generic shape:
+
+     {:model/entity-type entity-type
+      :model/expected    {:model/id             uuid
+                          :model/revision-key   keyword
+                          :model/revision       non-negative-integer
+                          :model/updated-at-key keyword
+                          :model/updated-at     timestamp}}
+
+   Model-specific FX decides which documents establish authorization and places
+   their guards in :authorization-versions. This namespace validates,
+   deduplicates, conflict-checks, and converts those guards into XTDB2 ASSERT
+   operations.
 
    This namespace owns the generic infrastructure required by every model:
 
    - optimistic-concurrency assertions for :model/* commands;
    - reusable HoneySQL ASSERT helpers;
+   - generic authorization-version guard normalization;
    - conversion of domain commands to XTDB2 operations;
    - Biff Malli validation and HoneySQL formatting;
    - synchronous XTDB2 execution with Gesso consistency metadata;
@@ -23,8 +39,8 @@
    than thrown as transaction failures. Callers must not retry a committed
    transaction merely because Live publication failed.
 
-   It does not own model-specific authorization, queries, workflow planning,
-   domain transitions, or UI rendering."
+   It does not own model-specific authorization decisions, proof discovery,
+   queries, workflow planning, domain transitions, or UI rendering."
   (:require
    [clojure.tools.logging :as log]
    [com.biffweb.experimental :as biffx]
@@ -100,6 +116,17 @@
             :id id}))
   (assert-none entity-type [:= :xt/id id]))
 
+(defn- expected-version?
+  [expected]
+  (let [{:model/keys [id revision-key revision updated-at-key updated-at]}
+        expected]
+    (and (map? expected)
+         (uuid? id)
+         (keyword? revision-key)
+         (nat-int? revision)
+         (keyword? updated-at-key)
+         (model.common/timestamp-value? updated-at))))
+
 (defn assert-document-current
   "Requires the current document to match generic expected-version metadata.
 
@@ -111,18 +138,13 @@
       :model/updated-at-key keyword
       :model/updated-at     timestamp}"
   [entity-type expected]
+  (when-not (expected-version? expected)
+    (fail! :model.fx/invalid-expected-version
+           "Expected-version metadata is invalid."
+           {:entity-type entity-type
+            :expected expected}))
   (let [{:model/keys [id revision-key revision updated-at-key updated-at]}
         expected]
-    (when-not (and (map? expected)
-                   (uuid? id)
-                   (keyword? revision-key)
-                   (nat-int? revision)
-                   (keyword? updated-at-key)
-                   (model.common/timestamp-value? updated-at))
-      (fail! :model.fx/invalid-expected-version
-             "Expected-version metadata is invalid."
-             {:entity-type entity-type
-              :expected expected}))
     (assert-one
      entity-type
      [:and
@@ -134,6 +156,89 @@
   [value]
   (and (map? value)
        (contains? value :assert)))
+
+;; =============================================================================
+;; Authorization-version guards
+;; =============================================================================
+
+(def authorization-version-keys
+  #{:model/entity-type
+    :model/expected})
+
+(defn authorization-version?
+  "Returns true when `value` is one generic authorization-version guard.
+
+   Authorization policy remains model-specific. This predicate validates only
+   the generic document-version guard shape understood by model.fx."
+  [value]
+  (and (map? value)
+       (= authorization-version-keys
+          (set (keys value)))
+       (keyword? (:model/entity-type value))
+       (expected-version? (:model/expected value))))
+
+(defn- require-authorization-version!
+  [guard]
+  (when-not (authorization-version? guard)
+    (fail! :model.fx/invalid-authorization-version
+           "An authorization-version guard is invalid."
+           {:authorization-version guard}))
+  guard)
+
+(defn authorization-version-target
+  "Returns the stable [entity-type document-id] target for one valid guard."
+  [guard]
+  (let [{:model/keys [entity-type expected]}
+        (require-authorization-version! guard)]
+    [entity-type (:model/id expected)]))
+
+(defn normalize-authorization-versions
+  "Validates and normalizes authorization-version guards.
+
+   Identical guards for the same [entity-type document-id] are deduplicated in
+   first-seen order. Different expected versions for the same target are
+   rejected because one transaction cannot honestly claim authorization from
+   two conflicting snapshots."
+  [guards]
+  (let [guards (or guards [])]
+    (when-not (sequential? guards)
+      (fail! :model.fx/invalid-authorization-versions
+             "Transaction :authorization-versions must be sequential."
+             {:authorization-versions guards}))
+    (let [{:keys [order guards-by-target]}
+          (reduce
+           (fn [{:keys [order guards-by-target] :as state} guard]
+             (let [guard (require-authorization-version! guard)
+                   target (authorization-version-target guard)
+                   existing (get guards-by-target target)]
+               (cond
+                 (nil? existing)
+                 {:order (conj order target)
+                  :guards-by-target (assoc guards-by-target target guard)}
+
+                 (= (:model/expected existing)
+                    (:model/expected guard))
+                 state
+
+                 :else
+                 (fail! :model.fx/conflicting-authorization-versions
+                        "The same authorization document was loaded at conflicting versions."
+                        {:target target
+                         :authorization-versions [existing guard]}))))
+           {:order []
+            :guards-by-target {}}
+           guards)]
+      (mapv guards-by-target order))))
+
+(defn authorization-version-assertions
+  "Converts authorization-version guards to XTDB2 ASSERT forms.
+
+   The input is normalized so this public helper is safe to call directly."
+  [guards]
+  (mapv
+   (fn [{:model/keys [entity-type expected]}]
+     (assert-document-current entity-type expected))
+   (normalize-authorization-versions guards)))
 
 ;; =============================================================================
 ;; Domain-command translation
@@ -219,11 +324,18 @@
 (defn transaction-ops
   "Builds unformatted Biff/XTDB2 operations from a normalized plan.
 
-   Model-specific assertions run first, followed by all generic command
-   preconditions, followed by all writes. Each model document may be written at
-   most once in a transaction."
-  [{:keys [assertions commands]}]
+   Operations are ordered as:
+
+   1. explicit model-specific assertions;
+   2. authorization-version assertions;
+   3. generic command optimistic-concurrency preconditions;
+   4. document writes.
+
+   Each model document may be written at most once in a transaction."
+  [{:keys [assertions authorization-versions commands]}]
   (let [commands (mapv validate-command! commands)
+        authorization-assertions
+        (authorization-version-assertions authorization-versions)
         duplicates (duplicate-command-targets commands)]
     (when (seq duplicates)
       (fail! :model.fx/duplicate-command-targets
@@ -232,6 +344,7 @@
 
     (into []
           (concat assertions
+                  authorization-assertions
                   (map command-precondition commands)
                   (map command->tx-op commands)))))
 
@@ -247,6 +360,9 @@
            {:plan plan}))
 
   (let [commands (vec (or (:commands plan) []))
+        authorization-versions
+        (normalize-authorization-versions
+         (:authorization-versions plan))
         assertions (vec (or (:assertions plan) []))
         changes (vec (or (:changes plan) []))
         emit (if (contains? plan :emit)
@@ -302,6 +418,7 @@
              {:tx-options tx-options}))
 
     {:commands commands
+     :authorization-versions authorization-versions
      :assertions assertions
      :changes changes
      :emit emit

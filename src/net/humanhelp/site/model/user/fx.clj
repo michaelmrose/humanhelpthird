@@ -7,12 +7,15 @@
    - accept a location-scoped helper invitation.
 
    The state machines load facts and authorize the requested business action.
-   Pure planning functions then construct domain commands, commit-time guards,
+   Pure planning functions then construct domain commands, generic
+   authorization-version guards, model-specific uniqueness assertions,
    semantic Gesso Live changes, and the application result.
 
    All transaction preparation and execution is delegated to
-   net.humanhelp.site.model.fx. This namespace contains no XTDB execution,
-   Biff transaction formatting, SQL count construction, or Live dispatcher
+   net.humanhelp.site.model.fx. User FX decides which documents established an
+   authorization decision, while model.fx validates, normalizes, and enforces
+   those versions atomically. This namespace contains no XTDB execution, Biff
+   transaction formatting, SQL count construction, or Live dispatcher
    implementation."
   (:require
    [clojure.string :as str]
@@ -120,11 +123,13 @@
   [command]
   (model.common/command-document command))
 
-(defn- current-document-assertion
+(defn- document-authorization-version
   [entity-type version document]
-  (model.fx/assert-document-current
-   entity-type
-   (model.common/expected-version document version)))
+  {:model/entity-type entity-type
+   :model/expected
+   (model.common/expected-version
+    document
+    version)})
 
 (defn- change-entry
   [{:keys [topic id]}]
@@ -188,56 +193,41 @@
   [organization-id]
   (role/organization-scope organization-id))
 
-(defn- authorization-version-assertions!
-  [guards location-id]
-  (when-not (sequential? guards)
+(defn- require-location-authorization-versions!
+  [authorization-versions location-id]
+  (when-not
+   (sequential? authorization-versions)
     (fail! :location/invalid-authorization-versions
            "Organization authorization versions must be sequential."
            {:location/id location-id
-            :authorization-versions guards}))
+            :authorization-versions authorization-versions}))
 
-  (let [guards (vec guards)
+  (let [authorization-versions
+        (vec authorization-versions)
+
         targets
         (mapv
-         (fn [{:model/keys [entity-type expected] :as guard}]
-           (when-not (and (map? guard)
-                          (keyword? entity-type)
-                          (map? expected))
-             (fail! :location/invalid-authorization-version
-                    "An Organization authorization-version guard is invalid."
-                    {:location/id location-id
-                     :guard guard}))
-           {:entity-type entity-type
-            :id (:model/id expected)
-            :assertion
-            (model.fx/assert-document-current entity-type expected)})
-         guards)
-        duplicate-targets
-        (->> targets
-             (map (juxt :entity-type :id))
-             frequencies
-             (keep (fn [[target n]]
-                     (when (< 1 n)
-                       target)))
-             set)]
-    (when (empty? targets)
+         model.fx/authorization-version-target
+         authorization-versions)
+
+        expected-location-target
+        [:location location-id]]
+    (when
+     (empty? authorization-versions)
       (fail! :location/missing-authorization-versions
              "Organization must supply authorization-version guards."
              {:location/id location-id}))
 
-    (when (seq duplicate-targets)
-      (fail! :location/duplicate-authorization-versions
-             "Organization supplied duplicate authorization-version guards."
-             {:location/id location-id
-              :targets duplicate-targets}))
-
-    (when-not (some #(= location-id (:id %)) targets)
+    (when-not
+     (some
+      #(= expected-location-target %)
+      targets)
       (fail! :location/missing-location-version
-             "Organization authorization guards must include the requested location."
+             "Organization authorization guards must include the requested location document."
              {:location/id location-id
-              :targets (mapv #(select-keys % [:entity-type :id]) targets)}))
+              :targets targets}))
 
-    (mapv :assertion targets)))
+    authorization-versions))
 
 (defn- require-location-context!
   [facts organization-id location-id]
@@ -252,8 +242,8 @@
         scopes
         (vec (:location/applicable-scopes facts))
 
-        authorization-assertions
-        (authorization-version-assertions!
+        authorization-versions
+        (require-location-authorization-versions!
          (:location/authorization-versions facts)
          location-id)
 
@@ -297,7 +287,7 @@
               :scopes scopes}))
 
     {:location location
-     :authorization-assertions authorization-assertions
+     :authorization-versions authorization-versions
      :scopes scopes}))
 
 ;; =============================================================================
@@ -341,14 +331,20 @@
              {:organization/id organization-id
               :location/id location-id}))))
 
-(defn- access-proof-assertions
+(defn- access-proof-authorization-versions
   [{:keys [user membership role-assignment]}]
-  [(current-document-assertion identity/entity-type identity/version user)
-   (current-document-assertion
+  [(document-authorization-version
+    identity/entity-type
+    identity/version
+    user)
+   (document-authorization-version
     membership/entity-type
     membership/version
     membership)
-   (current-document-assertion role/entity-type role/version role-assignment)])
+   (document-authorization-version
+    role/entity-type
+    role/version
+    role-assignment)])
 
 ;; =============================================================================
 ;; Invitation recipient ownership
@@ -462,22 +458,37 @@
 (defn plan-helper-invitation
   "Purely constructs the transaction plan and public result for a validated,
    authorized location-helper invitation."
-  [{:keys [command raw-token location-assertions access-proof]}]
-  (let [invitation-document (command-document command)]
+  [{:keys
+    [command
+     raw-token
+     location-authorization-versions
+     access-proof]}]
+  (let [invitation-document
+        (command-document command)]
     {:transaction-plan
-     {:commands [command]
-      :assertions
+     {:commands
+      [command]
+
+      :authorization-versions
       (into
-       (vec location-assertions)
-       (concat
-        [(model.fx/assert-none
-          invitation/entity-type
-          [:= :invitation/token-hash
-           (:invitation/token-hash invitation-document)])]
-        (access-proof-assertions access-proof)))
+       (vec location-authorization-versions)
+       (access-proof-authorization-versions
+        access-proof))
+
+      :assertions
+      [(model.fx/assert-none
+        invitation/entity-type
+        [:= :invitation/token-hash
+         (:invitation/token-hash invitation-document)])]
+
       :changes
-      [(invitation-change invitation-document :created :create)]
-      :entry-fn change-entry}
+      [(invitation-change
+        invitation-document
+        :created
+        :create)]
+
+      :entry-fn
+      change-entry}
 
      :result
      {:invitation invitation-document
@@ -567,8 +578,8 @@
           (plan-helper-invitation
            {:command command
             :raw-token (:user.fx/raw-token ctx)
-            :location-assertions
-            (:authorization-assertions location-context)
+            :location-authorization-versions
+            (:authorization-versions location-context)
             :access-proof access-proof})]
       {:user.fx/result (:result plan)
        :user.fx/transaction-plan (:transaction-plan plan)
@@ -634,7 +645,7 @@
   [{:keys [now
            user
            invitation-document
-           location-assertions
+           location-authorization-versions
            existing-membership
            existing-role-assignments
            generated-membership-id
@@ -726,24 +737,36 @@
          :helper
          invitation-scope)
 
-        assertions
+        authorization-versions
         (cond->
          (into
-          [(current-document-assertion
+          [(document-authorization-version
             identity/entity-type
             identity/version
             user)]
-          location-assertions)
+          location-authorization-versions)
 
           existing-membership
-          (into
-           [(current-document-assertion
-             membership/entity-type
-             membership/version
-             existing-membership)
-            (model.fx/assert-one
-             membership/entity-type
-             membership-predicate)])
+          (conj
+           (document-authorization-version
+            membership/entity-type
+            membership/version
+            existing-membership))
+
+          existing-role-assignment
+          (conj
+           (document-authorization-version
+            role/entity-type
+            role/version
+            existing-role-assignment)))
+
+        assertions
+        (cond-> []
+          existing-membership
+          (conj
+           (model.fx/assert-one
+            membership/entity-type
+            membership-predicate))
 
           membership-command
           (conj
@@ -752,14 +775,10 @@
             membership-predicate))
 
           existing-role-assignment
-          (into
-           [(current-document-assertion
-             role/entity-type
-             role/version
-             existing-role-assignment)
-            (model.fx/assert-one
-             role/entity-type
-             role-predicate)])
+          (conj
+           (model.fx/assert-one
+            role/entity-type
+            role-predicate))
 
           role-command
           (conj
@@ -781,6 +800,7 @@
 
     {:transaction-plan
      {:commands commands
+      :authorization-versions authorization-versions
       :assertions assertions
       :changes changes
       :entry-fn change-entry}
@@ -883,8 +903,8 @@
            {:now (:biff.fx/now ctx)
             :user user
             :invitation-document invitation-document
-            :location-assertions
-            (:authorization-assertions location-context)
+            :location-authorization-versions
+            (:authorization-versions location-context)
             :existing-membership existing-membership
             :existing-role-assignments
             (if existing-membership

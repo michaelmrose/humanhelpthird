@@ -1,9 +1,17 @@
 (ns net.humanhelp.site.model.organization.fx
   "Organization hierarchy workflows.
+
    Writes are authorized through User core, committed through model.fx, and
-   published as semantic Organization changes. This slice covers nonterminal
-   hierarchy management. Location closure remains intentionally unexposed
-   until User core supplies an atomic exact-scope role-revocation planner."
+   published as semantic Organization changes.
+
+   Organization FX decides which hierarchy and User documents establish
+   authorization. It passes those generic document guards to model.fx through
+   :authorization-versions; model.fx owns guard validation, deduplication,
+   conflict detection, and ASSERT generation.
+
+   This slice covers nonterminal hierarchy management. Location closure remains
+   intentionally unexposed until User core supplies an atomic exact-scope
+   role-revocation planner."
   (:require
    [gesso.fx :as fx]
    [net.humanhelp.site.model.common :as model.common]
@@ -46,85 +54,33 @@
 (defn- finish-state
   [{:organization.fx/keys [result transaction]}]
   {:biff.fx/return (assoc result :transaction transaction)})
-(defn- authorization-version-target
-  [{:model/keys [entity-type expected]}]
-  [entity-type
-   (:model/id expected)])
-(defn- validate-authorization-version!
-  [{:model/keys [entity-type expected] :as guard}]
+(defn- require-authorization-version-sequence!
+  [authorization-versions error-type message details]
   (when-not
-   (and
-    (map? guard)
-    (keyword? entity-type)
-    (map? expected)
-    (uuid? (:model/id expected))
-    (keyword? (:model/revision-key expected))
-    (nat-int? (:model/revision expected))
-    (keyword? (:model/updated-at-key expected))
-    (model.common/timestamp-value?
-     (:model/updated-at expected)))
+   (sequential? authorization-versions)
     (fail!
-     :organization.fx/invalid-authorization-version
-     "An authorization-version guard is invalid."
-     {:guard guard}))
-  guard)
-(defn- merge-authorization-versions!
-  [& guard-collections]
-  (let [guards
-        (mapv
-         validate-authorization-version!
-         (mapcat
-          (fn [guards]
-            (when-not
-             (sequential? guards)
-              (fail!
-               :organization.fx/invalid-authorization-versions
-               "Authorization versions must be sequential."
-               {:authorization-versions guards}))
-            guards)
-          guard-collections))
-        grouped
-        (group-by
-         authorization-version-target
-         guards)
-        conflicts
-        (->> grouped
-             (keep
-              (fn [[target matching]]
-                (when
-                 (< 1
-                    (count
-                     (set
-                      (map :model/expected matching))))
-                  {:target target
-                   :guards matching})))
-             vec)]
-    (when
-     (seq conflicts)
-      (fail!
-       :organization.fx/conflicting-authorization-versions
-       "The same authorization document was loaded at conflicting versions."
-       {:conflicts conflicts}))
-    (->> guards
-         (reduce
-          (fn [result guard]
-            (assoc
-             result
-             (authorization-version-target guard)
-             guard))
-          {})
-         vals
-         vec)))
-(defn- authorization-version-assertions!
-  [& guard-collections]
-  (mapv
-   (fn [{:model/keys [entity-type expected]}]
-     (model.fx/assert-document-current
-      entity-type
-      expected))
-   (apply
-    merge-authorization-versions!
-    guard-collections)))
+     error-type
+     message
+     (assoc
+      details
+      :authorization-versions
+      authorization-versions)))
+
+  (vec authorization-versions))
+
+(defn- collect-authorization-versions!
+  [& authorization-version-collections]
+  (into
+   []
+   (mapcat
+    (fn [authorization-versions]
+      (require-authorization-version-sequence!
+       authorization-versions
+       :organization.fx/invalid-authorization-versions
+       "Organization authorization versions must be sequential."
+       {})))
+   authorization-version-collections))
+
 (defn- scope-context-effect
   [organization-id scope]
   (when-not
@@ -276,8 +232,14 @@
       {:document document
        :scope-context scope-context
        :authorization-versions
-       (merge-authorization-versions!
-        authorization-versions)})))
+       (require-authorization-version-sequence!
+        authorization-versions
+        :organization.fx/invalid-authorization-versions
+        "Organization Graph authorization versions must be sequential."
+        {:authorization-versions-key
+         authorization-versions-key
+         :scope
+         expected-scope})})))
 (defn- require-operational-scope!
   [{:keys [scope-context] :as scope-facts}]
   (when-not
@@ -301,12 +263,6 @@
 (def role-assignment-version
   {:revision-key :role-assignment/revision
    :updated-at-key :role-assignment/updated-at})
-(defn- public-expected-version [document version]
-  {:model/id (:xt/id document)
-   :model/revision-key (:revision-key version)
-   :model/revision (get document (:revision-key version))
-   :model/updated-at-key (:updated-at-key version)
-   :model/updated-at (get document (:updated-at-key version))})
 (defn- require-public-document!
   [facts found-key document-key error-type message details]
   (when-not (true? (get facts found-key))
@@ -379,13 +335,13 @@
        :user/authorization-versions
        [{:model/entity-type user/user-entity-type
          :model/expected
-         (public-expected-version user-document user-version)}
+         (model.common/expected-version user-document user-version)}
         {:model/entity-type user/membership-entity-type
          :model/expected
-         (public-expected-version membership-document membership-version)}
+         (model.common/expected-version membership-document membership-version)}
         {:model/entity-type user/role-assignment-entity-type
          :model/expected
-         (public-expected-version
+         (model.common/expected-version
           administrator-assignment role-assignment-version)}]})))
 (defn- organization-change
   [document operation change-kind]
@@ -474,8 +430,13 @@
        document
        operation
        change-kind))))
-(defn- empty-fragment []
-  {:commands [] :assertions [] :changes []})
+(defn- empty-fragment
+  []
+  {:commands []
+   :authorization-versions []
+   :assertions []
+   :changes []})
+
 (defn- normalize-fragment
   [fragment]
   (merge
@@ -483,19 +444,29 @@
    (select-keys
     (or fragment {})
     [:commands
+     :authorization-versions
      :assertions
      :changes])))
+
 (defn- merge-fragments
   [& fragments]
   (reduce
    (fn [result fragment]
-     (let [{:keys [commands assertions changes]}
+     (let [{:keys
+            [commands
+             authorization-versions
+             assertions
+             changes]}
            (normalize-fragment fragment)]
        (-> result
            (update
             :commands
             into
             commands)
+           (update
+            :authorization-versions
+            into
+            authorization-versions)
            (update
             :assertions
             into
@@ -506,20 +477,28 @@
             changes))))
    (empty-fragment)
    fragments))
+
 (defn- transaction-plan
-  [{:keys [commands assertions changes]}]
+  [{:keys
+    [commands
+     authorization-versions
+     assertions
+     changes]}]
   {:commands
    (vec commands)
+   :authorization-versions
+   (vec authorization-versions)
    :assertions
    (vec assertions)
    :changes
    (vec changes)
    :entry-fn
    change-entry})
+
 (defn- organization-authorization-fragment
   [scope-facts user-authorization]
-  {:assertions
-   (authorization-version-assertions!
+  {:authorization-versions
+   (collect-authorization-versions!
     (:authorization-versions scope-facts)
     (:user/authorization-versions
      user-authorization))})
@@ -593,8 +572,8 @@
             entity-kind
             :move
             command)]}
-         {:assertions
-          (authorization-version-assertions!
+         {:authorization-versions
+          (collect-authorization-versions!
            (:authorization-versions
             current-scope-facts)
            (:authorization-versions

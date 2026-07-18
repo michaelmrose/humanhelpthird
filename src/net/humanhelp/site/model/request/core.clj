@@ -8,15 +8,15 @@
    This facade exposes:
 
    - the Request model's Biff module contribution;
-   - stable Graph query contracts and a named Request read;
+   - stable Graph query contracts and named Request reads;
    - the currently supported effectful Request operations;
    - selected pure Requestor, content, identity, lifecycle, and assignment
      facts useful to other models, handlers, and views.
 
    It deliberately does not expose domain constructors, model command
    constructors, lifecycle mutation functions, guarded revision machinery,
-   Graph resolver implementations, authorization-version construction, or FX
-   transaction planners.
+   Graph resolver implementations, Graph input construction,
+   authorization-version construction, or FX transaction planners.
 
    Capability-owned Request writes and supervisor override operations are not
    public because the current Request FX slice does not implement their
@@ -72,6 +72,17 @@
    intentionally absent."
   request.graph/request-facts-query)
 
+(def location-requests-query
+  "Loads the canonical Request collection for one Organization Location.
+
+   Collection members contain Request-owned persisted, projected, lifecycle,
+   assignment, and expected-version facts. Results are ordered newest first
+   with Request ID as a deterministic tiebreaker.
+
+   Organization validity, Location hierarchy, User access, current-actor
+   permissions, and identity display enrichment are intentionally absent."
+  request.graph/location-requests-query)
+
 ;; =============================================================================
 ;; Named Request reads
 ;; =============================================================================
@@ -100,6 +111,30 @@
    (request.graph/request-query-input
     {:request-id request-id})
    request-command-query))
+
+(defn location-requests
+  "Loads canonical Requests for one Organization Location.
+
+   input:
+
+     {:organization-id   organization-id
+      :location-id       location-id
+      :include-terminal? optional-boolean}
+
+   Terminal Requests are excluded unless :include-terminal? is exactly true.
+   The result follows location-requests-query:
+
+     {:request/location-requests [...]}
+
+   This read does not validate the Organization hierarchy or establish that the
+   current actor may view the Location. Application code must compose those
+   concerns through the Organization and User facades."
+  [ctx input]
+  (graph/query
+   ctx
+   (request.graph/location-requests-query-input
+    input)
+   location-requests-query))
 
 ;; =============================================================================
 ;; Supported Request operations

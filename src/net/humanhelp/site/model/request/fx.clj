@@ -4,7 +4,12 @@
    This slice supports signed-in User creation/edit/cancel and helper
    claim/unclaim/on-the-way/complete. Organization supplies authoritative
    Location context, User supplies current authorization proof, Request supplies
-   pure commands, and model.fx commits the command plus semantic change.
+   pure commands, and model.fx validates authorization-version guards and
+   commits the command plus semantic change.
+
+   Request FX decides which documents establish authorization. It does not
+   normalize guards or translate them into assertions; those generic concerns
+   belong to model.fx.
 
    Capability-owned writes and supervisor overrides remain unsupported until
    those models and policies exist."
@@ -91,92 +96,52 @@
   {:biff.fx/return (assoc result :transaction transaction)})
 
 ;; =============================================================================
-;; Authorization-version guards
+;; Authorization-version construction
 ;; =============================================================================
 
 (def user-version
   {:revision-key :user/revision
+   :created-at-key :user/created-at
    :updated-at-key :user/updated-at})
 
 (def membership-version
   {:revision-key :membership/revision
+   :created-at-key :membership/created-at
    :updated-at-key :membership/updated-at})
 
 (def role-assignment-version
   {:revision-key :role-assignment/revision
+   :created-at-key :role-assignment/created-at
    :updated-at-key :role-assignment/updated-at})
 
-(defn- public-expected-version
-  [document {:keys [revision-key updated-at-key]}]
-  {:model/id (:xt/id document)
-   :model/revision-key revision-key
-   :model/revision (get document revision-key)
-   :model/updated-at-key updated-at-key
-   :model/updated-at (get document updated-at-key)})
-
-(defn- document-guard
+(defn- document-authorization-version
+  "Builds one generic model.fx authorization-version guard from a concrete
+   document whose current version established this Request authorization
+   decision."
   [entity-type version document]
   {:model/entity-type entity-type
-   :model/expected (public-expected-version document version)})
+   :model/expected
+   (model.common/expected-version
+    document
+    version)})
 
-(defn- guard-target
-  [{:model/keys [entity-type expected]}]
-  [entity-type (:model/id expected)])
+(defn- require-authorization-version-sequence!
+  "Validates only the model-specific collection contract.
 
-(defn- valid-guard?
-  [{:model/keys [entity-type expected]}]
-  (and
-   (keyword? entity-type)
-   (map? expected)
-   (uuid? (:model/id expected))
-   (keyword? (:model/revision-key expected))
-   (nat-int? (:model/revision expected))
-   (keyword? (:model/updated-at-key expected))
-   (model.common/timestamp-value? (:model/updated-at expected))))
+   Generic guard shape validation, deduplication, conflict detection, and ASSERT
+   generation belong to model.fx."
+  [authorization-versions error-type message details]
+  (when-not
+   (sequential? authorization-versions)
+    (fail!
+     error-type
+     message
+     (assoc
+      details
+      :authorization-versions
+      authorization-versions)))
 
-(defn- require-guard!
-  [guard]
-  (when-not (and (map? guard) (valid-guard? guard))
-    (fail! :request.fx/invalid-authorization-version
-           "A Request authorization-version guard is invalid."
-           {:guard guard}))
-  guard)
-
-(defn- merge-guards!
-  [& guard-collections]
-  (reduce
-   (fn [result guard]
-     (let [guard (require-guard! guard)
-           target (guard-target guard)
-           existing (some #(when (= target (guard-target %)) %) result)]
-       (cond
-         (nil? existing)
-         (conj result guard)
-
-         (= (:model/expected existing) (:model/expected guard))
-         result
-
-         :else
-         (fail! :request.fx/conflicting-authorization-versions
-                "The same authorization document was loaded at conflicting versions."
-                {:target target
-                 :guards [existing guard]}))))
-   []
-   (mapcat
-    (fn [guards]
-      (when-not (sequential? guards)
-        (fail! :request.fx/invalid-authorization-versions
-               "Authorization versions must be sequential."
-               {:authorization-versions guards}))
-      guards)
-    guard-collections)))
-
-(defn- guard-assertions
-  [& guard-collections]
-  (mapv
-   (fn [{:model/keys [entity-type expected]}]
-     (model.fx/assert-document-current entity-type expected))
-   (apply merge-guards! guard-collections)))
+  authorization-versions)
 
 ;; =============================================================================
 ;; Organization Location proof
@@ -215,7 +180,7 @@
                      "Organization did not return the Location scope context."
                      {:location/id location-id}))
 
-          guards
+          authorization-versions
           (or (:location/authorization-versions facts)
               (fail! :request.fx/incomplete-location-context
                      "Organization did not return Location authorization versions."
@@ -265,7 +230,14 @@
 
       {:location location
        :scope-context scope-context
-       :authorization-versions (merge-guards! guards)})))
+       :authorization-versions
+       (vec
+        (require-authorization-version-sequence!
+         authorization-versions
+         :request.fx/invalid-location-authorization-versions
+         "Organization Location authorization versions must be sequential."
+         {:organization/id organization-id
+          :location/id location-id}))})))
 
 ;; =============================================================================
 ;; User proof
@@ -305,7 +277,7 @@
   (let [document (require-active-user-document! ctx user-id)]
     {:user/id user-id
      :user/authorization-versions
-     [(document-guard user/user-entity-type user-version document)]}))
+     [(document-authorization-version user/user-entity-type user-version document)]}))
 
 (defn- role-documents-at-scopes
   [ctx organization-id scopes]
@@ -394,13 +366,13 @@
        :organization/id organization-id
        :scope/target (:scope/target scope-context)
        :user/authorization-versions
-       [(document-guard user/user-entity-type
+       [(document-authorization-version user/user-entity-type
                         user-version
                         user-document)
-        (document-guard user/membership-entity-type
+        (document-authorization-version user/membership-entity-type
                         membership-version
                         membership-document)
-        (document-guard user/role-assignment-entity-type
+        (document-authorization-version user/role-assignment-entity-type
                         role-assignment-version
                         helper-assignment)]})))
 
@@ -490,7 +462,13 @@
 (defn- transaction-plan
   [command authorization-versions change]
   {:commands [command]
-   :assertions (guard-assertions authorization-versions)
+   :authorization-versions
+   (vec
+    (require-authorization-version-sequence!
+     authorization-versions
+     :request.fx/invalid-authorization-versions
+     "Request transaction authorization versions must be sequential."
+     {}))
    :changes [change]
    :entry-fn change-entry})
 
@@ -665,9 +643,11 @@
           (plan-create-request
            {:command command
             :authorization-versions
-            (concat
-             (:authorization-versions location-auth)
-             (:user/authorization-versions user-auth))})]
+            (into
+             []
+             (concat
+              (:authorization-versions location-auth)
+              (:user/authorization-versions user-auth)))})]
 
       {:request.fx/result (:result plan)
        :request.fx/transaction-plan (:transaction-plan plan)
@@ -756,9 +736,11 @@
            {:before document
             :command command
             :authorization-versions
-            (concat
-             (:authorization-versions location-auth)
-             (:user/authorization-versions actor-auth))})]
+            (into
+             []
+             (concat
+              (:authorization-versions location-auth)
+              (:user/authorization-versions actor-auth)))})]
 
       {:request.fx/result (:result plan)
        :request.fx/transaction-plan (:transaction-plan plan)

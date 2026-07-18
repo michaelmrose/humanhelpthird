@@ -7,7 +7,13 @@
    - persisted Request fields;
    - structural requestor projection;
    - lifecycle and helper-assignment facts;
-   - optimistic-concurrency metadata.
+   - optimistic-concurrency metadata;
+   - canonical Request collections scoped to one Organization Location.
+
+   Location collections query canonical Request documents directly. They do not
+   require mailbox projection documents or a cache. Collection rows seed the
+   complete :request/doc so downstream Request field and lifecycle resolvers do
+   not need to reload each Request by ID.
 
    It does not validate Organization hierarchy, derive User access, authenticate
    Request capabilities, decide current-actor permissions, execute mutations,
@@ -159,6 +165,24 @@
    {:request/id
     request-id}))
 
+(defn location-requests-query-input
+  "Builds the Graph input for one canonical Location Request collection.
+
+   Terminal Requests are excluded unless :include-terminal? is exactly true."
+  [{:keys
+    [organization-id
+     location-id
+     include-terminal?]}]
+  (without-nils
+   {:request/organization-id
+    organization-id
+
+    :request/location-id
+    location-id
+
+    :request/include-terminal?
+    (true? include-terminal?)}))
+
 ;; =============================================================================
 ;; XTDB reads
 ;; =============================================================================
@@ -184,6 +208,57 @@
 
        :where
        [:= :xt/id request-id]}))))
+
+(def active-status-predicate
+  [:or
+   [:= :request/status :open]
+   [:= :request/status :claimed]
+   [:= :request/status :on-the-way]])
+
+(defn- location-requests-where
+  [organization-id location-id include-terminal?]
+  (cond->
+   [:and
+    [:= :request/organization organization-id]
+    [:= :request/location location-id]]
+
+    (not include-terminal?)
+    (conj
+     active-status-predicate)))
+
+(defn- load-location-requests
+  [ctx organization-id location-id include-terminal?]
+  (if
+   (and
+    (uuid? organization-id)
+    (uuid? location-id))
+    (vec
+     (q
+      ctx
+      {:select
+       request-document-columns
+
+       :from
+       request/entity-type
+
+       :where
+       (location-requests-where
+        organization-id
+        location-id
+        include-terminal?)
+
+       :order-by
+       [[:request/created-at :desc]
+        [:xt/id :desc]]}))
+    []))
+
+(defn- request-document-seeds
+  [documents]
+  (mapv
+   (fn [document]
+     {:request/doc
+      document})
+   documents))
 
 (defn- lookup-result
   [document]
@@ -214,6 +289,33 @@
    (load-request
     ctx
     id)))
+
+;; =============================================================================
+;; Location Request collections
+;; =============================================================================
+
+(graph/defresolver requests-at-location
+  {:input
+   [:request/organization-id
+    :request/location-id
+    :request/include-terminal?]
+
+   :output
+   [{:request/location-requests
+     [{:request/doc
+       request-document-query}]}]}
+  [ctx
+   {:request/keys
+    [organization-id
+     location-id
+     include-terminal?]}]
+  {:request/location-requests
+   (request-document-seeds
+    (load-location-requests
+     ctx
+     organization-id
+     location-id
+     include-terminal?))})
 
 ;; =============================================================================
 ;; Stored Request fields
@@ -317,6 +419,38 @@
 ;; Public query contracts
 ;; =============================================================================
 
+(defn- optional-query-item
+  [query-item]
+  (if
+   (map? query-item)
+    {(vector
+      :?
+      (ffirst query-item))
+     (second
+      (first query-item))}
+    [:?
+     query-item]))
+
+(def request-derived-facts-query
+  (into
+   []
+   (concat
+    (map
+     optional-query-item
+     request-field-query)
+
+    (map
+     (fn [attribute]
+       [:? attribute])
+     request-lifecycle-query))))
+
+(def request-location-item-query
+  "Request-owned facts returned for each member of a Location collection."
+  (into
+   [{:request/doc
+     request-document-query}]
+   request-derived-facts-query))
+
 (def request-command-query
   "Loads the current Request document and its expected-version metadata.
 
@@ -338,21 +472,18 @@
     {[:? :request/doc]
      request-document-query}]
 
-   (concat
-    (map
-     (fn [query-item]
-       (if
-        (map? query-item)
-         {(vector :? (ffirst query-item))
-          (second
-           (first query-item))}
-         [:? query-item]))
-     request-field-query)
+   request-derived-facts-query))
 
-    (map
-     (fn [attribute]
-       [:? attribute])
-     request-lifecycle-query))))
+(def location-requests-query
+  "Loads the canonical Request collection for one Organization Location.
+
+   Results are ordered newest first with Request ID as a deterministic
+   tiebreaker. The query input controls whether terminal Requests are included.
+
+   Organization validity, Location hierarchy, User access, actor-specific
+   capabilities, and identity display enrichment are intentionally absent."
+  [{:request/location-requests
+    request-location-item-query}])
 
 ;; =============================================================================
 ;; Resolver collection
@@ -360,5 +491,6 @@
 
 (def resolvers
   [request-by-id
+   requests-at-location
    request-fields
    request-lifecycle-facts])

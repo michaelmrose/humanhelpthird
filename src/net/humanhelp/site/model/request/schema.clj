@@ -6,9 +6,13 @@
    is applied as the final document predicate.
 
    This registry also defines Request-owned value objects and scalar attributes
-   that Request Graph resolvers may consume or produce. It deliberately does
-   not describe User access contexts, Organization scope contexts, FX-machine
-   working state, transaction plans, or Gesso Live changes."
+   that Request Graph resolvers may consume or produce, including collection
+   query controls. Graph relation attributes themselves are described by the
+   resolver query contracts rather than duplicated as vector schemas here.
+
+   It deliberately does not describe User access contexts, Organization scope
+   contexts, FX-machine working state, transaction plans, or Gesso Live
+   changes."
   (:require
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.request.domain.core :as request]))
@@ -288,6 +292,9 @@
 
    :request/location-id
    :uuid
+
+   :request/include-terminal?
+   :boolean
 
    :request/requestor-type
    requestor-type-schema
