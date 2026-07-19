@@ -1,7 +1,6 @@
 (ns net.humanhelp.site.model.fx-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [clojure.tools.logging :as log]
    [com.biffweb.experimental :as biffx]
    [gesso.live.core :as live]
    [net.humanhelp.site.model.common :as model.common]
@@ -474,10 +473,16 @@
 
     (is
      (=
-      {:status :not-requested
-       :mode false
-       :results []}
-      (:publication result)))
+      []
+      (:emit-results result)))
+
+    (is
+     (false?
+      (contains? result :publication)))
+
+    (is
+     (false?
+      (contains? result :ctx)))
 
     (is
      (=
@@ -529,13 +534,20 @@
 
     (is
      (=
-      {:status :emitted
-       :mode :sync
-       :results
-       [{:status :emitted
-         :source/id document-id
-         :count 3}]}
-      (:publication result)))
+      :sync
+      (:emit result)))
+
+    (is
+     (=
+      [{:status :emitted
+        :source/id document-id
+        :count 3
+        :ignored true}]
+      (:emit-results result)))
+
+    (is
+     (false?
+      (contains? result :publication)))
 
     (is
      (=
@@ -590,14 +602,26 @@
                 (:id change)]})})))]
     (is
      (=
-      {:status :submitted
-       :mode :async
-       :results
-       [{:status :submitted
-         :reason :accepted
-         :job-id 9
-         :coalesce-key [:example document-id]}]}
-      (:publication result)))
+      :committed
+      (:commit/status result)))
+
+    (is
+     (=
+      :async
+      (:emit result)))
+
+    (is
+     (=
+      [{:status :submitted
+        :reason :accepted
+        :job-id 9
+        :coalesce-key [:example document-id]
+        :ignored true}]
+      (:emit-results result)))
+
+    (is
+     (false?
+      (contains? result :publication)))
 
     (is
      (=
@@ -651,21 +675,22 @@
 
     (is
      (=
-      :incomplete
-      (get-in result [:publication :status])))
+      [{:status :dropped
+        :reason :queue-full
+        :coalesce-key [:example document-id]}]
+      (:emit-results result)))
 
     (is
-     (=
-      0
-      (get-in result [:publication :dropped 0 :index])))))
+     (false?
+      (contains? result :publication)))))
 
-(deftest publication-failure-does-not-hide-commit-test
-  (let [result
+(deftest publication-failure-propagates-after-commit-test
+  (let [committed?
+        (atom false)
+
+        error
         (with-redefs
-         [log/enabled?
-          (fn [& _] false)
-
-          biffx/validate-tx
+         [biffx/validate-tx
           (fn [& _] nil)
 
           biffx/format-query
@@ -673,6 +698,7 @@
 
           live/execute-tx!
           (fn [& _]
+            (reset! committed? true)
             {:tx-result {:tx-id 25}
              :consistency {:tx-id 25}})
 
@@ -690,24 +716,27 @@
              (RuntimeException.
               "publication failed")))]
 
-         (model.fx/transact!
-          {:biff/malli-opts {}
-           :gesso.live/system ::live-system}
-          (base-plan)))]
+         (try
+           (model.fx/transact!
+            {:biff/malli-opts {}
+             :gesso.live/system ::live-system}
+            (base-plan))
+           nil
+           (catch RuntimeException error
+             error)))]
     (is
-     (=
-      :committed
-      (:commit/status result)))
+     (true?
+      @committed?))
 
     (is
-     (=
-      :failed
-      (get-in result [:publication :status])))
+     (instance?
+      RuntimeException
+      error))
 
     (is
      (=
       "publication failed"
-      (get-in result [:publication :error :message])))))
+      (ex-message error)))))
 
 (deftest transaction-failure-prevents-publication-test
   (let [published?
@@ -745,13 +774,20 @@
         @published?)))))
 
 (deftest missing-runtime-context-test
-  (is
-   (=
-    :model.fx/missing-live-system
-    (error-type
-     #(model.fx/transact!
-       {:biff/malli-opts {}}
-       (base-plan)))))
+  (with-redefs
+   [biffx/validate-tx
+    (fn [& _] nil)
+
+    biffx/format-query
+    identity]
+
+    (is
+     (=
+      :model.fx/missing-live-system
+      (error-type
+       #(model.fx/transact!
+         {:biff/malli-opts {}}
+         (base-plan))))))
 
   (is
    (=

@@ -49,7 +49,8 @@
 (def applicable-scopes [location-scope group-scope organization-scope])
 (def scope-context {:organization/id organization-id
                     :scope/target location-scope
-                    :scope/applicable applicable-scopes})
+                    :scope/applicable applicable-scopes
+                    :scope/operational? true})
 (def location-expected-version
   {:model/id location-id :model/revision-key :location/revision
    :model/revision 4 :model/updated-at-key :location/updated-at

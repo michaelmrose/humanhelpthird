@@ -1,21 +1,18 @@
 (ns net.humanhelp.site.model.request.schema
-  "Malli schemas for persisted Request documents and Request Graph values.
+  "Malli schemas for persisted Request documents and Request-owned Graph values.
 
    The closed Request table schema describes the exact persisted document
-   shape. Complete cross-field truth remains owned by request.domain.core and
-   is applied as the final document predicate.
+   shape. Complete ownership, content, assignment, lifecycle, timestamp, and
+   cross-field invariants remain owned by request.domain and are applied as the
+   final document predicate.
 
-   This registry also defines Request-owned value objects and scalar attributes
-   that Request Graph resolvers may consume or produce, including collection
-   query controls. Graph relation attributes themselves are described by the
-   resolver query contracts rather than duplicated as vector schemas here.
-
-   It deliberately does not describe User access contexts, Organization scope
-   contexts, FX-machine working state, transaction plans, or Gesso Live
-   changes."
+   This registry also defines the scalar attributes and Request-owned value
+   objects consumed and produced by Gesso Graph resolvers. It does not describe
+   User access contexts, Organization scope contexts, FX working state,
+   transaction plans, or Gesso Live changes."
   (:require
    [net.humanhelp.site.model.common :as model.common]
-   [net.humanhelp.site.model.request.domain.core :as request]))
+   [net.humanhelp.site.model.request.domain :as request]))
 
 ;; =============================================================================
 ;; Shared scalar schemas
@@ -128,7 +125,7 @@
    request/operation?])
 
 ;; =============================================================================
-;; Request expected-version guard
+;; Request expected-version value
 ;; =============================================================================
 
 (def expected-version-schema
@@ -219,8 +216,8 @@
 
    [:fn
     {:error/message
-     "The Request ownership, content, assignment, or lifecycle fields are inconsistent."}
-    request/request-consistent?]])
+     "The Request ownership, content, assignment, lifecycle, or version fields are inconsistent."}
+    request/request-document-consistent?]])
 
 ;; =============================================================================
 ;; Biff/Malli registry contribution
@@ -229,7 +226,7 @@
 (def schema
   "Malli schemas contributed by the Request model.
 
-   :request validates complete persisted Request documents. Other entries
+   :request validates complete persisted Request documents. Attribute keys
    validate Request-owned Graph inputs and outputs."
   {::instant
    instant-schema
@@ -274,7 +271,7 @@
    :requestor/id
    :uuid
 
-   ;; Request lookup and identity
+   ;; Request lookup and collection inputs
    :request/id
    :uuid
 
@@ -296,6 +293,7 @@
    :request/include-terminal?
    :boolean
 
+   ;; Request ownership
    :request/requestor-type
    requestor-type-schema
 
@@ -314,6 +312,9 @@
 
    :request/location-detail
    location-detail-schema
+
+   :request/content
+   content-schema
 
    ;; Request lifecycle and version
    :request/status
@@ -398,7 +399,7 @@
    :request/actively-assigned?
    :boolean
 
-   ;; Complete Request document
+   ;; Complete persisted Request document
    :request/doc
    request-document-schema
 
