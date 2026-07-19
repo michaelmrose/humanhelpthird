@@ -1,32 +1,34 @@
 (ns net.humanhelp.site.model.fx
   "The shared transaction boundary for HumanHelp model workflows.
 
-   Model-specific FX namespaces submit transaction plans through
-   `transact-effect`:
+   Model-specific FX namespaces describe one atomic database change with a
+   transaction fragment:
 
-     {:commands   [...]
-      :assertions [...]
-      :changes    [...]
-      :emit       :async}
+     {:commands               [...]
+      :authorization-versions [...]
+      :assertions             [...]
+      :changes                [...]}
 
-   This namespace owns the generic infrastructure required by every model:
+   Transaction fragments may be composed before commit. The final transaction
+   plan may additionally contain transaction-level execution options:
 
-   - optimistic-concurrency assertions for :model/* commands;
-   - reusable HoneySQL ASSERT helpers;
-   - conversion of domain commands to XTDB2 operations;
-   - Biff Malli validation and HoneySQL formatting;
-   - synchronous XTDB2 execution with Gesso consistency metadata;
-   - best-effort Gesso Live expansion and publication after commit.
+     {:emit       :async|:sync|false
+      :entry      dispatch-entry
+      :entry-fn   attached-change->dispatch-entry
+      :tx-options xtdb-options}
 
-   The database commit and Live publication cannot be atomic. Once XTDB2 has
-   committed, publication failures are returned as publication metadata rather
-   than thrown as transaction failures. Callers must not retry a committed
-   transaction merely because Live publication failed.
+   Model-specific code decides which documents establish authorization, which
+   commands express the domain transition, which model-specific ASSERT forms
+   are required, and which semantic changes describe the committed operation.
 
-   It does not own model-specific authorization, queries, workflow planning,
-   domain transitions, or UI rendering."
+   This namespace owns transaction-fragment construction and composition,
+   generic authorization and command guards, transaction operation assembly,
+   Biff validation and formatting, and one final delegation to
+   gesso.live.core/transact-and-notify!.
+
+   Gesso Live owns transaction execution, consistency attachment, change
+   expansion, dispatch construction, coalescing, and publication."
   (:require
-   [clojure.tools.logging :as log]
    [com.biffweb.experimental :as biffx]
    [gesso.live.core :as live]
    [net.humanhelp.site.model.common :as model.common]))
@@ -38,6 +40,25 @@
 (def valid-emit-modes
   #{:async :sync false})
 
+(def transaction-fragment-keys
+  "Keys that may appear in one composable atomic transaction fragment."
+  #{:commands
+    :authorization-versions
+    :assertions
+    :changes})
+
+(def transaction-option-keys
+  "Transaction-level options chosen once after fragments compose."
+  #{:emit
+    :entry
+    :entry-fn
+    :tx-options})
+
+(def transaction-plan-keys
+  "All keys accepted by transact!."
+  (into transaction-fragment-keys
+        transaction-option-keys))
+
 (defn- fail!
   ([error-type message]
    (fail! error-type message nil))
@@ -46,13 +67,106 @@
     (ex-info
      message
      (cond-> {:error/type error-type}
-       (some? details) (assoc :error/details details))))))
+       (some? details)
+       (assoc :error/details details))))))
 
 (defn- deref-if-needed
   [value]
   (if (instance? clojure.lang.IDeref value)
     @value
     value))
+
+(defn- unknown-keys
+  [allowed value]
+  (when (map? value)
+    (seq
+     (remove allowed
+             (keys value)))))
+
+(defn- sequential-value!
+  [key value]
+  (let [value (or value [])]
+    (when-not (sequential? value)
+      (fail! :model.fx/invalid-transaction-fragment
+             "Transaction fragment collections must be sequential."
+             {:key key
+              :value value}))
+    (vec value)))
+
+;; =============================================================================
+;; Composable transaction fragments
+;; =============================================================================
+
+(defn transaction-fragment
+  "Constructs one canonical composable transaction fragment.
+
+   Missing collections become empty vectors and collection order is preserved.
+
+   This validates only the fragment container. Authorization versions,
+   commands, assertions, and changes are intentionally left uninterpreted until
+   the final transaction boundary sees the complete composed operation."
+  [fragment]
+  (when-not (map? fragment)
+    (fail! :model.fx/invalid-transaction-fragment
+           "A transaction fragment must be a map."
+           {:fragment fragment}))
+
+  (when-let [unknown (unknown-keys transaction-fragment-keys fragment)]
+    (fail! :model.fx/unknown-transaction-fragment-keys
+           "A transaction fragment contains unsupported keys."
+           {:keys (set unknown)
+            :allowed-keys transaction-fragment-keys}))
+
+  {:commands
+   (sequential-value! :commands
+                      (:commands fragment))
+
+   :authorization-versions
+   (sequential-value! :authorization-versions
+                      (:authorization-versions fragment))
+
+   :assertions
+   (sequential-value! :assertions
+                      (:assertions fragment))
+
+   :changes
+   (sequential-value! :changes
+                      (:changes fragment))})
+
+(def empty-transaction-fragment
+  "Canonical empty fragment used as the identity for composition."
+  (transaction-fragment {}))
+
+(defn compose-transaction-fragments
+  "Concatenates transaction fragments in argument order.
+
+   Composition preserves every command, authorization version, assertion, and
+   semantic change. It does not deduplicate or resolve conflicts. The final
+   transaction boundary must see all supplied evidence so it can reject
+   conflicting authorization versions and duplicate command targets honestly.
+
+   With no arguments, returns empty-transaction-fragment."
+  [& fragments]
+  (reduce
+   (fn [combined fragment]
+     (let [fragment (transaction-fragment fragment)]
+       {:commands
+        (into (:commands combined)
+              (:commands fragment))
+
+        :authorization-versions
+        (into (:authorization-versions combined)
+              (:authorization-versions fragment))
+
+        :assertions
+        (into (:assertions combined)
+              (:assertions fragment))
+
+        :changes
+        (into (:changes combined)
+              (:changes fragment))}))
+   empty-transaction-fragment
+   fragments))
 
 ;; =============================================================================
 ;; Generic transaction assertions
@@ -76,34 +190,53 @@
   "Returns an XTDB2 HoneySQL ASSERT requiring zero current matches."
   [entity-type where]
   {:assert
-   [:= 0 (count-subquery entity-type where)]})
+   [:= 0
+    (count-subquery entity-type where)]})
 
 (defn assert-one
   "Returns an XTDB2 HoneySQL ASSERT requiring exactly one current match."
   [entity-type where]
   {:assert
-   [:= 1 (count-subquery entity-type where)]})
+   [:= 1
+    (count-subquery entity-type where)]})
 
 (defn assert-at-most-one
   "Returns an XTDB2 HoneySQL ASSERT requiring at most one current match."
   [entity-type where]
   {:assert
-   [:>= 1 (count-subquery entity-type where)]})
+   [:>= 1
+    (count-subquery entity-type where)]})
 
 (defn assert-document-absent
-  "Requires no current document with `id` in `entity-type`."
+  "Requires no current document with id in entity-type."
   [entity-type id]
   (when-not (uuid? id)
     (fail! :model.fx/invalid-document-id
            "A model document ID must be a UUID."
            {:entity-type entity-type
             :id id}))
-  (assert-none entity-type [:= :xt/id id]))
+  (assert-none entity-type
+               [:= :xt/id id]))
+
+(defn- expected-version?
+  [expected]
+  (let [{:model/keys [id
+                      revision-key
+                      revision
+                      updated-at-key
+                      updated-at]}
+        expected]
+    (and (map? expected)
+         (uuid? id)
+         (keyword? revision-key)
+         (nat-int? revision)
+         (keyword? updated-at-key)
+         (model.common/timestamp-value? updated-at))))
 
 (defn assert-document-current
   "Requires the current document to match generic expected-version metadata.
 
-   `expected` must have the shape returned by model.common/expected-version:
+   expected must have the shape returned by model.common/expected-version:
 
      {:model/id             uuid
       :model/revision-key   keyword
@@ -111,18 +244,18 @@
       :model/updated-at-key keyword
       :model/updated-at     timestamp}"
   [entity-type expected]
-  (let [{:model/keys [id revision-key revision updated-at-key updated-at]}
+  (when-not (expected-version? expected)
+    (fail! :model.fx/invalid-expected-version
+           "Expected-version metadata is invalid."
+           {:entity-type entity-type
+            :expected expected}))
+
+  (let [{:model/keys [id
+                      revision-key
+                      revision
+                      updated-at-key
+                      updated-at]}
         expected]
-    (when-not (and (map? expected)
-                   (uuid? id)
-                   (keyword? revision-key)
-                   (nat-int? revision)
-                   (keyword? updated-at-key)
-                   (model.common/timestamp-value? updated-at))
-      (fail! :model.fx/invalid-expected-version
-             "Expected-version metadata is invalid."
-             {:entity-type entity-type
-              :expected expected}))
     (assert-one
      entity-type
      [:and
@@ -136,6 +269,95 @@
        (contains? value :assert)))
 
 ;; =============================================================================
+;; Authorization-version guards
+;; =============================================================================
+
+(def authorization-version-keys
+  #{:model/entity-type
+    :model/expected})
+
+(defn authorization-version?
+  "Returns true when value is one generic authorization-version guard.
+
+   Authorization policy remains model-specific. This validates only the
+   generic document-version guard shape understood by model.fx."
+  [value]
+  (and (map? value)
+       (= authorization-version-keys
+          (set (keys value)))
+       (keyword? (:model/entity-type value))
+       (expected-version? (:model/expected value))))
+
+(defn- require-authorization-version!
+  [guard]
+  (when-not (authorization-version? guard)
+    (fail! :model.fx/invalid-authorization-version
+           "An authorization-version guard is invalid."
+           {:authorization-version guard}))
+  guard)
+
+(defn authorization-version-target
+  "Returns the stable [entity-type document-id] target for one valid guard."
+  [guard]
+  (let [{:model/keys [entity-type expected]}
+        (require-authorization-version! guard)]
+    [entity-type
+     (:model/id expected)]))
+
+(defn normalize-authorization-versions
+  "Validates and normalizes authorization-version guards.
+
+   Identical guards for the same [entity-type document-id] are deduplicated in
+   first-seen order. Different expected versions for the same target are
+   rejected because one transaction cannot honestly claim authorization from
+   conflicting snapshots."
+  [guards]
+  (let [guards (or guards [])]
+    (when-not (sequential? guards)
+      (fail! :model.fx/invalid-authorization-versions
+             "Transaction :authorization-versions must be sequential."
+             {:authorization-versions guards}))
+
+    (let [{:keys [order guards-by-target]}
+          (reduce
+           (fn [{:keys [order guards-by-target] :as state} guard]
+             (let [guard (require-authorization-version! guard)
+                   target (authorization-version-target guard)
+                   existing (get guards-by-target target)]
+               (cond
+                 (nil? existing)
+                 {:order (conj order target)
+                  :guards-by-target
+                  (assoc guards-by-target target guard)}
+
+                 (= (:model/expected existing)
+                    (:model/expected guard))
+                 state
+
+                 :else
+                 (fail!
+                  :model.fx/conflicting-authorization-versions
+                  "The same authorization document was loaded at conflicting versions."
+                  {:target target
+                   :authorization-versions [existing guard]}))))
+           {:order []
+            :guards-by-target {}}
+           guards)]
+      (mapv guards-by-target
+            order))))
+
+(defn authorization-version-assertions
+  "Converts authorization-version guards to XTDB2 ASSERT forms.
+
+   The input is normalized so this public helper is safe to call directly."
+  [guards]
+  (mapv
+   (fn [{:model/keys [entity-type expected]}]
+     (assert-document-current entity-type
+                              expected))
+   (normalize-authorization-versions guards)))
+
+;; =============================================================================
 ;; Domain-command translation
 ;; =============================================================================
 
@@ -146,10 +368,14 @@
            "A model command must be a map."
            {:command command}))
 
-  (let [{:model/keys [entity-type operation id expected]}
+  (let [{:model/keys [entity-type
+                      operation
+                      id
+                      expected]}
         command
         document
         (model.common/command-document command)]
+
     (when-not (keyword? entity-type)
       (fail! :model.fx/invalid-command
              "A model command requires a keyword :model/entity-type."
@@ -170,7 +396,8 @@
              "A model command must contain a document."
              {:command command}))
 
-    (when-not (= id (:xt/id document))
+    (when-not (= id
+                 (:xt/id document))
       (fail! :model.fx/invalid-command
              "The command ID must equal the document :xt/id."
              {:command-id id
@@ -181,21 +408,26 @@
         (fail! :model.fx/invalid-command
                "A create command must not contain :model/expected."
                {:command command}))
-      (when-not (map? expected)
+      (when-not (expected-version? expected)
         (fail! :model.fx/invalid-command
-               "A non-create command requires :model/expected metadata."
+               "A non-create command requires valid :model/expected metadata."
                {:command command}))))
 
   command)
 
 (defn command-precondition
-  "Returns the generic optimistic-concurrency assertion for `command`."
+  "Returns the generic optimistic-concurrency assertion for command."
   [command]
-  (let [{:model/keys [entity-type operation id expected]}
+  (let [{:model/keys [entity-type
+                      operation
+                      id
+                      expected]}
         (validate-command! command)]
     (if (= :create operation)
-      (assert-document-absent entity-type id)
-      (assert-document-current entity-type expected))))
+      (assert-document-absent entity-type
+                              id)
+      (assert-document-current entity-type
+                               expected))))
 
 (defn command->tx-op
   "Converts one model command to an XTDB2 :put-docs operation."
@@ -209,34 +441,54 @@
 (defn- duplicate-command-targets
   [commands]
   (->> commands
-       (map (juxt :model/entity-type :model/id))
+       (map
+        (juxt :model/entity-type
+              :model/id))
        frequencies
-       (keep (fn [[target n]]
-               (when (< 1 n)
-                 target)))
+       (keep
+        (fn [[target count]]
+          (when (< 1 count)
+            target)))
        set))
 
 (defn transaction-ops
-  "Builds unformatted Biff/XTDB2 operations from a normalized plan.
+  "Builds unformatted Biff/XTDB2 operations from one final transaction plan.
 
-   Model-specific assertions run first, followed by all generic command
-   preconditions, followed by all writes. Each model document may be written at
-   most once in a transaction."
-  [{:keys [assertions commands]}]
-  (let [commands (mapv validate-command! commands)
-        duplicates (duplicate-command-targets commands)]
+   Operations are ordered as:
+
+   1. explicit model-specific assertions;
+   2. authorization-version assertions;
+   3. generic command optimistic-concurrency preconditions;
+   4. document writes.
+
+   Each model document may be written at most once in a transaction."
+  [{:keys [assertions
+           authorization-versions
+           commands]}]
+  (let [commands
+        (mapv validate-command!
+              commands)
+
+        authorization-assertions
+        (authorization-version-assertions authorization-versions)
+
+        duplicates
+        (duplicate-command-targets commands)]
+
     (when (seq duplicates)
       (fail! :model.fx/duplicate-command-targets
              "A transaction may write each model document at most once."
              {:targets duplicates}))
 
-    (into []
-          (concat assertions
-                  (map command-precondition commands)
-                  (map command->tx-op commands)))))
+    (into
+     []
+     (concat assertions
+             authorization-assertions
+             (map command-precondition commands)
+             (map command->tx-op commands)))))
 
 ;; =============================================================================
-;; Transaction-plan normalization
+;; Final transaction-plan normalization
 ;; =============================================================================
 
 (defn- normalize-plan
@@ -246,15 +498,37 @@
            "A model transaction plan must be a map."
            {:plan plan}))
 
-  (let [commands (vec (or (:commands plan) []))
-        assertions (vec (or (:assertions plan) []))
-        changes (vec (or (:changes plan) []))
-        emit (if (contains? plan :emit)
-               (:emit plan)
-               :async)
-        entry (:entry plan)
-        entry-fn (:entry-fn plan)
-        tx-options (:tx-options plan)]
+  (when-let [unknown (unknown-keys transaction-plan-keys plan)]
+    (fail! :model.fx/unknown-transaction-plan-keys
+           "A model transaction plan contains unsupported keys."
+           {:keys (set unknown)
+            :allowed-keys transaction-plan-keys}))
+
+  (let [{:keys [commands
+                authorization-versions
+                assertions
+                changes]}
+        (transaction-fragment
+         (select-keys plan
+                      transaction-fragment-keys))
+
+        authorization-versions
+        (normalize-authorization-versions authorization-versions)
+
+        emit
+        (if (contains? plan :emit)
+          (:emit plan)
+          :async)
+
+        entry
+        (:entry plan)
+
+        entry-fn
+        (:entry-fn plan)
+
+        tx-options
+        (:tx-options plan)]
+
     (when (empty? commands)
       (fail! :model.fx/empty-transaction
              "A model transaction requires at least one command."))
@@ -302,6 +576,7 @@
              {:tx-options tx-options}))
 
     {:commands commands
+     :authorization-versions authorization-versions
      :assertions assertions
      :changes changes
      :emit emit
@@ -320,185 +595,86 @@
   "Validates model documents with Biff and formats HoneySQL operations for
    XTDB2/Gesso execution."
   [ctx normalized-plan]
-  (let [tx-ops (transaction-ops normalized-plan)]
-    (biffx/validate-tx tx-ops (malli-opts! ctx))
-    (mapv biffx/format-query tx-ops)))
+  (let [tx-ops
+        (transaction-ops normalized-plan)]
+    (biffx/validate-tx
+     tx-ops
+     (malli-opts! ctx))
 
-;; =============================================================================
-;; Post-commit Live publication
-;; =============================================================================
+    (mapv biffx/format-query
+          tx-ops)))
 
-(defn- live-system!
+(defn- live-system-for!
+  [ctx emit]
+  (when (not= false emit)
+    (or (:gesso.live/system ctx)
+        (:live/system ctx)
+        (fail! :model.fx/missing-live-system
+               "Publishing model transactions require the application Gesso Live system."
+               {:expected-one-of
+                [:gesso.live/system
+                 :live/system]}))))
+
+(defn- request-biff-listener-poll!
+  "Asks Biff's optional XTDB2 listener to poll immediately.
+
+   This is only a latency optimization: the listener polls on its own. A poll
+   hook failure must not make a successfully committed transaction appear to
+   have failed."
   [ctx]
-  (or (:gesso.live/system ctx)
-      (:live/system ctx)
-      (fail! :model.fx/missing-live-system
-             "Publishing model transactions require the application Gesso Live system."
-             {:expected-one-of
-              [:gesso.live/system :live/system]})))
-
-(defn- dispatch-entry-for!
-  [entry entry-fn change]
-  (let [dispatch-entry
-        (cond
-          entry-fn (entry-fn change)
-          entry entry
-          :else nil)]
-    (when-not (or (nil? dispatch-entry)
-                  (map? dispatch-entry))
-      (fail! :model.fx/invalid-dispatch-entry
-             "A Gesso Live dispatch entry must be a map when supplied."
-             {:change change
-              :entry dispatch-entry}))
-    dispatch-entry))
-
-(defn- error-summary
-  [^Exception error]
-  {:class (.getName (class error))
-   :message (.getMessage error)})
-
-(defn- summarize-publication-result
-  [emit result]
-  (case emit
-    :async
-    (select-keys result
-                 [:status :reason :job-id :coalesce-key])
-
-    :sync
-    (select-keys result
-                 [:status :source/id :count])))
-
-(defn- publish-one!
-  [system ctx emit change dispatch-entry]
-  (summarize-publication-result
-   emit
-   (case emit
-     :sync
-     (live/emit-expanded! system ctx change)
-
-     :async
-     (live/submit-expanded! system ctx change dispatch-entry))))
-
-(defn- dropped-submissions
-  [results]
-  (->> results
-       (keep-indexed
-        (fn [index result]
-          (when (= :dropped (:status result))
-            {:index index
-             :result result})))
-       vec))
-
-(defn- publish-changes!
-  [system ctx emit changes entry entry-fn]
-  (if (= false emit)
-    {:status :not-requested
-     :mode false
-     :results []}
-    (loop [index 0
-           remaining changes
-           results []]
-      (if-let [change (first remaining)]
-        (let [outcome
-              (try
-                {:result
-                 (publish-one!
-                  system
-                  ctx
-                  emit
-                  change
-                  (when (= :async emit)
-                    (dispatch-entry-for! entry entry-fn change)))}
-                (catch Exception error
-                  {:error error}))]
-          (if-let [error (:error outcome)]
-            (do
-              (log/error
-               error
-               (str "Model transaction committed, but Gesso Live publication failed"
-                    " at change index " index "."))
-              {:status :failed
-               :mode emit
-               :results results
-               :failed-index index
-               :failed-change change
-               :error (error-summary error)})
-            (recur (inc index)
-                   (next remaining)
-                   (conj results (:result outcome)))))
-        (if (= :sync emit)
-          {:status :emitted
-           :mode :sync
-           :results results}
-          (let [dropped (dropped-submissions results)]
-            (if (seq dropped)
-              (do
-                (log/warn
-                 (str "Model transaction committed, but "
-                      (count dropped)
-                      " Gesso Live submissions were dropped."))
-                {:status :incomplete
-                 :mode :async
-                 :results results
-                 :dropped dropped})
-              {:status :submitted
-               :mode :async
-               :results results})))))))
+  (when-some [poll-now (:biff.xtdb.listener/poll-now ctx)]
+    (try
+      (poll-now)
+      (catch Throwable _
+        nil))))
 
 ;; =============================================================================
 ;; Shared Gesso FX handler
 ;; =============================================================================
 
 (defn transact!
-  "Executes one model transaction through the shared Biff/Gesso boundary.
+  "Executes one atomic model transaction through Biff and Gesso Live.
 
-   XTDB2 transaction failures are thrown and no commit result is returned.
-   Once XTDB2 commits, Live publication is best-effort: publication problems are
-   logged and returned under :publication instead of being thrown as apparent
-   transaction failures.
+   Model transaction assembly ends here. This function validates and formats
+   the XTDB2 operations, then delegates execution, consistency attachment,
+   change expansion, dispatch, coalescing, and publication to
+   gesso.live.core/transact-and-notify!.
 
-   The returned value intentionally excludes the application ctx:
+   The returned map is Gesso Live's result without its consistency-aware ctx,
+   plus :commit/status :committed.
 
-     {:commit/status :committed
-      :tx-result ...
-      :consistency ...
-      :changes ...
-      :emit ...
-      :publication ...}"
+   Publication-failure semantics belong to Gesso Live. They must be fixed in
+   Gesso Live if it can throw after a successful commit; model.fx intentionally
+   does not reimplement the publication pipeline to change those semantics."
   [ctx plan]
-  (let [{:keys [changes emit entry entry-fn tx-options] :as normalized-plan}
+  (let [{:keys [changes
+                emit
+                entry
+                entry-fn
+                tx-options]
+         :as normalized-plan}
         (normalize-plan plan)
 
-        system
-        (when (not= false emit)
-          (live-system! ctx))
-
         tx-ops
-        (prepare-tx-ops ctx normalized-plan)
+        (prepare-tx-ops ctx
+                        normalized-plan)
 
-        {:keys [tx-result consistency]}
-        (live/execute-tx! ctx tx-ops tx-options)
+        result
+        (live/transact-and-notify!
+         (live-system-for! ctx emit)
+         ctx
+         {:tx-ops tx-ops
+          :tx-options tx-options
+          :changes changes
+          :emit emit
+          :entry entry
+          :entry-fn entry-fn})]
 
-        consistency-ctx
-        (live/with-consistency ctx consistency)
+    (request-biff-listener-poll! ctx)
 
-        attached-changes
-        (mapv #(live/attach-consistency % consistency) changes)
-
-        publication
-        (publish-changes!
-         system
-         consistency-ctx
-         emit
-         attached-changes
-         entry
-         entry-fn)]
-    {:commit/status :committed
-     :tx-result tx-result
-     :consistency consistency
-     :changes attached-changes
-     :emit emit
-     :publication publication}))
+    (-> result
+        (dissoc :ctx)
+        (assoc :commit/status :committed))))
 
 (def handlers
   "Gesso FX handler contribution."

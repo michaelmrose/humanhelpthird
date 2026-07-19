@@ -9,7 +9,9 @@
 
    - the Organization model's Biff module contribution;
    - stable Graph query contracts and named hierarchy reads;
-   - authoritative Organization-owned scope contexts;
+   - compatibility-preserving raw Graph fact reads;
+   - normalized required document and hierarchy-context reads;
+   - authoritative Organization-owned authorization-scope contexts;
    - the currently supported effectful hierarchy operations;
    - selected pure Organization values and predicates.
 
@@ -22,6 +24,7 @@
    authorization and cross-model consequences."
   (:require
    [gesso.graph :as graph]
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.organization.domain :as organization]
    [net.humanhelp.site.model.organization.fx :as organization.fx]
    [net.humanhelp.site.model.organization.graph :as organization.graph]
@@ -88,6 +91,125 @@
   "Loads a Location, its ancestry, effective operational state, and
    authoritative scope context."
   organization.graph/location-context-query)
+
+;; =============================================================================
+;; Public read-contract validation
+;; =============================================================================
+
+(defn- fail!
+  [error-type message details]
+  (throw
+   (ex-info
+    message
+    {:error/type error-type
+     :error/details details})))
+
+(defn- require-uuid!
+  [value error-type message details]
+  (when-not
+   (uuid? value)
+    (fail!
+     error-type
+     message
+     details))
+  value)
+
+(defn- require-document!
+  [facts
+   found-key
+   document-key
+   document-predicate
+   error-type
+   message
+   details]
+  (when-not
+   (true?
+    (get facts found-key))
+    (fail!
+     error-type
+     message
+     details))
+
+  (let [document
+        (get facts document-key)]
+    (when-not
+     (document-predicate
+      document)
+      (fail!
+       :organization.core/invalid-read-result
+       "Organization Graph returned a found entity without a valid document."
+       (assoc
+        details
+        :found-key found-key
+        :document-key document-key
+        :facts facts)))
+    document))
+
+(defn- require-scope-context!
+  [scope-context
+   organization-id
+   target-scope
+   details]
+  (when-not
+   (authorization-scope/scope-context?
+    scope-context)
+    (fail!
+     :organization.core/invalid-scope-context
+     "Organization Graph returned an invalid authorization-scope context."
+     (assoc details
+            :scope-context scope-context)))
+
+  (when-not
+   (=
+    organization-id
+    (:organization/id scope-context))
+    (fail!
+     :organization.core/scope-organization-mismatch
+     "Organization Graph returned an authorization-scope context for another Organization."
+     (assoc details
+            :scope-context scope-context)))
+
+  (when-not
+   (authorization-scope/same-scope?
+    target-scope
+    (:scope/target scope-context))
+    (fail!
+     :organization.core/scope-target-mismatch
+     "Organization Graph returned an authorization-scope context for another target."
+     (assoc details
+            :expected-target target-scope
+            :scope-context scope-context)))
+
+  scope-context)
+
+(defn- require-operational-value!
+  [value details]
+  (when-not
+   (boolean?
+    value)
+    (fail!
+     :organization.core/invalid-operational-value
+     "Organization Graph returned a non-boolean operational value."
+     (assoc details
+            :operational? value)))
+  value)
+
+(defn- require-ancestor-groups!
+  [value details]
+  (when-not
+   (and
+    (vector?
+     value)
+
+    (every?
+     organization/organization-group-document-consistent?
+     value))
+    (fail!
+     :organization.core/invalid-ancestor-groups
+     "Organization Graph returned an invalid ancestor-group collection."
+     (assoc details
+            :ancestor-groups value)))
+  value)
 
 ;; =============================================================================
 ;; Named Organization reads
@@ -195,6 +317,237 @@
     {:organization-id organization-id
      :location-id location-id})
    location-context-query))
+
+
+;; =============================================================================
+;; Normalized required reads
+;; =============================================================================
+
+(defn require-organization
+  "Returns one valid Organization document or throws when it is missing or the
+   Graph result violates the public Organization contract."
+  [ctx organization-id]
+  (require-uuid!
+   organization-id
+   :organization.core/invalid-organization-id
+   "Organization ID must be a UUID."
+   {:organization/id organization-id})
+
+  (require-document!
+   (organization-facts
+    ctx
+    organization-id)
+   :organization/found?
+   :organization/doc
+   organization/organization-document-consistent?
+   :organization/not-found
+   "The Organization does not exist."
+   {:organization/id organization-id}))
+
+(defn require-organization-context
+  "Returns a normalized authoritative root context.
+
+   Unlike organization-context, this function does not expose Graph envelope
+   keys or authorization proof versions."
+  [ctx organization-id]
+  (require-uuid!
+   organization-id
+   :organization.core/invalid-organization-id
+   "Organization ID must be a UUID."
+   {:organization/id organization-id})
+
+  (let [facts
+        (organization-context
+         ctx
+         organization-id)
+
+        details
+        {:organization/id organization-id}
+
+        document
+        (require-document!
+         facts
+         :organization/found?
+         :organization/doc
+         organization/organization-document-consistent?
+         :organization/not-found
+         "The Organization does not exist."
+         details)
+
+        scope-context
+        (require-scope-context!
+         (:organization/scope-context facts)
+         organization-id
+         (authorization-scope/organization-scope
+          organization-id)
+         details)
+
+        operational?
+        (require-operational-value!
+         (:organization/operational? facts)
+         details)]
+
+    {:organization document
+     :scope-context scope-context
+     :operational? operational?}))
+
+(defn require-organization-group-context
+  "Returns a normalized authoritative Organization Group context.
+
+   The returned ancestor groups are target-first and exclude the target Group.
+   Authorization proof versions remain internal to Organization workflows."
+  [ctx {:keys
+        [organization-id
+         organization-group-id]
+        :as input}]
+  (require-uuid!
+   organization-id
+   :organization.core/invalid-organization-id
+   "Organization ID must be a UUID."
+   {:input input})
+
+  (require-uuid!
+   organization-group-id
+   :organization.core/invalid-organization-group-id
+   "Organization Group ID must be a UUID."
+   {:input input})
+
+  (let [facts
+        (organization-group-context
+         ctx
+         input)
+
+        details
+        {:organization/id organization-id
+         :organization-group/id organization-group-id}
+
+        document
+        (require-document!
+         facts
+         :organization-group/found?
+         :organization-group/doc
+         organization/organization-group-document-consistent?
+         :organization-group/not-found
+         "The Organization Group does not exist in the named Organization."
+         details)
+
+        actual-organization-id
+        (organization/organization-group-organization-id
+         document)
+
+        _organization-match
+        (when-not
+         (=
+          organization-id
+          actual-organization-id)
+          (fail!
+           :organization-group/organization-mismatch
+           "The Organization Group belongs to another Organization."
+           (assoc details
+                  :actual-organization-id actual-organization-id)))
+
+        ancestor-groups
+        (require-ancestor-groups!
+         (:organization-group/ancestor-docs facts)
+         details)
+
+        scope-context
+        (require-scope-context!
+         (:organization-group/scope-context facts)
+         organization-id
+         (authorization-scope/organization-group-scope
+          organization-group-id)
+         details)
+
+        operational?
+        (require-operational-value!
+         (:organization-group/operational? facts)
+         details)]
+
+    {:organization/id organization-id
+     :organization-group document
+     :ancestor-groups ancestor-groups
+     :scope-context scope-context
+     :operational? operational?}))
+
+(defn require-location-context
+  "Returns a normalized authoritative Location context.
+
+   The returned ancestor groups are target-first. Authorization proof versions
+   remain internal to Organization workflows."
+  [ctx {:keys
+        [organization-id
+         location-id]
+        :as input}]
+  (require-uuid!
+   organization-id
+   :organization.core/invalid-organization-id
+   "Organization ID must be a UUID."
+   {:input input})
+
+  (require-uuid!
+   location-id
+   :organization.core/invalid-location-id
+   "Location ID must be a UUID."
+   {:input input})
+
+  (let [facts
+        (location-context
+         ctx
+         input)
+
+        details
+        {:organization/id organization-id
+         :location/id location-id}
+
+        document
+        (require-document!
+         facts
+         :location/found?
+         :location/doc
+         organization/location-document-consistent?
+         :location/not-found
+         "The Location does not exist in the named Organization."
+         details)
+
+        actual-organization-id
+        (organization/location-organization-id
+         document)
+
+        _organization-match
+        (when-not
+         (=
+          organization-id
+          actual-organization-id)
+          (fail!
+           :location/organization-mismatch
+           "The Location belongs to another Organization."
+           (assoc details
+                  :actual-organization-id actual-organization-id)))
+
+        ancestor-groups
+        (require-ancestor-groups!
+         (:location/ancestor-group-docs facts)
+         details)
+
+        scope-context
+        (require-scope-context!
+         (:location/scope-context facts)
+         organization-id
+         (authorization-scope/location-scope
+          location-id)
+         details)
+
+        operational?
+        (require-operational-value!
+         (:location/operational? facts)
+         details)]
+
+    {:organization/id organization-id
+     :location document
+     :ancestor-groups ancestor-groups
+     :scope-context scope-context
+     :operational? operational?}))
 
 ;; =============================================================================
 ;; Supported Organization operations
@@ -333,10 +686,10 @@
   organization/statuses)
 
 (def scope-types
-  organization/scope-types)
+  authorization-scope/scope-types)
 
 (def parent-scope-types
-  organization/parent-scope-types)
+  authorization-scope/parent-scope-types)
 
 (defn normalize-name
   [value]
@@ -370,55 +723,43 @@
 ;; Scope values
 ;; =============================================================================
 
-(defn scope-type?
-  [value]
-  (organization/scope-type? value))
+(def scope-type?
+  authorization-scope/scope-type?)
 
-(defn parent-scope-type?
-  [value]
-  (organization/parent-scope-type? value))
+(def parent-scope-type?
+  authorization-scope/parent-scope-type?)
 
-(defn scope-reference?
-  [value]
-  (organization/scope-reference? value))
+(def scope-reference?
+  authorization-scope/scope-reference?)
 
-(defn parent-scope-reference?
-  [value]
-  (organization/parent-scope-reference? value))
+(def parent-scope-reference?
+  authorization-scope/parent-scope-reference?)
 
-(defn organization-scope
-  [organization-id]
-  (organization/organization-scope organization-id))
+(def organization-scope
+  authorization-scope/organization-scope)
 
-(defn organization-group-scope
-  [organization-group-id]
-  (organization/organization-group-scope organization-group-id))
+(def organization-group-scope
+  authorization-scope/organization-group-scope)
 
-(defn location-scope
-  [location-id]
-  (organization/location-scope location-id))
+(def location-scope
+  authorization-scope/location-scope)
 
-(defn organization-scope?
-  [scope]
-  (organization/organization-scope? scope))
+(def organization-scope?
+  authorization-scope/organization-scope?)
 
-(defn organization-group-scope?
-  [scope]
-  (organization/organization-group-scope? scope))
+(def organization-group-scope?
+  authorization-scope/organization-group-scope?)
 
-(defn location-scope?
-  [scope]
-  (organization/location-scope? scope))
+(def location-scope?
+  authorization-scope/location-scope?)
 
-(defn same-scope?
-  [a b]
-  (organization/same-scope? a b))
+(def same-scope?
+  authorization-scope/same-scope?)
 
-(defn scope-context?
-  "Returns true for the compact authoritative scope context produced by this
-   model's context reads."
-  [value]
-  (organization/scope-context? value))
+(def scope-context?
+  "Returns true for the shared structural authorization-scope context
+   contract."
+  authorization-scope/scope-context?)
 
 ;; =============================================================================
 ;; Organization document facts

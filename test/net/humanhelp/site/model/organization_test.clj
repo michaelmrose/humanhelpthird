@@ -5,6 +5,7 @@
    [gesso.graph :as graph]
    [malli.core :as m]
    [net.humanhelp.site.model.common :as model.common]
+   [net.humanhelp.site.model.fx :as model.fx]
    [net.humanhelp.site.model.organization.core :as organization]
    [net.humanhelp.site.model.organization.domain :as domain]
    [net.humanhelp.site.model.organization.fx :as organization.fx]
@@ -464,67 +465,410 @@
       (is (= :reactivate-location (organization/reactivate-location ctx input)))) (is (= 13 (count @calls)))
     (is (every? #(= ctx (nth % 1)) @calls)) (is (every? #(= input (nth % 2)) @calls))))
 
-(deftest plan-create-child-test (let [organization-document (active-organization) context
-        (domain/organization-scope-context organization-document) command (domain/create-location-command
-         {:id location-id :organization-id organization-id :parent-scope organization-scope :name "Downtown"
-          :now t0}) plan (organization.fx/plan-create-child {:entity-kind :location :operation :create
-          :command command :parent-scope-facts (scope-facts organization-document context [(organization-guard
-             organization-document)]) :user-authorization (user-authorization)}) transaction-plan
-        (:transaction-plan plan) change (first (:changes transaction-plan))] (is (= [command]
-           (:commands transaction-plan))) (is (= 4 (count (:assertions transaction-plan)))) (is (= #{:location}
-           (topic-set (:changes transaction-plan)))) (is (= :created (:change/kind change))) (is (= :create
-           (:location/operation change))) (is (= location-id (:location/id change)))
-    (is (= (command-document command) (get-in plan [:result :location]))) (is (ifn?
-         (:entry-fn transaction-plan))) (is (= {:coalesce-key [:location location-id]}
-           ((:entry-fn transaction-plan) change)))))
+(deftest plan-create-child-test
+  (let [organization-document
+        (active-organization)
 
-(deftest plan-update-entity-test (let [location-document (active-location) organization-document
-        (active-organization) root (active-group) child (child-group) context (domain/location-scope-context
-         organization-document location-document [child root]) command (domain/rename-location-command
-         location-document {:name "Downtown Store" :now t1}) plan (organization.fx/plan-update-entity
-         {:entity-kind :location :operation :rename :command command :target-scope-facts (scope-facts
-           location-document context [(location-guard location-document) (group-guard child) (group-guard root)
-            (organization-guard organization-document)]) :user-authorization (user-authorization)})
-        transaction-plan (:transaction-plan plan) change (first (:changes transaction-plan))] (is (= [command]
-           (:commands transaction-plan))) (is (= 7 (count (:assertions transaction-plan)))) (is (= :updated
-           (:change/kind change))) (is (= :rename (:location/operation change))) (is (= 1
-           (:location/revision change))) (is (= "Downtown Store" (get-in plan [:result :location
-                    :location/name])))))
+        context
+        (domain/organization-scope-context
+         organization-document)
 
-(deftest plan-move-entity-deduplicates-shared-guards-test (let [organization-document (active-organization) root
-        (active-group) child (child-group) destination (destination-group) location-document (active-location)
-        current-context (domain/location-scope-context organization-document location-document [child root])
-        destination-context (domain/organization-group-scope-context organization-document destination [])
-        command (domain/move-location-command location-document {:parent-scope destination-group-scope :now t1
-          :actor-id actor-id :reason :test/move}) same-user-authorization (user-authorization) plan
-        (organization.fx/plan-move-entity {:entity-kind :location :command command :current-scope-facts
-          (scope-facts location-document current-context [(location-guard location-document) (group-guard child)
-            (group-guard root) (organization-guard organization-document)]) :destination-scope-facts
-          (scope-facts destination destination-context [(group-guard destination) (organization-guard
-             organization-document)]) :current-user-authorization same-user-authorization
-          :destination-user-authorization same-user-authorization}) transaction-plan (:transaction-plan plan)
-        change (first (:changes transaction-plan))] (is (= [command] (:commands transaction-plan))) (is (= 8
-           (count (:assertions transaction-plan)))) (is (= #{:location} (topic-set
-            (:changes transaction-plan)))) (is (= :move (:location/operation change)))
-    (is (= destination-group-id (:location/parent-id change))) (is (= destination-group-scope
-           (domain/location-parent-scope (get-in plan [:result :location]))))))
+        command
+        (domain/create-location-command
+         {:id location-id
+          :organization-id organization-id
+          :parent-scope organization-scope
+          :name "Downtown"
+          :now t0})
 
-(deftest plan-rejects-conflicting-authorization-versions-test (let [organization-document (active-organization)
-        context (domain/organization-scope-context organization-document) command
-        (domain/rename-organization-command organization-document {:name "New Name" :now t1}) current-guard
-        (organization-guard organization-document) conflicting-guard (assoc-in current-guard [:model/expected
-          :model/revision] 99)] (is (= :organization.fx/conflicting-authorization-versions (error-type
-            #(organization.fx/plan-update-entity {:entity-kind :organization :operation :rename :command command
-               :target-scope-facts (scope-facts organization-document context [current-guard conflicting-guard])
-               :user-authorization (user-authorization)}))))))
+        plan
+        (organization.fx/plan-create-child
+         {:entity-kind :location
+          :operation :create
+          :command command
+          :parent-scope-facts
+          (scope-facts
+           organization-document
+           context
+           [(organization-guard
+             organization-document)])
+          :user-authorization
+          (user-authorization)})
 
-(deftest plan-rejects-invalid-authorization-version-test (let [organization-document (active-organization)
-        context (domain/organization-scope-context organization-document) command
-        (domain/rename-organization-command organization-document {:name "New Name" :now t1})]
-    (is (= :organization.fx/invalid-authorization-version (error-type #(organization.fx/plan-update-entity
-              {:entity-kind :organization :operation :rename :command command :target-scope-facts (scope-facts
-                organization-document context [{:model/entity-type :organization :model/expected
-                  {:model/id organization-id}}]) :user-authorization (user-authorization)}))))))
+        transaction-plan
+        (:transaction-plan plan)
+
+        change
+        (first
+         (:changes transaction-plan))]
+
+    (is
+     (=
+      [command]
+      (:commands transaction-plan)))
+
+    (is
+     (=
+      4
+      (count
+       (:authorization-versions
+        transaction-plan))))
+
+    (is
+     (empty?
+      (:assertions transaction-plan)))
+
+    (is
+     (=
+      #{:location}
+      (topic-set
+       (:changes transaction-plan))))
+
+    (is
+     (=
+      :created
+      (:change/kind change)))
+
+    (is
+     (=
+      :create
+      (:location/operation change)))
+
+    (is
+     (=
+      location-id
+      (:location/id change)))
+
+    (is
+     (=
+      (command-document command)
+      (get-in
+       plan
+       [:result :location])))
+
+    (is
+     (ifn?
+      (:entry-fn transaction-plan)))
+
+    (is
+     (=
+      {:coalesce-key
+       [:location location-id]}
+      ((:entry-fn transaction-plan)
+       change)))))
+
+(deftest plan-update-entity-test
+  (let [location-document
+        (active-location)
+
+        organization-document
+        (active-organization)
+
+        root
+        (active-group)
+
+        child
+        (child-group)
+
+        context
+        (domain/location-scope-context
+         organization-document
+         location-document
+         [child root])
+
+        command
+        (domain/rename-location-command
+         location-document
+         {:name "Downtown Store"
+          :now t1})
+
+        plan
+        (organization.fx/plan-update-entity
+         {:entity-kind :location
+          :operation :rename
+          :command command
+          :target-scope-facts
+          (scope-facts
+           location-document
+           context
+           [(location-guard location-document)
+            (group-guard child)
+            (group-guard root)
+            (organization-guard
+             organization-document)])
+          :user-authorization
+          (user-authorization)})
+
+        transaction-plan
+        (:transaction-plan plan)
+
+        change
+        (first
+         (:changes transaction-plan))]
+
+    (is
+     (=
+      [command]
+      (:commands transaction-plan)))
+
+    (is
+     (=
+      7
+      (count
+       (:authorization-versions
+        transaction-plan))))
+
+    (is
+     (empty?
+      (:assertions transaction-plan)))
+
+    (is
+     (=
+      :updated
+      (:change/kind change)))
+
+    (is
+     (=
+      :rename
+      (:location/operation change)))
+
+    (is
+     (=
+      1
+      (:location/revision change)))
+
+    (is
+     (=
+      "Downtown Store"
+      (get-in
+       plan
+       [:result
+        :location
+        :location/name])))))
+
+(deftest plan-move-entity-defers-shared-guard-deduplication-test
+  (let [organization-document
+        (active-organization)
+
+        root
+        (active-group)
+
+        child
+        (child-group)
+
+        destination
+        (destination-group)
+
+        location-document
+        (active-location)
+
+        current-context
+        (domain/location-scope-context
+         organization-document
+         location-document
+         [child root])
+
+        destination-context
+        (domain/organization-group-scope-context
+         organization-document
+         destination
+         [])
+
+        command
+        (domain/move-location-command
+         location-document
+         {:parent-scope destination-group-scope
+          :now t1
+          :actor-id actor-id
+          :reason :test/move})
+
+        same-user-authorization
+        (user-authorization)
+
+        plan
+        (organization.fx/plan-move-entity
+         {:entity-kind :location
+          :command command
+          :current-scope-facts
+          (scope-facts
+           location-document
+           current-context
+           [(location-guard location-document)
+            (group-guard child)
+            (group-guard root)
+            (organization-guard
+             organization-document)])
+          :destination-scope-facts
+          (scope-facts
+           destination
+           destination-context
+           [(group-guard destination)
+            (organization-guard
+             organization-document)])
+          :current-user-authorization
+          same-user-authorization
+          :destination-user-authorization
+          same-user-authorization})
+
+        transaction-plan
+        (:transaction-plan plan)
+
+        raw-authorization-versions
+        (:authorization-versions
+         transaction-plan)
+
+        normalized-authorization-versions
+        (model.fx/normalize-authorization-versions
+         raw-authorization-versions)
+
+        change
+        (first
+         (:changes transaction-plan))]
+
+    (is
+     (=
+      [command]
+      (:commands transaction-plan)))
+
+    (is
+     (=
+      12
+      (count
+       raw-authorization-versions)))
+
+    (is
+     (=
+      8
+      (count
+       normalized-authorization-versions)))
+
+    (is
+     (empty?
+      (:assertions transaction-plan)))
+
+    (is
+     (=
+      #{:location}
+      (topic-set
+       (:changes transaction-plan))))
+
+    (is
+     (=
+      :move
+      (:location/operation change)))
+
+    (is
+     (=
+      destination-group-id
+      (:location/parent-id change)))
+
+    (is
+     (=
+      destination-group-scope
+      (domain/location-parent-scope
+       (get-in
+        plan
+        [:result :location]))))))
+
+(deftest plan-defers-conflicting-authorization-version-rejection-test
+  (let [organization-document
+        (active-organization)
+
+        context
+        (domain/organization-scope-context
+         organization-document)
+
+        command
+        (domain/rename-organization-command
+         organization-document
+         {:name "New Name"
+          :now t1})
+
+        current-guard
+        (organization-guard
+         organization-document)
+
+        conflicting-guard
+        (assoc-in
+         current-guard
+         [:model/expected
+          :model/revision]
+         99)
+
+        plan
+        (organization.fx/plan-update-entity
+         {:entity-kind :organization
+          :operation :rename
+          :command command
+          :target-scope-facts
+          (scope-facts
+           organization-document
+           context
+           [current-guard
+            conflicting-guard])
+          :user-authorization
+          (user-authorization)})
+
+        authorization-versions
+        (get-in
+         plan
+         [:transaction-plan
+          :authorization-versions])]
+
+    (is
+     (=
+      :model.fx/conflicting-authorization-versions
+      (error-type
+       #(model.fx/normalize-authorization-versions
+         authorization-versions))))))
+
+(deftest plan-defers-invalid-authorization-version-rejection-test
+  (let [organization-document
+        (active-organization)
+
+        context
+        (domain/organization-scope-context
+         organization-document)
+
+        command
+        (domain/rename-organization-command
+         organization-document
+         {:name "New Name"
+          :now t1})
+
+        malformed-guard
+        {:model/entity-type
+         :organization
+
+         :model/expected
+         {:model/id
+          organization-id}}
+
+        plan
+        (organization.fx/plan-update-entity
+         {:entity-kind :organization
+          :operation :rename
+          :command command
+          :target-scope-facts
+          (scope-facts
+           organization-document
+           context
+           [malformed-guard])
+          :user-authorization
+          (user-authorization)})
+
+        authorization-versions
+        (get-in
+         plan
+         [:transaction-plan
+          :authorization-versions])]
+
+    (is
+     (=
+      :model.fx/invalid-authorization-version
+      (error-type
+       #(model.fx/normalize-authorization-versions
+         authorization-versions))))))
 
 (deftest fx-and-core-operation-registries-match-test (is (= (set (keys organization.fx/operations)) (set
           (keys organization/operations)))) (is (= #{:organization/create-group :organization/create-location

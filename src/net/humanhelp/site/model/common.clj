@@ -1,33 +1,56 @@
 (ns net.humanhelp.site.model.common
+  "Shared mechanics for HumanHelp persisted model documents.
+
+   This namespace owns only model-independent behavior:
+
+   - timestamp predicates and ordering;
+   - standardized domain-validation failures;
+   - version-metadata validation;
+   - versioned-document consistency;
+   - guarded revision updates;
+   - expected-version descriptions;
+   - authorization-version guard construction;
+   - generic create and update command descriptions.
+
+   Individual models continue to own their document fields, lifecycle rules,
+   invariants, authorization policy, queries, assertions, and semantic changes."
   (:import
    [java.time Instant]))
 
 ;; =============================================================================
-;; Internal failures
+;; Errors
 ;; =============================================================================
 
 (defn- fail!
-  [error-type message data]
-  (throw
-   (ex-info
+  ([error-type message]
+   (fail!
+    error-type
     message
-    (assoc
-     data
-     :error/type
-     error-type))))
+    nil))
 
-;; =============================================================================
-;; Model-input mechanics
-;; =============================================================================
+  ([error-type message details]
+   (throw
+    (ex-info
+     message
+     (cond->
+      {:error/type
+       error-type}
+
+       (some?
+        details)
+       (assoc
+        :error/details
+        details))))))
 
 (defn exactly-one-present?
   "Returns true when exactly one supplied value is non-nil."
   [& values]
-  (= 1
-     (count
-      (filter
-       some?
-       values))))
+  (=
+   1
+   (count
+    (filter
+     some?
+     values))))
 
 (defn at-most-one-present?
   "Returns true when zero or one supplied values are non-nil."
@@ -40,48 +63,44 @@
    1))
 
 ;; =============================================================================
-;; Timestamp mechanics
+;; Timestamp values
 ;; =============================================================================
 
 (defn timestamp-value?
-  "Returns true when value is a supported persisted model timestamp.
-
-   HumanHelp persists lifecycle and event timestamps as Instant values."
+  "Returns true when value is a java.time.Instant."
   [value]
   (instance?
    Instant
    value))
 
-(defn timestamp<=
-  "Returns true when a and b are timestamps and a is not after b."
-  [a b]
+(defn timestamp<
+  "Returns true when left and right are Instants and left is before right."
+  [left right]
   (and
    (timestamp-value?
-    a)
+    left)
 
    (timestamp-value?
-    b)
+    right)
+
+   (.isBefore
+    ^Instant left
+    ^Instant right)))
+
+(defn timestamp<=
+  "Returns true when left and right are Instants and left is not after right."
+  [left right]
+  (and
+   (timestamp-value?
+    left)
+
+   (timestamp-value?
+    right)
 
    (not
-    (pos?
-     (compare
-      a
-      b)))))
-
-(defn timestamp<
-  "Returns true when a and b are timestamps and a is before b."
-  [a b]
-  (and
-   (timestamp-value?
-    a)
-
-   (timestamp-value?
-    b)
-
-   (neg?
-    (compare
-     a
-     b))))
+    (.isAfter
+     ^Instant left
+     ^Instant right))))
 
 (defn timestamps-ordered?
   "Returns true when every supplied timestamp is at or after the preceding one.
@@ -183,12 +202,13 @@
    (keyword?
     updated-at-key)
 
-   (= 3
-      (count
-       (set
-        [revision-key
-         created-at-key
-         updated-at-key])))))
+   (=
+    3
+    (count
+     (set
+      [revision-key
+       created-at-key
+       updated-at-key])))))
 
 (defn versioned-document-consistent?
   "Returns true when document satisfies the shared persisted-document
@@ -371,7 +391,11 @@
   "Returns the standardized compare-and-set description for document.
 
    Attribute keys are included so a generic persistence implementation can
-   compare entity-specific revision and update-time attributes."
+   compare entity-specific revision and update-time attributes.
+
+   metadata must include all three version keys. The created-at attribute is
+   validated as part of the complete versioned-document contract even though it
+   is not copied into the compare-and-set description."
   [document
    {:keys
     [revision-key
@@ -408,6 +432,44 @@
    (get
     document
     updated-at-key)})
+
+(defn authorization-version
+  "Returns one generic authorization-version guard for document.
+
+   Model-specific code decides whether a document actually establishes
+   authorization for an operation. This helper only validates the entity type
+   and document version contract, then packages the expected version in the
+   shape understood by model.fx:
+
+     {:model/entity-type entity-type
+      :model/expected    expected-version}
+
+   The complete metadata map is passed through expected-version, so missing
+   :created-at-key metadata or an invalid creation timestamp is rejected even
+   though created-at is not part of the resulting compare-and-set map."
+  [entity-type document metadata]
+  (when-not
+   (keyword?
+    entity-type)
+    (fail!
+     :model/invalid-entity-type
+     "An authorization version requires a keyword entity type."
+     {:entity-type
+      entity-type
+
+      :model/id
+      (:xt/id document)
+
+      :metadata
+      metadata}))
+
+  {:model/entity-type
+   entity-type
+
+   :model/expected
+   (expected-version
+    document
+    metadata)})
 
 ;; =============================================================================
 ;; Model command descriptions

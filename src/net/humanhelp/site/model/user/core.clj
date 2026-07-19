@@ -8,7 +8,8 @@
    This facade exposes:
 
    - the User model's Biff module contribution;
-   - stable Graph query contracts and named entity reads;
+   - stable raw Graph query contracts and compatibility reads;
+   - normalized required entity and aggregate reads;
    - a compact, document-free scoped access context for consumers;
    - the currently supported effectful User operations;
    - selected pure User values and predicates.
@@ -18,6 +19,7 @@
    access-proof Graph results, or resolver implementations."
   (:require
    [gesso.graph :as graph]
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.user.domain.access :as access]
    [net.humanhelp.site.model.user.domain.common :as user.common]
    [net.humanhelp.site.model.user.domain.identity :as identity]
@@ -173,52 +175,326 @@
      :scope scope})
    active-role-assignments-at-scope-query))
 
+(defn- require-uuid!
+  [value error-type message details]
+  (when-not
+   (uuid? value)
+    (fail!
+     error-type
+     message
+     details))
+  value)
+
+(defn- require-document!
+  [facts
+   found-key
+   document-key
+   document-predicate
+   error-type
+   message
+   details]
+  (when-not
+   (true?
+    (get facts found-key))
+    (fail!
+     error-type
+     message
+     details))
+
+  (let [document
+        (get facts document-key)]
+    (when-not
+     (document-predicate
+      document)
+      (fail!
+       :user.core/invalid-read-result
+       "User Graph returned a found entity without a valid document."
+       (assoc
+        details
+        :found-key found-key
+        :document-key document-key
+        :facts facts)))
+    document))
+
+(defn- user-lookup?
+  [{:keys
+    [user-id
+     phone
+     email]
+    :as lookup}]
+  (and
+   (map?
+    lookup)
+
+   (=
+    1
+    (count
+     (filter
+      some?
+      [user-id
+       phone
+       email])))
+
+   (or
+    (and
+     (some?
+      user-id)
+     (uuid?
+      user-id))
+
+    (and
+     (some?
+      phone)
+     (user.common/phone?
+      phone))
+
+    (and
+     (some?
+      email)
+     (user.common/email?
+      email)))))
+
+(defn require-user
+  "Returns one valid User document or throws.
+
+   lookup must contain exactly one canonical lookup:
+   :user-id, :phone, or :email."
+  [ctx lookup]
+  (when-not
+   (user-lookup?
+    lookup)
+    (fail!
+     :user/invalid-lookup
+     "A User lookup must contain exactly one valid user ID, phone, or email."
+     {:lookup lookup}))
+
+  (require-document!
+   (user-facts
+    ctx
+    lookup)
+   :user/found?
+   :user/doc
+   identity/document-consistent?
+   :user/not-found
+   "The requested User does not exist."
+   {:lookup lookup}))
+
+(defn require-membership
+  "Returns one valid Membership document or throws."
+  [ctx membership-id]
+  (require-uuid!
+   membership-id
+   :membership/invalid-id
+   "Membership ID must be a UUID."
+   {:membership/id membership-id})
+
+  (require-document!
+   (membership-facts
+    ctx
+    membership-id)
+   :membership/found?
+   :membership/doc
+   membership/document-consistent?
+   :membership/not-found
+   "The requested Membership does not exist."
+   {:membership/id membership-id}))
+
+(defn require-role-assignment
+  "Returns one valid role-assignment document or throws."
+  [ctx role-assignment-id]
+  (require-uuid!
+   role-assignment-id
+   :role-assignment/invalid-id
+   "Role-assignment ID must be a UUID."
+   {:role-assignment/id role-assignment-id})
+
+  (require-document!
+   (role-assignment-facts
+    ctx
+    role-assignment-id)
+   :role-assignment/found?
+   :role-assignment/doc
+   role/document-consistent?
+   :role-assignment/not-found
+   "The requested role assignment does not exist."
+   {:role-assignment/id role-assignment-id}))
+
+(defn require-invitation
+  "Returns one valid Invitation document or throws.
+
+   Raw bearer-token lookup remains internal to accept-invitation."
+  [ctx invitation-id]
+  (require-uuid!
+   invitation-id
+   :invitation/invalid-id
+   "Invitation ID must be a UUID."
+   {:invitation/id invitation-id})
+
+  (require-document!
+   (invitation-facts
+    ctx
+    invitation-id)
+   :invitation/found?
+   :invitation/doc
+   invitation/document-consistent?
+   :invitation/not-found
+   "The requested Invitation does not exist."
+   {:invitation/id invitation-id}))
+
+(defn customer-context
+  "Returns normalized customer and Organization-affiliation facts for one User.
+
+   Unlike customer-facts, this result contains documents directly rather than
+   Graph envelope nodes."
+  [ctx user-id]
+  (require-uuid!
+   user-id
+   :user/invalid-user-id
+   "Customer status requires a UUID User ID."
+   {:user/id user-id})
+
+  (let [facts
+        (customer-facts
+         ctx
+         user-id)
+
+        user
+        (require-document!
+         facts
+         :user/found?
+         :user/doc
+         identity/document-consistent?
+         :user/not-found
+         "The requested User does not exist."
+         {:user/id user-id})
+
+        membership-nodes
+        (or
+         (:user/memberships facts)
+         [])
+
+        memberships
+        (mapv
+         :membership/doc
+         membership-nodes)]
+
+    (when-not
+     (every?
+      #(access/membership-for-user?
+        user
+        %)
+      memberships)
+      (fail!
+       :user.core/invalid-customer-facts
+       "User Graph returned invalid Membership documents for customer status."
+       {:user/id user-id
+        :facts facts}))
+
+    (let [organization-affiliated?
+          (access/organization-affiliated?
+           user
+           memberships)
+
+          customer?
+          (access/customer?
+           user
+           memberships)]
+
+      {:user user
+       :memberships memberships
+       :organization-affiliated? organization-affiliated?
+       :customer? customer?})))
+
+(defn active-role-assignment-documents-at-scope
+  "Returns valid active role-assignment documents at one exact scope.
+
+   This normalizes active-role-assignments-at-scope without exposing Graph
+   envelope nodes."
+  [ctx organization-id scope]
+  (require-uuid!
+   organization-id
+   :organization/invalid-id
+   "Organization ID must be a UUID."
+   {:organization/id organization-id
+    :scope scope})
+
+  (when-not
+   (authorization-scope/scope-reference?
+    scope)
+    (fail!
+     :user/invalid-scope
+     "Role-assignment scope must be a valid authorization-scope reference."
+     {:organization/id organization-id
+      :scope scope}))
+
+  (let [facts
+        (active-role-assignments-at-scope
+         ctx
+         organization-id
+         scope)
+
+        documents
+        (mapv
+         :role-assignment/doc
+         (or
+          (:user/active-role-assignments-at-scope facts)
+          []))]
+
+    (when-not
+     (every?
+      #(and
+        (role/document-consistent?
+         %)
+
+        (role/active?
+         %)
+
+        (role/for-organization?
+         %
+         organization-id)
+
+        (authorization-scope/same-scope?
+         scope
+         (role/scope %)))
+      documents)
+      (fail!
+       :user.core/invalid-role-assignment-collection
+       "User Graph returned an invalid active role-assignment collection."
+       {:organization/id organization-id
+        :scope scope
+        :facts facts}))
+
+    documents))
+
 ;; =============================================================================
 ;; Organization scope-context contract
 ;; =============================================================================
 
-(defn scope-context?
-  "Returns true for the Organization-owned scope context accepted by
-   access-context.
-
-   Expected shape:
-
-     {:organization/id organization-id
-      :scope/target    {:scope/type ... :scope/id ...}
-      :scope/applicable [target-scope ... organization-scope]}
-
-   Organization is responsible for establishing the actual hierarchy. User
-   validates only the public shape and internal agreement of that result."
-  [value]
-  (let [organization-id (:organization/id value)
-        target (:scope/target value)
-        applicable (:scope/applicable value)
-        organization-scope
-        (when (uuid? organization-id)
-          (role/organization-scope organization-id))]
-    (boolean
-     (and
-      (map? value)
-      (uuid? organization-id)
-      (user.common/scope-reference? target)
-      (access/applicable-scopes? applicable)
-      (= (count applicable)
-         (count (set applicable)))
-      (some #(user.common/same-scope? target %)
-            applicable)
-      (some #(user.common/same-scope? organization-scope %)
-            applicable)))))
+(def scope-context?
+  "Shared structural Organization authorization-scope context predicate."
+  authorization-scope/scope-context?)
 
 (defn- require-scope-context!
   [scope-context]
-  (when-not (scope-context? scope-context)
+  (when-not
+   (scope-context?
+    scope-context)
     (fail!
      :user/invalid-scope-context
-     "User access requires a valid Organization scope context."
+     "User access requires a valid Organization authorization-scope context."
      {:scope-context scope-context}))
-  {:organization-id (:organization/id scope-context)
-   :target (:scope/target scope-context)
-   :applicable-scopes (vec (:scope/applicable scope-context))})
+
+  {:organization-id
+   (:organization/id scope-context)
+
+   :target
+   (:scope/target scope-context)
+
+   :applicable-scopes
+   (:scope/applicable scope-context)
+
+   :operational?
+   (:scope/operational? scope-context)})
 
 (defn- access-proof-facts
   [ctx user-id organization-id applicable-scopes]
@@ -267,8 +543,13 @@
      "User access requires a UUID user ID."
      {:user-id user-id}))
 
-  (let [{:keys [organization-id target applicable-scopes]}
-        (require-scope-context! scope-context)
+  (let [{:keys
+         [organization-id
+          target
+          applicable-scopes
+          operational?]}
+        (require-scope-context!
+         scope-context)
 
         facts
         (access-proof-facts
@@ -306,6 +587,7 @@
 
       (assoc context
              :scope/target target
+             :scope/operational? operational?
              :user/display-name (:user/display-name user)))))
 
 ;; =============================================================================
@@ -352,7 +634,7 @@
   user.common/roles)
 
 (def scope-types
-  user.common/scope-types)
+  authorization-scope/scope-types)
 
 (def capabilities
   access/capabilities)
@@ -364,41 +646,36 @@
   [value]
   (user.common/role? value))
 
-(defn scope-type?
-  [value]
-  (user.common/scope-type? value))
+(def scope-type?
+  authorization-scope/scope-type?)
 
-(defn scope-reference?
-  [value]
-  (user.common/scope-reference? value))
+(def scope-reference?
+  authorization-scope/scope-reference?)
 
-(defn same-scope?
-  [a b]
-  (user.common/same-scope? a b))
+(def same-scope?
+  authorization-scope/same-scope?)
 
 (defn capability?
   [value]
   (access/capability? value))
 
-(defn organization-scope
-  [organization-id]
-  (role/organization-scope organization-id))
+(def organization-scope
+  authorization-scope/organization-scope)
 
-(defn organization-group-scope
-  [organization-group-id]
-  (role/organization-group-scope organization-group-id))
+(def organization-group-scope
+  authorization-scope/organization-group-scope)
 
-(defn location-scope
-  [location-id]
-  (role/location-scope location-id))
+(def location-scope
+  authorization-scope/location-scope)
 
-(defn organization-group-scope?
-  [scope]
-  (role/organization-group-scope? scope))
+(def organization-scope?
+  authorization-scope/organization-scope?)
 
-(defn location-scope?
-  [scope]
-  (role/location-scope? scope))
+(def organization-group-scope?
+  authorization-scope/organization-group-scope?)
+
+(def location-scope?
+  authorization-scope/location-scope?)
 
 ;; =============================================================================
 ;; Identity values and facts
@@ -608,16 +885,23 @@
   [user memberships]
   (access/customer? user memberships))
 
-(defn applicable-scopes?
-  [scopes]
-  (access/applicable-scopes? scopes))
+(def applicable-scopes?
+  authorization-scope/applicable-scopes?)
 
 (defn access-context?
   [value]
   (and
-   (access/access-context? value)
-   (user.common/scope-reference?
-    (:scope/target value))))
+   (access/access-context?
+    value)
+
+   (authorization-scope/scope-reference?
+    (:scope/target value))
+
+   (boolean?
+    (:scope/operational? value))
+
+   (identity/display-name?
+    (:user/display-name value))))
 
 (defn has-capability?
   [access-context expected-capability]

@@ -1,14 +1,14 @@
 (ns net.humanhelp.site.model.organization.schema
   "Malli schemas for persisted Organization-model documents and Graph values.
 
-   Structural schemas describe organizations, nested organization groups,
-   locations, scope contexts, and authorization-version guards. Complete
-   lifecycle, ancestry, and cross-field invariants remain owned by
-   organization.domain and are applied as predicates to persisted documents
-   and public scope contexts.
+   Shared structural authorization-scope schemas use
+   model.authorization-scope. Complete Organization lifecycle, ownership,
+   hierarchy, ancestry, and cross-field invariants remain owned by
+   organization.domain and are applied as predicates to persisted documents.
 
    This namespace does not query XTDB, authorize users, or execute workflows."
   (:require
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.organization.domain :as organization]))
 
@@ -44,12 +44,12 @@
   [:fn
    {:error/message
     "must be organization, organization-group, or location"}
-   organization/scope-type?])
+   authorization-scope/scope-type?])
 
 (def parent-scope-type-schema
   [:fn
    {:error/message "must be organization or organization-group"}
-   organization/parent-scope-type?])
+   authorization-scope/parent-scope-type?])
 
 (def scope-reference-schema
   [:and
@@ -59,8 +59,8 @@
 
    [:fn
     {:error/message
-     "must be a valid Organization-model scope reference"}
-    organization/scope-reference?]])
+     "must be a valid HumanHelp authorization-scope reference"}
+    authorization-scope/scope-reference?]])
 
 (def parent-scope-reference-schema
   [:and
@@ -69,7 +69,7 @@
    [:fn
     {:error/message
      "must refer to an organization or organization group"}
-    organization/parent-scope-reference?]])
+    authorization-scope/parent-scope-reference?]])
 
 (def scope-reference-vector-schema
   [:vector scope-reference-schema])
@@ -101,7 +101,7 @@
   [:vector authorization-version-schema])
 
 ;; =============================================================================
-;; Public scope context
+;; Public authorization-scope context
 ;; =============================================================================
 
 (def scope-context-schema
@@ -114,8 +114,8 @@
 
    [:fn
     {:error/message
-     "The scope context must be target-first, organization-last, unique, and structurally valid."}
-    organization/scope-context?]])
+     "The authorization-scope context must be target-first, organization-last, unique, and structurally valid."}
+    authorization-scope/scope-context?]])
 
 ;; =============================================================================
 ;; Organization document
@@ -285,7 +285,7 @@
 
    Table keywords validate complete persisted documents. Attribute keywords are
    registered independently for Gesso Graph input/output validation and for
-   other models consuming Organization scope contexts."
+   other models consuming Organization authorization-scope contexts."
   {::instant
    instant-schema
 
@@ -325,7 +325,7 @@
    ::authorization-versions
    authorization-versions-schema
 
-   ;; Shared Organization-model Graph values
+   ;; Shared HumanHelp authorization-scope values
    :scope/type
    scope-type-schema
 
@@ -596,14 +596,12 @@
    :location/ancestor-group-docs
    [:vector organization-group-document-schema]
 
-   ;; Current User FX contract
    :location/applicable-scopes
    scope-reference-vector-schema
 
    :location/authorization-versions
    authorization-versions-schema
 
-   ;; New compact cross-model contract
    :location/scope-context
    scope-context-schema
 

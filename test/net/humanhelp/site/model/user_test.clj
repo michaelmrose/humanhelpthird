@@ -49,15 +49,14 @@
 (def applicable-scopes [location-scope group-scope organization-scope])
 (def scope-context {:organization/id organization-id
                     :scope/target location-scope
-                    :scope/applicable applicable-scopes})
+                    :scope/applicable applicable-scopes
+                    :scope/operational? true})
 (def location-expected-version
   {:model/id location-id :model/revision-key :location/revision
    :model/revision 4 :model/updated-at-key :location/updated-at
    :model/updated-at t0})
 (def location-authorization-versions
   [{:model/entity-type :location :model/expected location-expected-version}])
-(def location-assertions
-  [(model.fx/assert-document-current :location location-expected-version)])
 (defn active-user
   ([]
    (active-user {}))
@@ -868,7 +867,7 @@
         (user.fx/plan-helper-invitation
          {:command command
           :raw-token raw-token
-          :location-assertions location-assertions
+          :location-authorization-versions location-authorization-versions
           :access-proof
           {:user inviter
            :membership inviter-membership
@@ -876,7 +875,8 @@
         transaction-plan (:transaction-plan plan)
         result (:result plan)]
     (is (= [command] (:commands transaction-plan)))
-    (is (= 5 (count (:assertions transaction-plan))))
+    (is (= 4 (count (:authorization-versions transaction-plan))))
+    (is (= 1 (count (:assertions transaction-plan))))
     (is (= #{:invitation}
            (topic-set (:changes transaction-plan))))
     (is (ifn? (:entry-fn transaction-plan)))
@@ -890,7 +890,7 @@
          {:now t1
           :user (active-user)
           :invitation-document (pending-invitation)
-          :location-assertions location-assertions
+          :location-authorization-versions location-authorization-versions
           :existing-membership nil
           :existing-role-assignments []
           :generated-membership-id generated-membership-id
@@ -900,7 +900,8 @@
     (is (= 3 (count (:commands transaction-plan))))
     (is (= [:create :create :accept]
            (mapv :model/operation (:commands transaction-plan))))
-    (is (= 4 (count (:assertions transaction-plan))))
+    (is (= 2 (count (:authorization-versions transaction-plan))))
+    (is (= 2 (count (:assertions transaction-plan))))
     (is (= #{:membership :role-assignment :invitation}
            (topic-set (:changes transaction-plan))))
     (is (= generated-membership-id
@@ -920,7 +921,7 @@
          {:now t1
           :user (active-user)
           :invitation-document (pending-invitation)
-          :location-assertions location-assertions
+          :location-authorization-versions location-authorization-versions
           :existing-membership membership-document
           :existing-role-assignments [assignment]
           :generated-membership-id generated-membership-id
@@ -930,7 +931,8 @@
     (is (= 1 (count (:commands transaction-plan))))
     (is (= :accept
            (:model/operation (first (:commands transaction-plan)))))
-    (is (= 6 (count (:assertions transaction-plan))))
+    (is (= 4 (count (:authorization-versions transaction-plan))))
+    (is (= 2 (count (:assertions transaction-plan))))
     (is (= #{:invitation}
            (topic-set (:changes transaction-plan))))
     (is (= membership-document (:membership result)))
@@ -942,7 +944,7 @@
          {:now t1
           :user (active-user)
           :invitation-document (pending-invitation)
-          :location-assertions location-assertions
+          :location-authorization-versions location-authorization-versions
           :existing-membership membership-document
           :existing-role-assignments []
           :generated-membership-id generated-membership-id
@@ -950,7 +952,8 @@
         transaction-plan (:transaction-plan plan)]
     (is (= [:create :accept]
            (mapv :model/operation (:commands transaction-plan))))
-    (is (= 5 (count (:assertions transaction-plan))))
+    (is (= 3 (count (:authorization-versions transaction-plan))))
+    (is (= 2 (count (:assertions transaction-plan))))
     (is (= #{:role-assignment :invitation}
            (topic-set (:changes transaction-plan))))))
 (deftest plan-invitation-acceptance-rejects-invalid-state-test
@@ -960,7 +963,7 @@
             {:now t1
              :user (active-user)
              :invitation-document (pending-invitation)
-             :location-assertions location-assertions
+             :location-authorization-versions location-authorization-versions
              :existing-membership (suspended-membership)
              :existing-role-assignments []
              :generated-membership-id generated-membership-id
@@ -971,7 +974,7 @@
             {:now t1
              :user (active-user)
              :invitation-document (pending-invitation)
-             :location-assertions location-assertions
+             :location-authorization-versions location-authorization-versions
              :existing-membership (active-membership)
              :existing-role-assignments
              [(role-assignment)
@@ -984,7 +987,7 @@
             {:now t1
              :user (active-user {:email-verified? false})
              :invitation-document (pending-invitation)
-             :location-assertions location-assertions
+             :location-authorization-versions location-authorization-versions
              :existing-membership nil
              :existing-role-assignments []
              :generated-membership-id generated-membership-id
@@ -995,7 +998,7 @@
             {:now t8
              :user (active-user)
              :invitation-document (pending-invitation)
-             :location-assertions location-assertions
+             :location-authorization-versions location-authorization-versions
              :existing-membership nil
              :existing-role-assignments []
              :generated-membership-id generated-membership-id
@@ -1074,7 +1077,8 @@
     (is (= :committed
            (get-in result [:transaction :commit/status])))
     (is (= 1 (count (:commands @captured-plan))))
-    (is (= 5 (count (:assertions @captured-plan))))
+    (is (= 4 (count (:authorization-versions @captured-plan))))
+    (is (= 1 (count (:assertions @captured-plan))))
     (is (= #{:invitation}
            (topic-set (:changes @captured-plan))))))
 (deftest invite-helper-machine-authorization-test

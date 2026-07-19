@@ -1,44 +1,56 @@
 (ns net.humanhelp.site.model.request.fx
   "Effectful Request workflows.
 
-   This slice supports signed-in User creation/edit/cancel and helper
-   claim/unclaim/on-the-way/complete. Organization supplies authoritative
-   Location context, User supplies current authorization proof, Request supplies
-   pure commands, and model.fx commits the command plus semantic change.
+   Request FX coordinates the pure Request domain with the public Organization
+   and User model interfaces.
 
-   Capability-owned writes and supervisor overrides remain unsupported until
-   those models and policies exist."
+   Organization supplies one authoritative Location hierarchy context and the
+   authorization-version guards for every Organization document that established
+   it. User supplies current identity, Membership, and role facts. Request FX
+   rechecks the operation policy, constructs one Request command, and delegates
+   the final atomic transaction to the shared model.fx effect.
+
+   This namespace does not query XTDB directly, format transactions, execute
+   transactions, dispatch Gesso Live invalidations, or duplicate the shared
+   authorization-version machinery. Capability-authenticated Request writes and
+   supervisor overrides remain intentionally unsupported."
   (:require
    [gesso.fx :as fx]
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.fx :as model.fx]
    [net.humanhelp.site.model.organization.core :as organization]
-   [net.humanhelp.site.model.request.domain.core :as request]
+   [net.humanhelp.site.model.request.domain :as request]
    [net.humanhelp.site.model.request.graph :as request.graph]
    [net.humanhelp.site.model.user.core :as user]))
 
 ;; =============================================================================
-;; Workflow vocabulary
+;; Supported workflow policy
 ;; =============================================================================
 
-(def operation-order
-  [:create :edit :claim :unclaim :mark-on-the-way :complete :cancel])
-
-(def operations-set
-  (set operation-order))
-
 (def operational-location-operations
-  #{:create :edit :claim :mark-on-the-way :complete})
+  "Operations that require the Request Location hierarchy to remain
+   operational at commit time."
+  #{:create
+    :edit
+    :claim
+    :mark-on-the-way
+    :complete})
 
 (def owner-operations
-  #{:edit :cancel})
+  "Operations reserved for the authenticated User requestor."
+  #{:edit
+    :cancel})
 
-(def helper-operations
-  #{:claim :mark-on-the-way :complete})
+(def effective-helper-operations
+  "Operations requiring a currently effective helper role at the Location."
+  #{:claim
+    :mark-on-the-way
+    :complete})
 
-(defn operation?
-  [value]
-  (contains? operations-set value))
+(def assigned-helper-operations
+  "Cleanup operations requiring current assignment ownership but not a still
+   effective helper role."
+  #{:unclaim})
 
 ;; =============================================================================
 ;; Errors and machine plumbing
@@ -51,21 +63,30 @@
    (throw
     (ex-info
      message
-     (cond-> {:error/type error-type}
-       (some? details) (assoc :error/details details))))))
+     (cond->
+      {:error/type error-type}
+
+       (some? details)
+       (assoc :error/details details))))))
 
 (defn- require-uuid!
   [value error-type message details]
-  (when-not (uuid? value)
-    (fail! error-type message details))
+  (when-not
+   (uuid? value)
+    (fail!
+     error-type
+     message
+     details))
   value)
 
 (defn- require-operation!
   [operation]
-  (when-not (operation? operation)
-    (fail! :request.fx/unsupported-operation
-           "The requested Request operation is not supported."
-           {:operation operation}))
+  (when-not
+   (request/operation? operation)
+    (fail!
+     :request.fx/unsupported-operation
+     "The requested Request operation is not supported."
+     {:operation operation}))
   operation)
 
 (defn- require-authenticated-user-id!
@@ -74,306 +95,357 @@
    (:current-user/id ctx)
    :request/not-authenticated
    "A signed-in User is required."
-   {:current-user/id (:current-user/id ctx)}))
+   {:current-user/id
+    (:current-user/id ctx)}))
 
 (defn- command-document
   [command]
-  (model.common/command-document command))
+  (model.common/command-document
+   command))
 
 (defn- commit-state
-  [{:request.fx/keys [result transaction-plan]}]
-  {:request.fx/result result
-   :request.fx/transaction [model.fx/transact-effect transaction-plan]
-   :biff.fx/next :finish})
+  [{:request.fx/keys
+    [result
+     transaction-plan]}]
+  {:request.fx/result
+   result
+
+   :request.fx/transaction
+   [model.fx/transact-effect
+    transaction-plan]
+
+   :biff.fx/next
+   :finish})
 
 (defn- finish-state
-  [{:request.fx/keys [result transaction]}]
-  {:biff.fx/return (assoc result :transaction transaction)})
+  [{:request.fx/keys
+    [result
+     transaction]}]
+  {:biff.fx/return
+   (assoc
+    result
+    :transaction
+    transaction)})
 
 ;; =============================================================================
-;; Authorization-version guards
+;; Cross-model version metadata
 ;; =============================================================================
 
 (def user-version
   {:revision-key :user/revision
+   :created-at-key :user/created-at
    :updated-at-key :user/updated-at})
 
 (def membership-version
   {:revision-key :membership/revision
+   :created-at-key :membership/created-at
    :updated-at-key :membership/updated-at})
 
 (def role-assignment-version
   {:revision-key :role-assignment/revision
+   :created-at-key :role-assignment/created-at
    :updated-at-key :role-assignment/updated-at})
 
-(defn- public-expected-version
-  [document {:keys [revision-key updated-at-key]}]
-  {:model/id (:xt/id document)
-   :model/revision-key revision-key
-   :model/revision (get document revision-key)
-   :model/updated-at-key updated-at-key
-   :model/updated-at (get document updated-at-key)})
-
-(defn- document-guard
+(defn- document-authorization-version
   [entity-type version document]
-  {:model/entity-type entity-type
-   :model/expected (public-expected-version document version)})
-
-(defn- guard-target
-  [{:model/keys [entity-type expected]}]
-  [entity-type (:model/id expected)])
-
-(defn- valid-guard?
-  [{:model/keys [entity-type expected]}]
-  (and
-   (keyword? entity-type)
-   (map? expected)
-   (uuid? (:model/id expected))
-   (keyword? (:model/revision-key expected))
-   (nat-int? (:model/revision expected))
-   (keyword? (:model/updated-at-key expected))
-   (model.common/timestamp-value? (:model/updated-at expected))))
-
-(defn- require-guard!
-  [guard]
-  (when-not (and (map? guard) (valid-guard? guard))
-    (fail! :request.fx/invalid-authorization-version
-           "A Request authorization-version guard is invalid."
-           {:guard guard}))
-  guard)
-
-(defn- merge-guards!
-  [& guard-collections]
-  (reduce
-   (fn [result guard]
-     (let [guard (require-guard! guard)
-           target (guard-target guard)
-           existing (some #(when (= target (guard-target %)) %) result)]
-       (cond
-         (nil? existing)
-         (conj result guard)
-
-         (= (:model/expected existing) (:model/expected guard))
-         result
-
-         :else
-         (fail! :request.fx/conflicting-authorization-versions
-                "The same authorization document was loaded at conflicting versions."
-                {:target target
-                 :guards [existing guard]}))))
-   []
-   (mapcat
-    (fn [guards]
-      (when-not (sequential? guards)
-        (fail! :request.fx/invalid-authorization-versions
-               "Authorization versions must be sequential."
-               {:authorization-versions guards}))
-      guards)
-    guard-collections)))
-
-(defn- guard-assertions
-  [& guard-collections]
-  (mapv
-   (fn [{:model/keys [entity-type expected]}]
-     (model.fx/assert-document-current entity-type expected))
-   (apply merge-guards! guard-collections)))
+  (model.common/authorization-version
+   entity-type
+   document
+   version))
 
 ;; =============================================================================
-;; Organization Location proof
+;; Organization Location authorization
 ;; =============================================================================
+
+(defn- require-location-authorization-versions!
+  [authorization-versions location-id]
+  (when-not
+   (sequential? authorization-versions)
+    (fail!
+     :request.fx/invalid-location-authorization-versions
+     "Organization Location authorization versions must be sequential."
+     {:location/id location-id
+      :authorization-versions authorization-versions}))
+
+  (let [authorization-versions
+        (vec authorization-versions)
+
+        targets
+        (mapv
+         model.fx/authorization-version-target
+         authorization-versions)
+
+        location-target
+        [organization/location-entity-type
+         location-id]]
+
+    (when
+     (empty? authorization-versions)
+      (fail!
+       :request.fx/missing-location-authorization-versions
+       "Organization must supply authorization-version guards for the Request Location."
+       {:location/id location-id}))
+
+    (when-not
+     (some
+      #(= location-target %)
+      targets)
+      (fail!
+       :request.fx/missing-location-version
+       "Organization authorization guards must include the Request Location document."
+       {:location/id location-id
+        :authorization-targets targets}))
+
+    authorization-versions))
 
 (defn- require-location-authorization!
-  [ctx organization-id location-id require-operational?]
-  (require-uuid! organization-id
-                 :request/invalid-organization
-                 "A Request requires an Organization UUID."
-                 {:organization/id organization-id})
-  (require-uuid! location-id
-                 :request/invalid-location
-                 "A Request requires a Location UUID."
-                 {:location/id location-id})
+  "Loads and validates Organization's stable Location authorization contract.
 
-  (let [facts (organization/location-context
-               ctx
-               {:organization-id organization-id
-                :location-id location-id})]
-    (when-not (true? (:location/found? facts))
-      (fail! :location/not-found
-             "The Request Location no longer exists."
-             {:organization/id organization-id
-              :location/id location-id}))
+   This intentionally consumes organization/location-context rather than
+   rebuilding hierarchy facts from separate reads. Its scope context,
+   operational decision, and authorization-version guards therefore describe
+   one coherent Organization Graph result."
+  [ctx organization-id location-id require-operational?]
+  (require-uuid!
+   organization-id
+   :request/invalid-organization
+   "A Request requires an Organization UUID."
+   {:organization/id organization-id})
+
+  (require-uuid!
+   location-id
+   :request/invalid-location
+   "A Request requires a Location UUID."
+   {:location/id location-id})
+
+  (let [facts
+        (organization/location-context
+         ctx
+         {:organization-id organization-id
+          :location-id location-id})]
+
+    (when-not
+     (true?
+      (:location/found? facts))
+      (fail!
+       :location/not-found
+       "The Request Location no longer exists."
+       {:organization/id organization-id
+        :location/id location-id}))
 
     (let [location
-          (or (:location/doc facts)
-              (fail! :request.fx/incomplete-location-context
-                     "Organization reported a found Location without its document."
-                     {:location/id location-id}))
+          (:location/doc facts)
 
           scope-context
-          (or (:location/scope-context facts)
-              (fail! :request.fx/incomplete-location-context
-                     "Organization did not return the Location scope context."
-                     {:location/id location-id}))
+          (:location/scope-context facts)
 
-          guards
-          (or (:location/authorization-versions facts)
-              (fail! :request.fx/incomplete-location-context
-                     "Organization did not return Location authorization versions."
-                     {:location/id location-id}))
+          authorization-versions
+          (require-location-authorization-versions!
+           (:location/authorization-versions facts)
+           location-id)
 
           expected-scope
-          (organization/location-scope location-id)]
+          (organization/location-scope
+           location-id)]
 
-      (when-not (= location-id (:xt/id location))
-        (fail! :request.fx/inconsistent-location-context
-               "Organization returned a different Location document."
-               {:expected-location-id location-id
-                :actual-location-id (:xt/id location)}))
+      (when-not
+       (organization/location-document?
+        location)
+        (fail!
+         :request.fx/invalid-location-document
+         "Organization returned an invalid Location document."
+         {:organization/id organization-id
+          :location/id location-id
+          :location location}))
 
-      (when-not (= organization-id (:location/organization-id facts))
-        (fail! :location/organization-mismatch
-               "The Request Location belongs to another Organization."
-               {:expected-organization-id organization-id
-                :actual-organization-id (:location/organization-id facts)
-                :location/id location-id}))
+      (when-not
+       (=
+        location-id
+        (organization/location-id location))
+        (fail!
+         :request.fx/inconsistent-location-context
+         "Organization returned a different Location document."
+         {:expected-location-id location-id
+          :actual-location-id
+          (organization/location-id location)}))
 
-      (when-not (organization/scope-context? scope-context)
-        (fail! :request.fx/invalid-location-context
-               "Organization returned an invalid Location scope context."
-               {:scope-context scope-context}))
+      (when-not
+       (=
+        organization-id
+        (organization/location-organization-id location))
+        (fail!
+         :location/organization-mismatch
+         "The Request Location belongs to another Organization."
+         {:expected-organization-id organization-id
+          :actual-organization-id
+          (organization/location-organization-id location)
+          :location/id location-id}))
 
-      (when-not (= organization-id (:organization/id scope-context))
-        (fail! :request.fx/inconsistent-location-context
-               "The Location scope context belongs to another Organization."
-               {:expected-organization-id organization-id
-                :actual-organization-id (:organization/id scope-context)}))
+      (when-not
+       (organization/scope-context?
+        scope-context)
+        (fail!
+         :request.fx/invalid-location-context
+         "Organization returned an invalid Location scope context."
+         {:organization/id organization-id
+          :location/id location-id
+          :scope-context scope-context}))
 
-      (when-not (organization/same-scope?
-                 expected-scope
-                 (:scope/target scope-context))
-        (fail! :request.fx/inconsistent-location-context
-               "Organization returned a scope context for another Location."
-               {:expected-scope expected-scope
-                :actual-scope (:scope/target scope-context)}))
+      (when-not
+       (=
+        organization-id
+        (:organization/id scope-context))
+        (fail!
+         :request.fx/inconsistent-location-context
+         "The Location scope context belongs to another Organization."
+         {:expected-organization-id organization-id
+          :actual-organization-id
+          (:organization/id scope-context)
+          :location/id location-id}))
 
-      (when (and require-operational?
-                 (not (true? (:scope/operational? scope-context))))
-        (fail! :location/not-operational
-               "The Request Location is not operational."
-               {:organization/id organization-id
-                :location/id location-id}))
+      (when-not
+       (organization/same-scope?
+        expected-scope
+        (:scope/target scope-context))
+        (fail!
+         :request.fx/inconsistent-location-context
+         "Organization returned a scope context for another Location."
+         {:expected-scope expected-scope
+          :actual-scope
+          (:scope/target scope-context)}))
+
+      (when
+       (and
+        require-operational?
+        (not
+         (true?
+          (:scope/operational? scope-context))))
+        (fail!
+         :location/not-operational
+         "The Request Location is not operational."
+         {:organization/id organization-id
+          :location/id location-id}))
 
       {:location location
        :scope-context scope-context
-       :authorization-versions (merge-guards! guards)})))
+       :authorization-versions authorization-versions})))
 
 ;; =============================================================================
-;; User proof
+;; User authorization evidence
 ;; =============================================================================
-
-(defn- require-public-document!
-  [facts found-key document-key error-type message details]
-  (when-not (true? (get facts found-key))
-    (fail! error-type message details))
-  (or (get facts document-key)
-      (fail! :request.fx/incomplete-user-result
-             "User core reported a found document without returning it."
-             {:document-key document-key
-              :details details})))
-
-(defn- require-user-document!
-  [ctx user-id]
-  (require-public-document!
-   (user/user-facts ctx {:user-id user-id})
-   :user/found?
-   :user/doc
-   :user/not-found
-   "The signed-in User no longer exists."
-   {:user/id user-id}))
 
 (defn- require-active-user-document!
   [ctx user-id]
-  (let [document (require-user-document! ctx user-id)]
-    (when-not (user/user-active? document)
-      (fail! :user/not-active
-             "Only an active User may change a Request."
-             {:user/id user-id}))
+  (let [document
+        (user/require-user
+         ctx
+         {:user-id user-id})]
+    (when-not
+     (user/user-active?
+      document)
+      (fail!
+       :user/not-active
+       "Only an active User may change a Request."
+       {:user/id user-id}))
     document))
 
 (defn- active-user-authorization
   [ctx user-id]
-  (let [document (require-active-user-document! ctx user-id)]
+  (let [document
+        (require-active-user-document!
+         ctx
+         user-id)]
     {:user/id user-id
-     :user/authorization-versions
-     [(document-guard user/user-entity-type user-version document)]}))
+     :user/document document
+     :authorization-versions
+     [(document-authorization-version
+       user/user-entity-type
+       user-version
+       document)]}))
+
+(defn- distinct-documents-by-id
+  [documents]
+  (reduce
+   (fn [result document]
+     (if
+      (some
+       #(=
+         (:xt/id %)
+         (:xt/id document))
+       result)
+       result
+       (conj
+        result
+        document)))
+   []
+   documents))
 
 (defn- role-documents-at-scopes
   [ctx organization-id scopes]
-  (reduce
-   (fn [documents document]
-     (if (some #(= (:xt/id %) (:xt/id document)) documents)
-       documents
-       (conj documents document)))
-   []
+  (distinct-documents-by-id
    (mapcat
     (fn [scope]
-      (let [facts (user/active-role-assignments-at-scope
-                   ctx organization-id scope)
-            values (:user/active-role-assignments-at-scope facts)]
-        (when-not (sequential? values)
-          (fail! :request.fx/incomplete-helper-authorization
-                 "User core did not return active role assignments for a scope."
-                 {:organization/id organization-id
-                  :scope scope
-                  :facts facts}))
-        (map
-         (fn [value]
-           (or (:role-assignment/doc value)
-               (fail! :request.fx/incomplete-helper-authorization
-                      "User core returned a role assignment without its document."
-                      {:scope scope
-                       :value value})))
-         values)))
+      (user/active-role-assignment-documents-at-scope
+       ctx
+       organization-id
+       scope))
     scopes)))
 
 (defn- helper-authorization
+  "Reloads and rechecks every User document that establishes effective helper
+   authority. The compact access context supplies the current Membership ID;
+   the final authorization decision is recomputed from the loaded User,
+   Membership, and role-assignment documents that are guarded in the same
+   transaction."
   [ctx user-id scope-context]
-  (let [organization-id (:organization/id scope-context)
-        scopes (vec (:scope/applicable scope-context))
-        access-context
+  (let [organization-id
+        (:organization/id scope-context)
+
+        scopes
+        (vec
+         (:scope/applicable scope-context))
+
+        public-access
         (user/access-context
          ctx
          {:user-id user-id
           :scope-context scope-context})]
 
-    (when-not (true? (:user/helper? access-context))
-      (fail! :user/not-authorized
-             "Effective helper authority at this Location is required."
-             {:user/id user-id
-              :organization/id organization-id
-              :scope/target (:scope/target scope-context)}))
+    (when-not
+     (true?
+      (:user/helper? public-access))
+      (fail!
+       :user/not-authorized
+       "Effective helper authority at this Location is required."
+       {:user/id user-id
+        :organization/id organization-id
+        :scope/target
+        (:scope/target scope-context)}))
 
     (let [membership-id
-          (or (:membership/id access-context)
-              (fail! :request.fx/incomplete-helper-authorization
-                     "Helper access did not identify a Membership."
-                     {:user/id user-id
-                      :organization/id organization-id}))
+          (or
+           (:membership/id public-access)
+           (fail!
+            :request.fx/incomplete-helper-authorization
+            "Helper access did not identify a Membership."
+            {:user/id user-id
+             :organization/id organization-id}))
 
           user-document
-          (require-active-user-document! ctx user-id)
+          (require-active-user-document!
+           ctx
+           user-id)
 
           membership-document
-          (require-public-document!
-           (user/membership-facts ctx membership-id)
-           :membership/found?
-           :membership/doc
-           :membership/not-found
-           "The helper Membership no longer exists."
-           {:membership/id membership-id})
+          (user/require-membership
+           ctx
+           membership-id)
 
           assignments
-          (role-documents-at-scopes ctx organization-id scopes)
+          (role-documents-at-scopes
+           ctx
+           organization-id
+           scopes)
 
           helper-assignment
           (user/effective-assignment-for-role
@@ -383,26 +455,36 @@
            scopes
            :helper)]
 
-      (when-not helper-assignment
-        (fail! :user/not-authorized
-               "Helper authority changed while it was being loaded."
-               {:user/id user-id
-                :organization/id organization-id
-                :scope/target (:scope/target scope-context)}))
+      (when-not
+       helper-assignment
+        (fail!
+         :user/not-authorized
+         "Helper authority changed while it was being loaded."
+         {:user/id user-id
+          :organization/id organization-id
+          :scope/target
+          (:scope/target scope-context)}))
 
       {:user/id user-id
        :organization/id organization-id
-       :scope/target (:scope/target scope-context)
-       :user/authorization-versions
-       [(document-guard user/user-entity-type
-                        user-version
-                        user-document)
-        (document-guard user/membership-entity-type
-                        membership-version
-                        membership-document)
-        (document-guard user/role-assignment-entity-type
-                        role-assignment-version
-                        helper-assignment)]})))
+       :scope/target
+       (:scope/target scope-context)
+
+       :authorization-versions
+       [(document-authorization-version
+         user/user-entity-type
+         user-version
+         user-document)
+
+        (document-authorization-version
+         user/membership-entity-type
+         membership-version
+         membership-document)
+
+        (document-authorization-version
+         user/role-assignment-entity-type
+         role-assignment-version
+         helper-assignment)]})))
 
 ;; =============================================================================
 ;; Request actor policy
@@ -410,162 +492,343 @@
 
 (defn- owner-authorization
   [ctx request-document]
-  (let [user-id (require-authenticated-user-id! ctx)]
-    (when (request/capability-requestor?
-           (request/requestor request-document))
-      (fail! :request/capability-authorization-unavailable
-             "Capability-owned Request writes are not implemented yet."
-             {:request/id (request/request-id request-document)
-              :requestor (request/requestor request-document)}))
+  (let [user-id
+        (require-authenticated-user-id!
+         ctx)
 
-    (when-not (request/requested-by-user? request-document user-id)
-      (fail! :request/not-authorized
-             "Only the User who created this Request may perform this action."
-             {:request/id (request/request-id request-document)
-              :user/id user-id}))
+        requestor
+        (request/requestor
+         request-document)]
 
-    (active-user-authorization ctx user-id)))
+    (when
+     (request/capability-requestor?
+      requestor)
+      (fail!
+       :request/capability-authorization-unavailable
+       "Capability-owned Request writes are not implemented yet."
+       {:request/id
+        (request/request-id request-document)
+        :requestor requestor}))
+
+    (when-not
+     (request/requested-by-user?
+      request-document
+      user-id)
+      (fail!
+       :request/not-authorized
+       "Only the User who created this Request may perform this action."
+       {:request/id
+        (request/request-id request-document)
+        :user/id user-id}))
+
+    (active-user-authorization
+     ctx
+     user-id)))
 
 (defn- assigned-helper-authorization
   [ctx request-document]
-  (let [user-id (require-authenticated-user-id! ctx)]
-    (when-not (request/assigned-to? request-document user-id)
-      (fail! :request/not-authorized
-             "Only the currently assigned helper may perform this action."
-             {:request/id (request/request-id request-document)
-              :user/id user-id
-              :request/helper (request/helper-id request-document)}))
-    (active-user-authorization ctx user-id)))
+  (let [user-id
+        (require-authenticated-user-id!
+         ctx)]
+
+    (when-not
+     (request/assigned-to?
+      request-document
+      user-id)
+      (fail!
+       :request/not-authorized
+       "Only the currently assigned helper may perform this action."
+       {:request/id
+        (request/request-id request-document)
+        :user/id user-id
+        :request/helper
+        (request/helper-id request-document)}))
+
+    (active-user-authorization
+     ctx
+     user-id)))
 
 (defn- operation-authorization
   [ctx operation request-document scope-context]
   (cond
-    (contains? owner-operations operation)
-    (owner-authorization ctx request-document)
+    (contains?
+     owner-operations
+     operation)
+    (owner-authorization
+     ctx
+     request-document)
 
-    (= :unclaim operation)
-    (assigned-helper-authorization ctx request-document)
+    (contains?
+     assigned-helper-operations
+     operation)
+    (assigned-helper-authorization
+     ctx
+     request-document)
 
-    (contains? helper-operations operation)
+    (contains?
+     effective-helper-operations
+     operation)
     (helper-authorization
      ctx
      (require-authenticated-user-id! ctx)
      scope-context)
 
     :else
-    (fail! :request.fx/unsupported-operation
-           "The Request operation has no authorization policy."
-           {:operation operation})))
+    (fail!
+     :request.fx/unsupported-operation
+     "The Request operation has no authorization policy."
+     {:operation operation})))
 
 ;; =============================================================================
-;; Semantic changes and transaction planning
+;; Semantic changes
 ;; =============================================================================
 
 (defn- without-nils
-  [m]
-  (into {} (remove (comp nil? val)) m))
+  [value]
+  (into
+   {}
+   (remove
+    (comp nil? val))
+   value))
 
 (defn- change-entry
   [{:keys [topic id]}]
-  {:coalesce-key [topic id]})
+  {:coalesce-key
+   [topic id]})
 
 (defn- request-change
   [before after operation]
   (without-nils
-   {:topic :request
-    :id (request/request-id after)
-    :change/kind (if before :updated :created)
-    :request/operation operation
-    :request/id (request/request-id after)
-    :organization/id (request/organization-id after)
-    :location/id (request/location-id after)
-    :request/requestor-type (request/requestor-type after)
-    :request/requestor-id (request/requestor-id after)
-    :request/status (request/status after)
-    :request/previous-status (some-> before request/status)
-    :request/helper (request/helper-id after)
-    :request/previous-helper (some-> before request/helper-id)
-    :request/revision (request/revision after)}))
+   {:topic
+    :request
+
+    :id
+    (request/request-id after)
+
+    :change/kind
+    (if before
+      :updated
+      :created)
+
+    :request/operation
+    operation
+
+    :request/id
+    (request/request-id after)
+
+    :organization/id
+    (request/organization-id after)
+
+    :location/id
+    (request/location-id after)
+
+    :request/requestor-type
+    (request/requestor-type after)
+
+    :request/requestor-id
+    (request/requestor-id after)
+
+    :request/status
+    (request/status after)
+
+    :request/previous-status
+    (some->
+     before
+     request/status)
+
+    :request/helper
+    (request/helper-id after)
+
+    :request/previous-helper
+    (some->
+     before
+     request/helper-id)
+
+    :request/revision
+    (request/revision after)}))
 
 (defn- transaction-plan
-  [command authorization-versions change]
-  {:commands [command]
-   :assertions (guard-assertions authorization-versions)
-   :changes [change]
-   :entry-fn change-entry})
+  [fragment]
+  (assoc
+   (model.fx/transaction-fragment
+    fragment)
+   :entry-fn
+   change-entry))
+
+;; =============================================================================
+;; Pure transaction planning
+;; =============================================================================
 
 (defn- require-command!
   [command expected-operation]
-  (when-not (map? command)
-    (fail! :request.fx/invalid-command
-           "A Request workflow requires a model command."
-           {:command command}))
-  (when-not (= request/entity-type (:model/entity-type command))
-    (fail! :request.fx/invalid-command
-           "The command does not target a Request."
-           {:command command}))
-  (when-not (= expected-operation (:model/operation command))
-    (fail! :request.fx/invalid-command
-           "The command operation does not match the workflow."
-           {:expected-operation expected-operation
-            :actual-operation (:model/operation command)}))
+  (when-not
+   (map?
+    command)
+    (fail!
+     :request.fx/invalid-command
+     "A Request workflow requires a model command."
+     {:command command}))
+
+  (when-not
+   (=
+    request/request-entity-type
+    (:model/entity-type command))
+    (fail!
+     :request.fx/invalid-command
+     "The command does not target a Request."
+     {:command command}))
+
+  (when-not
+   (=
+    expected-operation
+    (:model/operation command))
+    (fail!
+     :request.fx/invalid-command
+     "The command operation does not match the workflow."
+     {:expected-operation expected-operation
+      :actual-operation
+      (:model/operation command)}))
+
   command)
 
 (defn plan-create-request
-  "Builds an atomic transaction plan for an already-authorized create command."
-  [{:keys [command authorization-versions]}]
-  (require-command! command :create)
-  (let [document (command-document command)]
-    (when-not (request/request-consistent? document)
-      (fail! :request.fx/invalid-command-document
-             "The create command contains an invalid Request."
-             {:request document}))
+  "Constructs one atomic Request-create plan from an already-authorized domain
+   command and the cross-model versions that established authorization."
+  [{:keys
+    [command
+     location-authorization-versions
+     actor-authorization-versions]}]
+  (require-command!
+   command
+   :create)
+
+  (let [document
+        (command-document
+         command)]
+
+    (when-not
+     (request/request-document-consistent?
+      document)
+      (fail!
+       :request.fx/invalid-command-document
+       "The create command contains an invalid Request."
+       {:request document}))
+
     {:transaction-plan
      (transaction-plan
-      command
-      authorization-versions
-      (request-change nil document :create))
+      (model.fx/compose-transaction-fragments
+       {:authorization-versions
+        location-authorization-versions}
+
+       {:authorization-versions
+        actor-authorization-versions}
+
+       {:commands
+        [command]
+
+        :changes
+        [(request-change
+          nil
+          document
+          :create)]}))
+
      :result
      {:request document}}))
 
 (defn plan-update-request
-  "Builds an atomic transaction plan for an already-authorized update command."
-  [{:keys [before command authorization-versions]}]
-  (when-not (request/request-consistent? before)
-    (fail! :request.fx/invalid-before
-           "The current Request is invalid."
-           {:request before}))
+  "Constructs one atomic Request-update plan from the current Request, an
+   already-authorized domain command, and all cross-model versions that
+   established authorization."
+  [{:keys
+    [before
+     command
+     location-authorization-versions
+     actor-authorization-versions]}]
+  (request/require-request-document
+   before)
 
-  (let [operation (:model/operation command)]
-    (require-operation! operation)
-    (when (= :create operation)
-      (fail! :request.fx/invalid-command
-             "An update workflow cannot execute a create command."
-             {:command command}))
-    (require-command! command operation)
+  (let [operation
+        (require-operation!
+         (:model/operation command))]
 
-    (let [after (command-document command)]
-      (when-not (request/request-consistent? after)
-        (fail! :request.fx/invalid-command-document
-               "The update command contains an invalid Request."
-               {:request after}))
-      (when-not (= (request/request-id before)
-                   (request/request-id after))
-        (fail! :request.fx/command-target-mismatch
-               "The Request command changed its target."
-               {:before-id (request/request-id before)
-                :after-id (request/request-id after)}))
+    (when
+     (=
+      :create
+      operation)
+      (fail!
+       :request.fx/invalid-command
+       "An update workflow cannot execute a create command."
+       {:command command}))
+
+    (require-command!
+     command
+     operation)
+
+    (let [after
+          (command-document
+           command)
+
+          expected-before
+          (model.common/expected-version
+           before
+           request/request-version)]
+
+      (when-not
+       (request/request-document-consistent?
+        after)
+        (fail!
+         :request.fx/invalid-command-document
+         "The update command contains an invalid Request."
+         {:request after}))
+
+      (when-not
+       (=
+        (request/request-id before)
+        (request/request-id after))
+        (fail!
+         :request.fx/command-target-mismatch
+         "The Request command changed its target."
+         {:before-id
+          (request/request-id before)
+          :after-id
+          (request/request-id after)}))
+
+      (when-not
+       (=
+        expected-before
+        (:model/expected command))
+        (fail!
+         :request.fx/stale-command-origin
+         "The Request command was not derived from the supplied current Request."
+         {:request/id
+          (request/request-id before)
+          :expected expected-before
+          :actual
+          (:model/expected command)}))
 
       {:transaction-plan
        (transaction-plan
-        command
-        authorization-versions
-        (request-change before after operation))
+        (model.fx/compose-transaction-fragments
+         {:authorization-versions
+          location-authorization-versions}
+
+         {:authorization-versions
+          actor-authorization-versions}
+
+         {:commands
+          [command]
+
+          :changes
+          [(request-change
+            before
+            after
+            operation)]}))
+
        :result
        {:request after}})))
 
 ;; =============================================================================
-;; Command selection and Request loading
+;; Domain-command selection
 ;; =============================================================================
 
 (defn- update-command
@@ -574,61 +837,97 @@
     :edit
     (request/edit-command
      request-document
-     {:content (:content input)
-      :now now})
+     {:content
+      (:content input)
+
+      :now
+      now})
 
     :claim
     (request/claim-command
      request-document
-     {:helper-id user-id
-      :now now})
+     {:helper-id
+      user-id
+
+      :now
+      now})
 
     :unclaim
     (request/unclaim-command
      request-document
-     {:helper-id user-id
-      :now now})
+     {:helper-id
+      user-id
+
+      :now
+      now})
 
     :mark-on-the-way
     (request/mark-on-the-way-command
      request-document
-     {:helper-id user-id
-      :now now})
+     {:helper-id
+      user-id
+
+      :now
+      now})
 
     :complete
     (request/complete-command
      request-document
-     {:helper-id user-id
-      :now now})
+     {:helper-id
+      user-id
+
+      :now
+      now})
 
     :cancel
     (request/cancel-command
      request-document
-     {:now now
-      :reason (:reason input)})
+     {:now
+      now
 
-    (fail! :request.fx/unsupported-operation
-           "The requested Request update is not supported."
-           {:operation operation})))
+      :reason
+      (:reason input)})
+
+    (fail!
+     :request.fx/unsupported-operation
+     "The requested Request update is not supported."
+     {:operation operation})))
 
 (defn- require-request-document!
   [facts request-id]
-  (when-not (true? (:request/found? facts))
-    (fail! :request/not-found
-           "The Request no longer exists."
-           {:request/id request-id}))
+  (when-not
+   (true?
+    (:request/found? facts))
+    (fail!
+     :request/not-found
+     "The Request no longer exists."
+     {:request/id request-id}))
 
   (let [document
-        (or (:request/doc facts)
-            (fail! :request.fx/incomplete-request-result
-                   "Request Graph reported a found Request without its document."
-                   {:request/id request-id}))]
-    (when-not (= request-id (request/request-id document))
-      (fail! :request.fx/inconsistent-request-result
-             "Request Graph returned a different Request."
-             {:expected-request-id request-id
-              :actual-request-id (request/request-id document)}))
-    (request/require-request-consistent document)))
+        (:request/doc facts)]
+
+    (when-not
+     document
+      (fail!
+       :request.fx/incomplete-request-result
+       "Request Graph reported a found Request without its document."
+       {:request/id request-id}))
+
+    (request/require-request-document
+     document)
+
+    (when-not
+     (=
+      request-id
+      (request/request-id document))
+      (fail!
+       :request.fx/inconsistent-request-result
+       "Request Graph returned a different Request."
+       {:expected-request-id request-id
+        :actual-request-id
+        (request/request-id document)}))
+
+    document))
 
 ;; =============================================================================
 ;; Create workflow
@@ -637,44 +936,78 @@
 (fx/defmachine create-request-machine
   :start
   (fn [ctx]
-    (let [input (:request.fx/input ctx)
-          now (:biff.fx/now ctx)
-          seed (:biff.fx/seed ctx)
-          user-id (require-authenticated-user-id! ctx)
-          organization-id (:organization-id input)
-          location-id (:location-id input)
-          [request-id _] (fx/uuid7 seed now)
+    (let [input
+          (:request.fx/input ctx)
 
-          location-auth
+          now
+          (:biff.fx/now ctx)
+
+          seed
+          (:biff.fx/seed ctx)
+
+          user-id
+          (require-authenticated-user-id!
+           ctx)
+
+          organization-id
+          (:organization-id input)
+
+          location-id
+          (:location-id input)
+
+          [request-id _]
+          (fx/uuid7
+           seed
+           now)
+
+          location-authorization
           (require-location-authorization!
-           ctx organization-id location-id true)
+           ctx
+           organization-id
+           location-id
+           true)
 
-          user-auth
-          (active-user-authorization ctx user-id)
+          actor-authorization
+          (active-user-authorization
+           ctx
+           user-id)
 
           command
           (request/create-command
            {:id request-id
             :organization-id organization-id
             :location-id location-id
-            :requestor (request/user-requestor user-id)
-            :content (:content input)
+            :requestor
+            (request/user-requestor
+             user-id)
+            :content
+            (:content input)
             :now now})
 
           plan
           (plan-create-request
            {:command command
-            :authorization-versions
-            (concat
-             (:authorization-versions location-auth)
-             (:user/authorization-versions user-auth))})]
+            :location-authorization-versions
+            (:authorization-versions
+             location-authorization)
+            :actor-authorization-versions
+            (:authorization-versions
+             actor-authorization)})]
 
-      {:request.fx/result (:result plan)
-       :request.fx/transaction-plan (:transaction-plan plan)
-       :biff.fx/next :commit}))
+      {:request.fx/result
+       (:result plan)
 
-  :commit commit-state
-  :finish finish-state)
+       :request.fx/transaction-plan
+       (:transaction-plan plan)
+
+       :biff.fx/next
+       :commit}))
+
+  :commit
+  commit-state
+
+  :finish
+  finish-state)
 
 (defn create-request
   "Creates one User-owned Request at an operational Location.
@@ -682,12 +1015,15 @@
    input:
      {:organization-id uuid
       :location-id     uuid
-      :content         {:title ...
-                        :details ...
-                        :location-detail ...}}"
+      :content         {:title string
+                        :details string-or-nil
+                        :location-detail string-or-nil}}"
   [ctx input]
   (create-request-machine
-   (assoc ctx :request.fx/input input)))
+   (assoc
+    ctx
+    :request.fx/input
+    input)))
 
 ;; =============================================================================
 ;; Existing-Request workflow
@@ -696,52 +1032,82 @@
 (fx/defmachine update-request-machine
   :start
   (fn [ctx]
-    (let [input (:request.fx/input ctx)
-          operation (require-operation! (:request.fx/operation ctx))
+    (let [input
+          (:request.fx/input ctx)
+
+          operation
+          (require-operation!
+           (:request.fx/operation ctx))
+
           request-id
           (require-uuid!
            (:request-id input)
            :request/invalid-request-id
            "A Request UUID is required."
-           {:request/id (:request-id input)})]
-      {:request.fx/base-ctx ctx
-       :request.fx/input input
-       :request.fx/operation operation
-       :request.fx/request-id request-id
+           {:request/id
+            (:request-id input)})]
+
+      {:request.fx/base-ctx
+       ctx
+
+       :request.fx/input
+       input
+
+       :request.fx/operation
+       operation
+
+       :request.fx/request-id
+       request-id
+
        :request.fx/request-facts
        [:biff.graph.fx/query
-        (request.graph/request-query-input {:request-id request-id})
+        (request.graph/request-query-input
+         {:request-id request-id})
         request.graph/request-command-query]
-       :biff.fx/next :plan}))
+
+       :biff.fx/next
+       :plan}))
 
   :plan
   (fn [{:request.fx/keys
-        [base-ctx input operation request-id request-facts]}]
+        [base-ctx
+         input
+         operation
+         request-id
+         request-facts]}]
     (let [document
-          (require-request-document! request-facts request-id)
+          (require-request-document!
+           request-facts
+           request-id)
 
           organization-id
-          (request/organization-id document)
+          (request/organization-id
+           document)
 
           location-id
-          (request/location-id document)
+          (request/location-id
+           document)
 
-          location-auth
+          location-authorization
           (require-location-authorization!
            base-ctx
            organization-id
            location-id
-           (contains? operational-location-operations operation))
+           (contains?
+            operational-location-operations
+            operation))
 
-          actor-auth
+          actor-authorization
           (operation-authorization
            base-ctx
            operation
            document
-           (:scope-context location-auth))
+           (:scope-context
+            location-authorization))
 
           user-id
-          (require-authenticated-user-id! base-ctx)
+          (require-authenticated-user-id!
+           base-ctx)
 
           command
           (update-command
@@ -755,81 +1121,150 @@
           (plan-update-request
            {:before document
             :command command
-            :authorization-versions
-            (concat
-             (:authorization-versions location-auth)
-             (:user/authorization-versions actor-auth))})]
+            :location-authorization-versions
+            (:authorization-versions
+             location-authorization)
+            :actor-authorization-versions
+            (:authorization-versions
+             actor-authorization)})]
 
-      {:request.fx/result (:result plan)
-       :request.fx/transaction-plan (:transaction-plan plan)
-       :biff.fx/next :commit}))
+      {:request.fx/result
+       (:result plan)
 
-  :commit commit-state
-  :finish finish-state)
+       :request.fx/transaction-plan
+       (:transaction-plan plan)
+
+       :biff.fx/next
+       :commit}))
+
+  :commit
+  commit-state
+
+  :finish
+  finish-state)
 
 (defn- run-update
   [ctx operation input]
   (update-request-machine
-   (assoc ctx
-          :request.fx/operation operation
-          :request.fx/input input)))
+   (assoc
+    ctx
+    :request.fx/operation
+    operation
+    :request.fx/input
+    input)))
 
 (defn edit-request
-  "Edits an active User-owned Request."
+  "Edits an active User-owned Request while its Location remains operational."
   [ctx input]
-  (run-update ctx :edit input))
+  (run-update
+   ctx
+   :edit
+   input))
 
 (defn claim-request
   "Claims an open Request for the signed-in effective helper."
   [ctx input]
-  (run-update ctx :claim input))
+  (run-update
+   ctx
+   :claim
+   input))
 
 (defn unclaim-request
   "Returns the signed-in helper's Request to open.
 
-   Location operational state and current helper role are not required for this
-   cleanup action; current assignment ownership and an active User are."
+   Location operational state and a still-current helper role are not required.
+   Current assignment ownership and an active User identity are required."
   [ctx input]
-  (run-update ctx :unclaim input))
+  (run-update
+   ctx
+   :unclaim
+   input))
 
 (defn mark-request-on-the-way
-  "Marks the signed-in helper's Request on the way."
+  "Marks the signed-in effective helper's assigned Request on the way."
   [ctx input]
-  (run-update ctx :mark-on-the-way input))
+  (run-update
+   ctx
+   :mark-on-the-way
+   input))
 
 (defn complete-request
-  "Completes the signed-in helper's claimed or on-the-way Request."
+  "Completes the signed-in effective helper's claimed or on-the-way Request."
   [ctx input]
-  (run-update ctx :complete input))
+  (run-update
+   ctx
+   :complete
+   input))
 
 (defn cancel-request
   "Cancels an active User-owned Request.
 
-   The Location must still exist and match the Request, but it need not remain
-   operational."
+   The Location must still exist and match the Request, but the hierarchy need
+   not remain operational."
   [ctx input]
-  (run-update ctx :cancel input))
+  (run-update
+   ctx
+   :cancel
+   input))
 
 (defn perform-action
   "Dispatches one supported existing-Request operation."
   [ctx operation input]
   (case operation
-    :edit (edit-request ctx input)
-    :claim (claim-request ctx input)
-    :unclaim (unclaim-request ctx input)
-    :mark-on-the-way (mark-request-on-the-way ctx input)
-    :complete (complete-request ctx input)
-    :cancel (cancel-request ctx input)
-    (fail! :request.fx/unsupported-operation
-           "The requested Request action is not supported."
-           {:operation operation})))
+    :edit
+    (edit-request
+     ctx
+     input)
 
-(def operation-handlers
+    :claim
+    (claim-request
+     ctx
+     input)
+
+    :unclaim
+    (unclaim-request
+     ctx
+     input)
+
+    :mark-on-the-way
+    (mark-request-on-the-way
+     ctx
+     input)
+
+    :complete
+    (complete-request
+     ctx
+     input)
+
+    :cancel
+    (cancel-request
+     ctx
+     input)
+
+    (fail!
+     :request.fx/unsupported-operation
+     "The requested Request action is not supported."
+     {:operation operation})))
+
+(def operations
   "Public Request operation registry."
-  {:request/create #'create-request
-   :request/edit #'edit-request
-   :request/claim #'claim-request
-   :request/unclaim #'unclaim-request
-   :request/mark-on-the-way #'mark-request-on-the-way
-   :request/complete #'complete-request
-   :request/cancel #'cancel-request})
+  {:request/create
+   #'create-request
+
+   :request/edit
+   #'edit-request
+
+   :request/claim
+   #'claim-request
+
+   :request/unclaim
+   #'unclaim-request
+
+   :request/mark-on-the-way
+   #'mark-request-on-the-way
+
+   :request/complete
+   #'complete-request
+
+   :request/cancel
+   #'cancel-request})

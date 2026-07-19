@@ -8,22 +8,23 @@
    This facade exposes:
 
    - the Request model's Biff module contribution;
-   - stable Graph query contracts and a named Request read;
-   - the currently supported effectful Request operations;
-   - selected pure Requestor, content, identity, lifecycle, and assignment
-     facts useful to other models, handlers, and views.
+   - stable Request-owned Graph query contracts;
+   - named reads for one Request and one Location's Request collection;
+   - the supported effectful Request operations;
+   - selected pure Request values and predicates needed by handlers, views, and
+     other models.
 
-   It deliberately does not expose domain constructors, model command
-   constructors, lifecycle mutation functions, guarded revision machinery,
-   Graph resolver implementations, authorization-version construction, or FX
-   transaction planners.
+   It deliberately does not expose Request constructors, command constructors,
+   lifecycle mutation functions, guarded revision machinery, Graph resolver
+   implementations, raw XTDB2 query construction, authorization proofs,
+   workflow machines, or transaction planners.
 
-   Capability-owned Request writes and supervisor override operations are not
-   public because the current Request FX slice does not implement their
-   authentication and policy."
+   net.humanhelp.site.model.fx/module must be installed separately, exactly once
+   for the application. Request FX uses that shared transaction handler and
+   publishes committed semantic changes through Gesso Live."
   (:require
    [gesso.graph :as graph]
-   [net.humanhelp.site.model.request.domain.core :as request]
+   [net.humanhelp.site.model.request.domain :as domain]
    [net.humanhelp.site.model.request.fx :as request.fx]
    [net.humanhelp.site.model.request.graph :as request.graph]
    [net.humanhelp.site.model.request.schema :as request.schema]))
@@ -40,9 +41,6 @@
   "Gesso Graph resolvers contributed by the Request model."
   request.graph/resolvers)
 
-;; net.humanhelp.site.model.fx/module must be installed separately, exactly once
-;; for the application. Request FX uses that shared transaction handler and does
-;; not contribute another transaction implementation.
 (def module
   "Biff module contribution for the Request model."
   {:schema schema
@@ -53,35 +51,28 @@
 ;; =============================================================================
 
 (def request-document-query
+  "Graph shape for one complete persisted Request document."
   request.graph/request-document-query)
 
-(def request-command-query
-  "Loads one Request lookup result with :request/found?, optional
-   :request/doc, and optional :request/expected-version.
-
-   This contract is useful to another model that must compose current Request
-   state into one larger authorized operation."
-  request.graph/request-command-query)
-
 (def request-query
-  "Loads one Request lookup result with the persisted document, Request-owned
-   projected fields, lifecycle facts, assignment facts, and expected-version
-   metadata.
-
-   User access, Organization hierarchy, and current-actor permissions are
-   intentionally absent."
+  "Graph query for one Request with all Request-owned projections and lifecycle
+   facts."
   request.graph/request-facts-query)
 
+(def location-requests-query
+  "Graph query for the canonical Request collection at one Location."
+  request.graph/location-requests-query)
+
 ;; =============================================================================
-;; Named Request reads
+;; Named reads
 ;; =============================================================================
 
 (defn request-facts
-  "Loads one Request by UUID.
+  "Returns Request-owned facts for request-id.
 
-   The result follows request-query and contains :request/found? plus optional
-   Request-owned facts. This read does not establish current-actor authority,
-   capability ownership, helper eligibility, or Location operational state."
+   A missing Request returns {:request/found? false}. This read does not load
+   Organization hierarchy, Location operational state, User profiles, or actor
+   authorization."
   [ctx request-id]
   (graph/query
    ctx
@@ -89,120 +80,161 @@
     {:request-id request-id})
    request-query))
 
-(defn request-command-facts
-  "Loads the minimal current Request facts needed to compose another model
-   operation.
-
-   Prefer request-facts for handlers and views."
+(defn request-document
+  "Returns the complete persisted Request document for request-id, or nil when
+   no current Request exists."
   [ctx request-id]
+  (let [facts
+        (request-facts
+         ctx
+         request-id)]
+    (when
+     (true?
+      (:request/found? facts))
+      (:request/doc facts))))
+
+(defn location-requests
+  "Returns the canonical Request collection for one Organization Location.
+
+   input is:
+
+     {:organization-id  uuid
+      :location-id      uuid
+      :include-terminal? boolean}
+
+   :include-terminal? defaults to false. Results are newest first with Request
+   ID as a deterministic tiebreaker.
+
+   This is a Request-owned collection read. Callers that need Location
+   hierarchy, operational state, helper display data, or scoped access must
+   compose those through the public Organization and User model facades."
+  [ctx input]
   (graph/query
    ctx
-   (request.graph/request-query-input
-    {:request-id request-id})
-   request-command-query))
+   (request.graph/location-requests-query-input
+    input)
+   location-requests-query))
+
+(defn location-request-items
+  "Returns the vector under :request/location-requests from location-requests.
+
+   This convenience keeps consumers from depending on the Graph envelope while
+   preserving each item as a Request facts map."
+  [ctx input]
+  (or
+   (:request/location-requests
+    (location-requests
+     ctx
+     input))
+   []))
 
 ;; =============================================================================
-;; Supported Request operations
+;; Effectful operations
 ;; =============================================================================
 
 (defn create-request
-  "Creates one User-owned Request at an operational Location.
-
-   input:
-
-     {:organization-id organization-id
-      :location-id     location-id
-      :content         {:title title
-                        :details optional-details
-                        :location-detail optional-within-location-detail}}
-
-   The authenticated User must be active. Organization hierarchy and Location
-   operational state are reloaded and guarded in the transaction."
+  "Creates a User-owned Request at an operational Organization Location."
   [ctx input]
   (request.fx/create-request
    ctx
    input))
 
 (defn edit-request
-  "Edits the content of an active User-owned Request.
-
-   input:
-
-     {:request-id request-id
-      :content    {:title title
-                   :details optional-details
-                   :location-detail optional-within-location-detail}}"
+  "Edits an active Request owned by the signed-in User."
   [ctx input]
   (request.fx/edit-request
    ctx
    input))
 
 (defn claim-request
-  "Claims one open Request for the authenticated effective helper.
-
-   input:
-
-     {:request-id request-id}"
+  "Claims an open Request for the signed-in effective Location helper."
   [ctx input]
   (request.fx/claim-request
    ctx
    input))
 
 (defn unclaim-request
-  "Returns the authenticated helper's claimed Request to open.
-
-   Current assignment ownership and active User identity are required. The
-   Location need not remain operational and the helper role may already have
-   been revoked.
-
-   input:
-
-     {:request-id request-id}"
+  "Returns the signed-in assigned helper's claimed Request to open."
   [ctx input]
   (request.fx/unclaim-request
    ctx
    input))
 
 (defn mark-request-on-the-way
-  "Marks the authenticated helper's claimed Request on the way.
-
-   input:
-
-     {:request-id request-id}"
+  "Marks the signed-in effective helper's assigned Request on the way."
   [ctx input]
   (request.fx/mark-request-on-the-way
    ctx
    input))
 
 (defn complete-request
-  "Completes the authenticated helper's claimed or on-the-way Request.
-
-   input:
-
-     {:request-id request-id}"
+  "Completes the signed-in effective helper's claimed or on-the-way Request."
   [ctx input]
   (request.fx/complete-request
    ctx
    input))
 
 (defn cancel-request
-  "Cancels an active User-owned Request.
-
-   The Location must still exist and belong to the stored Organization, but it
-   need not remain operational.
-
-   input:
-
-     {:request-id request-id
-      :reason     optional-qualified-keyword}"
+  "Cancels an active Request owned by the signed-in User."
   [ctx input]
   (request.fx/cancel-request
    ctx
    input))
 
+(defn perform-action
+  "Dispatches one supported existing-Request operation.
+
+   operation is one of:
+
+     :edit
+     :claim
+     :unclaim
+     :mark-on-the-way
+     :complete
+     :cancel
+
+   Request creation remains explicit through create-request."
+  [ctx operation input]
+  (case operation
+    :edit
+    (edit-request
+     ctx
+     input)
+
+    :claim
+    (claim-request
+     ctx
+     input)
+
+    :unclaim
+    (unclaim-request
+     ctx
+     input)
+
+    :mark-on-the-way
+    (mark-request-on-the-way
+     ctx
+     input)
+
+    :complete
+    (complete-request
+     ctx
+     input)
+
+    :cancel
+    (cancel-request
+     ctx
+     input)
+
+    (throw
+     (ex-info
+      "The requested Request action is not supported."
+      {:error/type :request/unsupported-operation
+       :error/details
+       {:operation operation}}))))
+
 (def operations
-  "Public Request operation registry. Entries point at this facade rather than
-   the internal FX namespace."
+  "Public Request operation registry."
   {:request/create
    #'create-request
 
@@ -225,353 +257,167 @@
    #'cancel-request})
 
 ;; =============================================================================
-;; Shared Request values
+;; Stable Request vocabulary
 ;; =============================================================================
 
 (def request-entity-type
-  request/entity-type)
-
-(def operation-order
-  request/operation-order)
-
-(def operations-set
-  request/operations)
-
-(def requestor-types
-  request/requestor-types)
-
-(def status-order
-  request/status-order)
+  domain/request-entity-type)
 
 (def statuses
-  request/statuses)
+  domain/statuses)
 
 (def active-statuses
-  request/active-statuses)
-
-(def assigned-statuses
-  request/assigned-statuses)
+  domain/active-statuses)
 
 (def terminal-statuses
-  request/terminal-statuses)
+  domain/terminal-statuses)
+
+(def operations-set
+  domain/operations)
+
+;; =============================================================================
+;; Requestor values
+;; =============================================================================
+
+(def requestor-reference?
+  domain/requestor-reference?)
+
+(def user-requestor
+  domain/user-requestor)
+
+(def capability-requestor
+  domain/capability-requestor)
+
+(def user-requestor?
+  domain/user-requestor?)
+
+(def capability-requestor?
+  domain/capability-requestor?)
+
+;; =============================================================================
+;; Content values
+;; =============================================================================
 
 (def title-max
-  request/title-max)
+  domain/title-max)
 
 (def details-max
-  request/details-max)
+  domain/details-max)
 
 (def location-detail-max
-  request/location-detail-max)
+  domain/location-detail-max)
 
-(defn operation?
-  [value]
-  (request/operation?
-   value))
+(def normalize-content
+  domain/normalize-content)
 
-;; =============================================================================
-;; Requestor values and facts
-;; =============================================================================
+(def content?
+  domain/content?)
 
-(defn requestor-type?
-  [value]
-  (request/requestor-type?
-   value))
+(def content-errors
+  domain/content-errors)
 
-(defn requestor-reference?
-  [value]
-  (request/requestor-reference?
-   value))
-
-(defn user-requestor
-  [user-id]
-  (request/user-requestor
-   user-id))
-
-(defn capability-requestor
-  [capability-id]
-  (request/capability-requestor
-   capability-id))
-
-(defn user-requestor?
-  [value]
-  (request/user-requestor?
-   value))
-
-(defn capability-requestor?
-  [value]
-  (request/capability-requestor?
-   value))
-
-(defn requestor
-  [request-document]
-  (request/requestor
-   request-document))
-
-(defn requestor-type
-  [request-document]
-  (request/requestor-type
-   request-document))
-
-(defn requestor-id
-  [request-document]
-  (request/requestor-id
-   request-document))
-
-(defn requested-by-user?
-  [request-document user-id]
-  (request/requested-by-user?
-   request-document
-   user-id))
-
-(defn requested-by-capability?
-  [request-document capability-id]
-  (request/requested-by-capability?
-   request-document
-   capability-id))
-
-(defn requested-by?
-  [request-document requestor-reference]
-  (request/requested-by?
-   request-document
-   requestor-reference))
-
-(defn controlled-by?
-  "Returns true when supplied identity values equal the Request's stored
-   requestor.
-
-   This is not authentication or authorization. Callers must independently
-   establish ownership of the User identity or Request capability."
-  [request-document identity]
-  (request/controlled-by?
-   request-document
-   identity))
+(def content
+  domain/content)
 
 ;; =============================================================================
-;; Request content values and facts
+;; Pure Request projections and predicates
 ;; =============================================================================
 
-(defn normalize-content
-  [value]
-  (request/normalize-content
-   value))
+(def request-id
+  domain/request-id)
 
-(defn title?
-  [value]
-  (request/title?
-   value))
+(def organization-id
+  domain/organization-id)
 
-(defn details?
-  [value]
-  (request/details?
-   value))
+(def location-id
+  domain/location-id)
 
-(defn location-detail?
-  [value]
-  (request/location-detail?
-   value))
+(def requestor
+  domain/requestor)
 
-(defn content?
-  [value]
-  (request/content?
-   value))
+(def status
+  domain/status)
 
-(defn content
-  [request-document]
-  (request/content
-   request-document))
+(def helper-id
+  domain/helper-id)
 
-(defn content-errors
-  [value]
-  (request/content-errors
-   value))
+(def revision
+  domain/revision)
 
-(defn valid-content?
-  [value]
-  (request/valid-content?
-   value))
+(def created-at
+  domain/created-at)
 
-(defn same-content?
-  [request-document value]
-  (request/same-content?
-   request-document
-   value))
+(def updated-at
+  domain/updated-at)
 
-;; =============================================================================
-;; Request document identity and ownership
-;; =============================================================================
+(def belongs-to-organization?
+  domain/belongs-to-organization?)
 
-(defn request-document?
-  [request-document]
-  (request/request-consistent?
-   request-document))
+(def at-location?
+  domain/at-location?)
 
-(defn request-id
-  [request-document]
-  (request/request-id
-   request-document))
+(def belongs-to-location?
+  domain/belongs-to-location?)
 
-(defn organization-id
-  [request-document]
-  (request/organization-id
-   request-document))
+(def requested-by?
+  domain/requested-by?)
 
-(defn location-id
-  [request-document]
-  (request/location-id
-   request-document))
+(def requested-by-user?
+  domain/requested-by-user?)
 
-(defn revision
-  [request-document]
-  (request/revision
-   request-document))
+(def requested-by-capability?
+  domain/requested-by-capability?)
 
-(defn created-at
-  [request-document]
-  (request/created-at
-   request-document))
+(def controlled-by?
+  domain/controlled-by?)
 
-(defn updated-at
-  [request-document]
-  (request/updated-at
-   request-document))
+(def open?
+  domain/open?)
 
-(defn belongs-to-organization?
-  [request-document organization-id]
-  (request/belongs-to-organization?
-   request-document
-   organization-id))
+(def claimed?
+  domain/claimed?)
 
-(defn at-location?
-  [request-document location-id]
-  (request/at-location?
-   request-document
-   location-id))
+(def on-the-way?
+  domain/on-the-way?)
 
-(defn belongs-to-location?
-  [request-document organization-id location-id]
-  (request/belongs-to-location?
-   request-document
-   organization-id
-   location-id))
+(def done?
+  domain/done?)
 
-;; =============================================================================
-;; Lifecycle values and facts
-;; =============================================================================
+(def cancelled?
+  domain/cancelled?)
 
-(defn status?
-  [value]
-  (request/status?
-   value))
+(def active?
+  domain/active?)
 
-(defn status
-  [request-document]
-  (request/status
-   request-document))
+(def terminal?
+  domain/terminal?)
 
-(defn open?
-  [request-document]
-  (request/open?
-   request-document))
+(def editable?
+  domain/editable?)
 
-(defn claimed?
-  [request-document]
-  (request/claimed?
-   request-document))
+(def has-helper?
+  domain/has-helper?)
 
-(defn on-the-way?
-  [request-document]
-  (request/on-the-way?
-   request-document))
+(def actively-assigned?
+  domain/actively-assigned?)
 
-(defn done?
-  [request-document]
-  (request/done?
-   request-document))
+(def assigned-to?
+  domain/assigned-to?)
 
-(defn cancelled?
-  [request-document]
-  (request/cancelled?
-   request-document))
+(def claimable?
+  domain/claimable?)
 
-(defn active?
-  [request-document]
-  (request/active?
-   request-document))
+(def unclaimable?
+  domain/unclaimable?)
 
-(defn terminal?
-  [request-document]
-  (request/terminal?
-   request-document))
+(def markable-on-the-way?
+  domain/markable-on-the-way?)
 
-(defn next-status
-  [request-document operation]
-  (request/next-status
-   request-document
-   operation))
+(def completable?
+  domain/completable?)
 
-(defn transition-allowed?
-  [request-document operation]
-  (request/transition-allowed?
-   request-document
-   operation))
+(def cancellable?
+  domain/cancellable?)
 
-(defn editable?
-  [request-document]
-  (request/editable?
-   request-document))
-
-(defn claimable?
-  [request-document]
-  (request/claimable?
-   request-document))
-
-(defn unclaimable?
-  [request-document]
-  (request/unclaimable?
-   request-document))
-
-(defn markable-on-the-way?
-  [request-document]
-  (request/markable-on-the-way?
-   request-document))
-
-(defn completable?
-  [request-document]
-  (request/completable?
-   request-document))
-
-(defn cancellable?
-  [request-document]
-  (request/cancellable?
-   request-document))
-
-;; =============================================================================
-;; Helper-assignment facts
-;; =============================================================================
-
-(defn helper-id
-  "Returns the helper associated with the active or terminal Request."
-  [request-document]
-  (request/helper-id
-   request-document))
-
-(defn has-helper?
-  "Returns true when the Request records a helper, including after completion
-   or cancellation."
-  [request-document]
-  (request/has-helper?
-   request-document))
-
-(defn actively-assigned?
-  "Returns true only while a helper is actively responsible for a claimed or
-   on-the-way Request."
-  [request-document]
-  (request/actively-assigned?
-   request-document))
-
-(defn assigned-to?
-  [request-document user-id]
-  (request/assigned-to?
-   request-document
-   user-id))
+(def request-document?
+  domain/request-document-consistent?)
