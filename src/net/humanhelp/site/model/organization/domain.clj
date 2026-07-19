@@ -9,11 +9,8 @@
        -> locations
 
    Persisted parent relationships use explicit parent-type and parent-id fields
-   so they remain straightforward to query. Public scope values use the stable
-   structural shape:
-
-     {:scope/type :organization|:organization-group|:location
-      :scope/id   uuid}
+   so they remain straightforward to query. Structural authorization-scope
+   values are shared with User through model.authorization-scope.
 
    This namespace owns document invariants, lifecycle transitions, hierarchy
    composition from already-loaded documents, and model command construction.
@@ -24,7 +21,10 @@
    Graph and FX are responsible for loading complete ancestry, preventing
    duplicate entities, proving parent ownership, checking cycle freedom before
    moves, and composing cross-model consequences atomically."
-  (:require [clojure.string :as str] [net.humanhelp.site.model.common :as model.common]))
+  (:require
+   [clojure.string :as str]
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
+   [net.humanhelp.site.model.common :as model.common]))
 
 ;; =============================================================================
 ;; Entity identity and versioning
@@ -53,9 +53,14 @@
 
 (def statuses #{:active :suspended :closed})
 
-(def scope-types #{:organization :organization-group :location})
+;; Structural authorization-scope values are shared with User through
+;; model.authorization-scope. These aliases preserve Organization's existing
+;; public domain vocabulary while keeping one implementation.
+(def scope-types
+  authorization-scope/scope-types)
 
-(def parent-scope-types #{:organization :organization-group})
+(def parent-scope-types
+  authorization-scope/parent-scope-types)
 
 (def allowed-transitions {[:active :suspend] :suspended [:suspended :reactivate] :active
    [:active :close] :closed [:suspended :close] :closed})
@@ -78,37 +83,41 @@
 (defn can-transition-status? [status operation] (some? (next-status status operation)))
 
 ;; =============================================================================
-;; Scope values
+;; Authorization-scope values
 ;; =============================================================================
 
-(defn scope-type? [value] (contains? scope-types value))
+(def scope-type?
+  authorization-scope/scope-type?)
 
-(defn parent-scope-type? [value] (contains? parent-scope-types value))
+(def parent-scope-type?
+  authorization-scope/parent-scope-type?)
 
-(defn scope-reference?
-  "Returns true when value is the structural reference to one Organization
-   scope. Existence and ownership require loaded Organization data."
-  [value] (and (map? value) (scope-type? (:scope/type value)) (uuid? (:scope/id value))))
+(def scope-reference?
+  authorization-scope/scope-reference?)
 
-(defn parent-scope-reference? [value] (and (scope-reference? value) (parent-scope-type?
-    (:scope/type value))))
+(def parent-scope-reference?
+  authorization-scope/parent-scope-reference?)
 
-(defn organization-scope [organization-id] {:scope/type :organization :scope/id organization-id})
+(def organization-scope
+  authorization-scope/organization-scope)
 
-(defn organization-group-scope [organization-group-id] {:scope/type :organization-group
-   :scope/id organization-group-id})
+(def organization-group-scope
+  authorization-scope/organization-group-scope)
 
-(defn location-scope [location-id] {:scope/type :location :scope/id location-id})
+(def location-scope
+  authorization-scope/location-scope)
 
-(defn organization-scope? [scope] (and (scope-reference? scope) (= :organization
-      (:scope/type scope))))
+(def organization-scope?
+  authorization-scope/organization-scope?)
 
-(defn organization-group-scope? [scope] (and (scope-reference? scope) (= :organization-group
-      (:scope/type scope))))
+(def organization-group-scope?
+  authorization-scope/organization-group-scope?)
 
-(defn location-scope? [scope] (and (scope-reference? scope) (= :location (:scope/type scope))))
+(def location-scope?
+  authorization-scope/location-scope?)
 
-(defn same-scope? [a b] (and (scope-reference? a) (scope-reference? b) (= a b)))
+(def same-scope?
+  authorization-scope/same-scope?)
 
 ;; =============================================================================
 ;; Organization facts
@@ -1023,19 +1032,14 @@
    (every? organization-group-active? groups)))
 
 (defn scope-context?
-  "Returns true for the compact Organization-owned scope context consumed by
-   User and Request.
+  "Returns true when value satisfies the shared structural authorization-scope
+   context contract.
 
-   Applicable scopes are ordered target-first and organization-last."
-  [value] (let [organization-id (:organization/id value)
-
-        target (:scope/target value)
-
-        applicable (:scope/applicable value)] (boolean (and (map? value) (uuid? organization-id)
-      (scope-reference? target) (vector? applicable) (seq applicable) (= target (first applicable))
-      (= (organization-scope organization-id) (peek applicable)) (= (count applicable)
-         (count (set applicable))) (every? scope-reference? applicable) (boolean?
-       (:scope/operational? value))))))
+   Organization remains responsible for constructing the authoritative
+   hierarchy chain and operational value."
+  [value]
+  (authorization-scope/scope-context?
+   value))
 
 (defn organization-scope-context [organization] (ensure-organization-document! organization)
 

@@ -4,11 +4,15 @@
    An invitation addresses exactly one phone number or email address and offers
    one role at one organization scope. Only the bearer-token hash is persisted.
 
-   Acceptance records the user, membership, and role-assignment IDs produced by
-   the surrounding atomic workflow. This namespace does not create those
-   documents, query XTDB, compare raw tokens, deliver invitations, establish
-   recipient ownership, validate organization hierarchy, or authorize actors."
+   Acceptance records the User, Membership, and role-assignment IDs produced by
+   the surrounding atomic workflow. Structural authorization-scope values come
+   from model.authorization-scope.
+
+   This namespace does not create those documents, query XTDB, compare raw
+   tokens, deliver invitations, establish recipient ownership, validate
+   Organization hierarchy, or authorize actors."
   (:require
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.user.domain.common :as user.common]))
 
@@ -82,7 +86,7 @@
   (= expected-role (offered-role invitation)))
 
 (defn at-scope? [invitation expected-scope]
-  (user.common/same-scope? (scope invitation) expected-scope))
+  (authorization-scope/same-scope? (scope invitation) expected-scope))
 
 (defn recipient-type [invitation]
   (cond
@@ -154,9 +158,9 @@
 (defn- scope-consistent? [invitation]
   (let [invitation-scope (scope invitation)]
     (and
-     (user.common/scope-reference? invitation-scope)
+     (authorization-scope/scope-reference? invitation-scope)
      (or
-      (not (user.common/organization-scope? invitation-scope))
+      (not (authorization-scope/organization-scope? invitation-scope))
       (= (:scope/id invitation-scope)
          (:invitation/organization invitation))))))
 
@@ -295,12 +299,12 @@
     (not (user.common/role? role))
     (assoc :role "The role must be helper, supervisor, or admin.")
 
-    (not (user.common/scope-reference? scope))
+    (not (authorization-scope/scope-reference? scope))
     (assoc :scope
            "An organization, organization-group, or location scope is required.")
 
     (and
-     (user.common/organization-scope? scope)
+     (authorization-scope/organization-scope? scope)
      (not= organization-id (:scope/id scope)))
     (assoc :scope
            "An organization-wide invitation must reference its organization.")

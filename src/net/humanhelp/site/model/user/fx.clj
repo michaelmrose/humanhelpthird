@@ -7,23 +7,23 @@
    - accept a location-scoped helper invitation.
 
    The state machines load facts and authorize the requested business action.
-   Pure planning functions then construct domain commands, generic
-   authorization-version guards, model-specific uniqueness assertions,
-   semantic Gesso Live changes, and the application result.
+   Pure planning functions construct and compose transaction fragments
+   containing domain commands, generic authorization-version guards,
+   model-specific uniqueness assertions, and semantic Gesso Live changes.
 
    All transaction preparation and execution is delegated to
    net.humanhelp.site.model.fx. User FX decides which documents established an
-   authorization decision, while model.fx validates, normalizes, and enforces
-   those versions atomically. This namespace contains no XTDB execution, Biff
-   transaction formatting, SQL count construction, or Live dispatcher
-   implementation."
+   authorization decision, while model.fx validates, normalizes, composes, and
+   enforces those versions atomically. This namespace contains no XTDB
+   execution, Biff transaction formatting, SQL count construction, or Live
+   dispatcher implementation."
   (:require
    [clojure.string :as str]
    [gesso.fx :as fx]
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.fx :as model.fx]
    [net.humanhelp.site.model.user.domain.access :as access]
-   [net.humanhelp.site.model.user.domain.common :as user.common]
    [net.humanhelp.site.model.user.domain.identity :as identity]
    [net.humanhelp.site.model.user.domain.invitation :as invitation]
    [net.humanhelp.site.model.user.domain.membership :as membership]
@@ -66,7 +66,7 @@
    Each guard has this generic shape:
 
      {:model/entity-type keyword
-      :model/expected    model.common/expected-version-map}
+      :model/expected    canonical expected-version metadata}
 
    At least one guard must cover the requested location document. Organization
    owns the persistence details and must include relationship/group documents
@@ -125,15 +125,22 @@
 
 (defn- document-authorization-version
   [entity-type version document]
-  {:model/entity-type entity-type
-   :model/expected
-   (model.common/expected-version
-    document
-    version)})
+  (model.common/authorization-version
+   entity-type
+   document
+   version))
 
 (defn- change-entry
   [{:keys [topic id]}]
   {:coalesce-key [topic id]})
+
+(defn- transaction-plan
+  [fragment]
+  (assoc
+   (model.fx/transaction-fragment
+    fragment)
+   :entry-fn
+   change-entry))
 
 ;; =============================================================================
 ;; Secure invitation tokens
@@ -187,11 +194,13 @@
 
 (defn- location-scope
   [location-id]
-  (role/location-scope location-id))
+  (authorization-scope/location-scope
+   location-id))
 
 (defn- organization-scope
   [organization-id]
-  (role/organization-scope organization-id))
+  (authorization-scope/organization-scope
+   organization-id))
 
 (defn- require-location-authorization-versions!
   [authorization-versions location-id]
@@ -240,7 +249,7 @@
          "The location no longer exists.")
 
         scopes
-        (vec (:location/applicable-scopes facts))
+        (:location/applicable-scopes facts)
 
         authorization-versions
         (require-location-authorization-versions!
@@ -271,12 +280,12 @@
              {:location/id location-id
               :document-id (:xt/id location)}))
 
-    (when-not (and (access/applicable-scopes? scopes)
-                   (some #(user.common/same-scope?
+    (when-not (and (authorization-scope/applicable-scopes? scopes)
+                   (some #(authorization-scope/same-scope?
                            expected-location-scope
                            %)
                          scopes)
-                   (some #(user.common/same-scope?
+                   (some #(authorization-scope/same-scope?
                            expected-organization-scope
                            %)
                          scopes))
@@ -466,29 +475,29 @@
   (let [invitation-document
         (command-document command)]
     {:transaction-plan
-     {:commands
-      [command]
+     (transaction-plan
+      (model.fx/compose-transaction-fragments
+       {:authorization-versions
+        location-authorization-versions}
 
-      :authorization-versions
-      (into
-       (vec location-authorization-versions)
-       (access-proof-authorization-versions
-        access-proof))
+       {:authorization-versions
+        (access-proof-authorization-versions
+         access-proof)}
 
-      :assertions
-      [(model.fx/assert-none
-        invitation/entity-type
-        [:= :invitation/token-hash
-         (:invitation/token-hash invitation-document)])]
+       {:commands
+        [command]
 
-      :changes
-      [(invitation-change
-        invitation-document
-        :created
-        :create)]
+        :assertions
+        [(model.fx/assert-none
+          invitation/entity-type
+          [:= :invitation/token-hash
+           (:invitation/token-hash invitation-document)])]
 
-      :entry-fn
-      change-entry}
+        :changes
+        [(invitation-change
+          invitation-document
+          :created
+          :create)]}))
 
      :result
      {:invitation invitation-document
@@ -737,14 +746,12 @@
          :helper
          invitation-scope)
 
-        authorization-versions
+        user-authorization-versions
         (cond->
-         (into
-          [(document-authorization-version
-            identity/entity-type
-            identity/version
-            user)]
-          location-authorization-versions)
+         [(document-authorization-version
+           identity/entity-type
+           identity/version
+           user)]
 
           existing-membership
           (conj
@@ -799,11 +806,22 @@
            (invitation-change accepted-invitation :updated :accept)))]
 
     {:transaction-plan
-     {:commands commands
-      :authorization-versions authorization-versions
-      :assertions assertions
-      :changes changes
-      :entry-fn change-entry}
+     (transaction-plan
+      (model.fx/compose-transaction-fragments
+       {:authorization-versions
+        location-authorization-versions}
+
+       {:authorization-versions
+        user-authorization-versions}
+
+       {:commands
+        commands
+
+        :assertions
+        assertions
+
+        :changes
+        changes}))
 
      :result
      {:user user

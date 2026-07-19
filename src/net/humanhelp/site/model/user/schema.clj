@@ -1,13 +1,17 @@
 (ns net.humanhelp.site.model.user.schema
   "Malli schemas for persisted User-model documents and Graph attributes.
 
-   Structural schemas describe the shape and scalar types of user identities,
-   memberships, role assignments, and invitations. Complete lifecycle and
-   cross-field invariants remain owned by the corresponding domain namespace
-   and are applied as the final predicate of each document schema.
+   Structural schemas describe the shape and scalar types of User identities,
+   Memberships, role assignments, invitations, and User Graph values. Complete
+   lifecycle and cross-field invariants remain owned by the corresponding
+   domain namespace and are applied as the final predicate of each document
+   schema.
 
-   This namespace does not query XTDB, authorize actors, or define workflows."
+   Shared structural authorization-scope values are validated through
+   model.authorization-scope. This namespace does not query XTDB, authorize
+   actors, or define workflows."
   (:require
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.user.domain.common :as user.common]
    [net.humanhelp.site.model.user.domain.identity :as identity]
@@ -51,7 +55,7 @@
   [:fn
    {:error/message
     "must be organization, organization-group, or location"}
-   user.common/scope-type?])
+   authorization-scope/scope-type?])
 
 (def scope-reference-schema
   [:and
@@ -60,8 +64,18 @@
     [:scope/id :uuid]]
 
    [:fn
-    {:error/message "must be a valid User-model scope reference"}
-    user.common/scope-reference?]])
+    {:error/message "must be a valid HumanHelp authorization-scope reference"}
+    authorization-scope/scope-reference?]])
+
+
+(def applicable-scopes-schema
+  [:and
+   [:vector scope-reference-schema]
+
+   [:fn
+    {:error/message
+     "must be a nonempty, target-first, distinct vector of authorization scopes"}
+    authorization-scope/applicable-scopes?]])
 
 ;; =============================================================================
 ;; User identity document
@@ -325,14 +339,30 @@
    ::role role-schema
    ::scope-type scope-type-schema
    ::scope-reference scope-reference-schema
+   ::applicable-scopes applicable-scopes-schema
 
-   ;; Shared User-model Graph values
+   ;; Shared authorization-scope and User Graph values
+   :scope/type scope-type-schema
+   :scope/id :uuid
+   :scope/reference scope-reference-schema
+
    :user/role role-schema
    :user/scope-type scope-type-schema
    :user/scope-reference scope-reference-schema
+   :user/applicable-scopes applicable-scopes-schema
+   :user/effective-roles [:set role-schema]
+   :user/organization-affiliated? :boolean
+   :user/customer? :boolean
+   :user/helper? :boolean
+   :user/supervisor? :boolean
+   :user/admin? :boolean
+   :user/staff? :boolean
+   :user/current-membership-found? :boolean
+   :user/active-role-assignments-at-scope [:vector :map]
 
    ;; User identity attributes
    :user/id :uuid
+   :user/found? :boolean
    :user/phone phone-schema
    :user/email email-schema
    :user/display-name
@@ -356,6 +386,7 @@
 
    ;; Membership attributes
    :membership/id :uuid
+   :membership/found? :boolean
    :membership/user-id :uuid
    :membership/organization-id :uuid
    :membership/status
@@ -374,6 +405,7 @@
 
    ;; Role-assignment attributes
    :role-assignment/id :uuid
+   :role-assignment/found? :boolean
    :role-assignment/membership-id :uuid
    :role-assignment/organization-id :uuid
    :role-assignment/role role-schema
@@ -395,6 +427,7 @@
 
    ;; Invitation attributes
    :invitation/id :uuid
+   :invitation/found? :boolean
    :invitation/organization-id :uuid
    :invitation/invited-by-id :uuid
    :invitation/phone phone-schema

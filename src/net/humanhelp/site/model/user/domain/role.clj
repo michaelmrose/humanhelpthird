@@ -10,12 +10,15 @@
    auditable history and avoids silently rewriting past authority.
 
    This namespace owns role-assignment values, document invariants, revocation,
-   exact-scope collection operations, and command construction. It does not
-   query XTDB, establish that referenced documents exist, determine whether a
-   location or group belongs to an organization, authorize actors, or interpret
-   effective access across a hierarchy. Effective-access rules belong to
-   user.domain.access."
+   exact-scope collection operations, and command construction. Shared
+   structural authorization-scope values come from model.authorization-scope.
+
+   It does not query XTDB, establish that referenced documents exist, determine
+   whether a location or group belongs to an organization, authorize actors, or
+   interpret effective access across a hierarchy. Effective-access rules belong
+   to user.domain.access."
   (:require
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.user.domain.common :as user.common]))
 
@@ -35,32 +38,20 @@
 ;; Role and scope values
 ;; =============================================================================
 
-(defn organization-scope
-  [organization-id]
-  {:scope/type :organization
-   :scope/id organization-id})
+(def organization-scope
+  authorization-scope/organization-scope)
 
-(defn organization-group-scope
-  [organization-group-id]
-  {:scope/type :organization-group
-   :scope/id organization-group-id})
+(def organization-group-scope
+  authorization-scope/organization-group-scope)
 
-(defn location-scope
-  [location-id]
-  {:scope/type :location
-   :scope/id location-id})
+(def location-scope
+  authorization-scope/location-scope)
 
-(defn organization-group-scope?
-  [scope]
-  (and
-   (user.common/scope-reference? scope)
-   (= :organization-group (:scope/type scope))))
+(def organization-group-scope?
+  authorization-scope/organization-group-scope?)
 
-(defn location-scope?
-  [scope]
-  (and
-   (user.common/scope-reference? scope)
-   (= :location (:scope/type scope))))
+(def location-scope?
+  authorization-scope/location-scope?)
 
 (defn scope
   [role-assignment]
@@ -120,7 +111,7 @@
 
 (defn at-scope?
   [role-assignment expected-scope]
-  (user.common/same-scope?
+  (authorization-scope/same-scope?
    (scope role-assignment)
    expected-scope))
 
@@ -171,13 +162,13 @@
   (let [assignment-scope
         (scope role-assignment)]
     (and
-     (user.common/scope-reference? assignment-scope)
+     (authorization-scope/scope-reference? assignment-scope)
 
      ;; Organization-wide assignments explicitly reference their organization.
      ;; Group and location ownership requires Organization data and is checked
      ;; by Graph/FX rather than guessed here.
      (or
-      (not (user.common/organization-scope? assignment-scope))
+      (not (authorization-scope/organization-scope? assignment-scope))
       (= (:scope/id assignment-scope)
          (:role-assignment/organization role-assignment))))))
 
@@ -307,13 +298,13 @@
      "The role must be helper, supervisor, or admin.")
 
     (not
-     (user.common/scope-reference? scope))
+     (authorization-scope/scope-reference? scope))
     (assoc
      :scope
      "An organization, organization-group, or location scope is required.")
 
     (and
-     (user.common/organization-scope? scope)
+     (authorization-scope/organization-scope? scope)
      (not=
       organization-id
       (:scope/id scope)))
@@ -630,7 +621,7 @@
    committing all returned commands atomically with the initiating operation."
   [role-assignments expected-scope input]
   (when-not
-   (user.common/scope-reference? expected-scope)
+   (authorization-scope/scope-reference? expected-scope)
     (model.common/throw-invalid!
      :role-assignment/invalid-scope
      "Role assignments cannot be revoked for an invalid scope."

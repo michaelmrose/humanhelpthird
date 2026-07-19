@@ -427,61 +427,44 @@
        {:organization/id organization-id
         :parent-scope parent-scope}))))
 
-(defn- organization-authorization-version
-  [organization-document]
-  {:model/entity-type
-   organization/organization-entity-type
+(defn- authorization-version
+  [document]
+  (cond
+    (contains?
+     document
+     :location/organization)
+    (model.common/authorization-version
+     organization/location-entity-type
+     document
+     organization/location-version)
 
-   :model/expected
-   (model.common/expected-version
-    organization-document
-    organization/organization-version)})
+    (contains?
+     document
+     :organization-group/organization)
+    (model.common/authorization-version
+     organization/organization-group-entity-type
+     document
+     organization/organization-group-version)
 
-(defn- organization-group-authorization-version
-  [group]
-  {:model/entity-type
-   organization/organization-group-entity-type
+    (contains?
+     document
+     :organization/name)
+    (model.common/authorization-version
+     organization/organization-entity-type
+     document
+     organization/organization-version)
 
-   :model/expected
-   (model.common/expected-version
-    group
-    organization/organization-group-version)})
-
-(defn- location-authorization-version
-  [location]
-  {:model/entity-type
-   organization/location-entity-type
-
-   :model/expected
-   (model.common/expected-version
-    location
-    organization/location-version)})
+    :else
+    (hierarchy-error!
+     :organization.graph/unknown-authorization-document
+     "A hierarchy authorization document has no known entity type."
+     {:document-id
+      (:xt/id document)})))
 
 (defn- authorization-versions
   [documents]
   (mapv
-   (fn [document]
-     (cond
-       (contains?
-        document
-        :location/organization)
-       (location-authorization-version document)
-
-       (contains?
-        document
-        :organization-group/organization)
-       (organization-group-authorization-version document)
-
-       (contains?
-        document
-        :organization/name)
-       (organization-authorization-version document)
-
-       :else
-       (hierarchy-error!
-        :organization.graph/unknown-authorization-document
-        "A hierarchy authorization document has no known entity type."
-        {:document-id (:xt/id document)})))
+   authorization-version
    documents))
 
 (defn- organization-context-facts
@@ -500,7 +483,7 @@
      :organization/scope-context
      scope-context
      :organization/authorization-versions
-     [(organization-authorization-version
+     [(authorization-version
        organization-document)]}))
 
 (defn- organization-group-context-facts

@@ -1,10 +1,29 @@
 (ns net.humanhelp.site.model.user.domain.common
+  "Small pure values shared by User identity, membership, role-assignment,
+   invitation, and access namespaces.
+
+   This namespace owns:
+
+   - canonical email and phone values;
+   - User-model role values.
+
+   Structural HumanHelp authorization scopes are owned by
+   net.humanhelp.site.model.authorization-scope. Compatibility aliases remain
+   here so existing User domain namespaces do not need to depend on two shared
+   namespaces immediately.
+
+   This namespace does not query XTDB, inspect Organization hierarchy,
+   authorize actors, calculate effective access, or define Gesso Live delivery
+   scopes."
   (:require
-   [clojure.string :as str])
+   [clojure.string :as str]
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope])
   (:import
    [java.util Locale]))
 
-;; Contact values --------------------------------------------------------------
+;; =============================================================================
+;; Contact values
+;; =============================================================================
 
 (def email-max
   254)
@@ -72,7 +91,9 @@
      phone-pattern
      value))))
 
-;; Role values -----------------------------------------------------------------
+;; =============================================================================
+;; Role values
+;; =============================================================================
 
 (def roles
   #{:helper
@@ -85,53 +106,21 @@
    roles
    value))
 
-;; Scope references ------------------------------------------------------------
+;; =============================================================================
+;; Shared authorization-scope compatibility aliases
+;; =============================================================================
 
 (def scope-types
-  #{:organization
-    :organization-group
-    :location})
+  authorization-scope/scope-types)
 
-(defn scope-type?
-  [value]
-  (contains?
-   scope-types
-   value))
+(def scope-type?
+  authorization-scope/scope-type?)
 
-(defn scope-reference?
-  "Returns true when value structurally references one supported access scope.
+(def scope-reference?
+  authorization-scope/scope-reference?)
 
-   This does not establish that the referenced organization, group, or location
-   exists or that it belongs to a particular organization."
-  [value]
-  (and
-   (map? value)
+(def organization-scope?
+  authorization-scope/organization-scope?)
 
-   (scope-type?
-    (:scope/type value))
-
-   (uuid?
-    (:scope/id value))))
-
-(defn organization-scope?
-  [scope]
-  (and
-   (scope-reference?
-    scope)
-
-   (=
-    :organization
-    (:scope/type scope))))
-
-(defn same-scope?
-  [a b]
-  (and
-   (scope-reference?
-    a)
-
-   (scope-reference?
-    b)
-
-   (=
-    a
-    b)))
+(def same-scope?
+  authorization-scope/same-scope?)

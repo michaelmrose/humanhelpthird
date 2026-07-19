@@ -7,7 +7,8 @@
    Organization FX decides which hierarchy and User documents establish
    authorization. It passes those generic document guards to model.fx through
    :authorization-versions; model.fx owns guard validation, deduplication,
-   conflict detection, and ASSERT generation.
+   conflict detection, ASSERT generation, and composable transaction-fragment
+   mechanics.
 
    This slice covers nonterminal hierarchy management. Location closure remains
    intentionally unexposed until User core supplies an atomic exact-scope
@@ -256,12 +257,18 @@
        scope-context)}))
   scope-facts)
 (def user-version
-  {:revision-key :user/revision :updated-at-key :user/updated-at})
+  {:revision-key :user/revision
+   :created-at-key :user/created-at
+   :updated-at-key :user/updated-at})
+
 (def membership-version
   {:revision-key :membership/revision
+   :created-at-key :membership/created-at
    :updated-at-key :membership/updated-at})
+
 (def role-assignment-version
   {:revision-key :role-assignment/revision
+   :created-at-key :role-assignment/created-at
    :updated-at-key :role-assignment/updated-at})
 (defn- require-public-document!
   [facts found-key document-key error-type message details]
@@ -333,16 +340,20 @@
        :organization/id organization-id
        :scope/target (scope-context-target scope-context)
        :user/authorization-versions
-       [{:model/entity-type user/user-entity-type
-         :model/expected
-         (model.common/expected-version user-document user-version)}
-        {:model/entity-type user/membership-entity-type
-         :model/expected
-         (model.common/expected-version membership-document membership-version)}
-        {:model/entity-type user/role-assignment-entity-type
-         :model/expected
-         (model.common/expected-version
-          administrator-assignment role-assignment-version)}]})))
+       [(model.common/authorization-version
+         user/user-entity-type
+         user-document
+         user-version)
+
+        (model.common/authorization-version
+         user/membership-entity-type
+         membership-document
+         membership-version)
+
+        (model.common/authorization-version
+         user/role-assignment-entity-type
+         administrator-assignment
+         role-assignment-version)]})))
 (defn- organization-change
   [document operation change-kind]
   {:topic
@@ -430,70 +441,13 @@
        document
        operation
        change-kind))))
-(defn- empty-fragment
-  []
-  {:commands []
-   :authorization-versions []
-   :assertions []
-   :changes []})
-
-(defn- normalize-fragment
-  [fragment]
-  (merge
-   (empty-fragment)
-   (select-keys
-    (or fragment {})
-    [:commands
-     :authorization-versions
-     :assertions
-     :changes])))
-
-(defn- merge-fragments
-  [& fragments]
-  (reduce
-   (fn [result fragment]
-     (let [{:keys
-            [commands
-             authorization-versions
-             assertions
-             changes]}
-           (normalize-fragment fragment)]
-       (-> result
-           (update
-            :commands
-            into
-            commands)
-           (update
-            :authorization-versions
-            into
-            authorization-versions)
-           (update
-            :assertions
-            into
-            assertions)
-           (update
-            :changes
-            into
-            changes))))
-   (empty-fragment)
-   fragments))
-
 (defn- transaction-plan
-  [{:keys
-    [commands
-     authorization-versions
-     assertions
-     changes]}]
-  {:commands
-   (vec commands)
-   :authorization-versions
-   (vec authorization-versions)
-   :assertions
-   (vec assertions)
-   :changes
-   (vec changes)
+  [fragment]
+  (assoc
+   (model.fx/transaction-fragment
+    fragment)
    :entry-fn
-   change-entry})
+   change-entry))
 
 (defn- organization-authorization-fragment
   [scope-facts user-authorization]
@@ -513,7 +467,7 @@
   (let [document
         (command-document command)
         fragment
-        (merge-fragments
+        (model.fx/compose-transaction-fragments
          {:commands [command]
           :changes
           [(command-change
@@ -538,7 +492,7 @@
   (let [document
         (command-document command)
         fragment
-        (merge-fragments
+        (model.fx/compose-transaction-fragments
          {:commands [command]
           :changes
           [(command-change
@@ -565,7 +519,7 @@
   (let [document
         (command-document command)
         fragment
-        (merge-fragments
+        (model.fx/compose-transaction-fragments
          {:commands [command]
           :changes
           [(command-change

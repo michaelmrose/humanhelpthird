@@ -6,12 +6,14 @@
    mutations, mutation authorization, messaging, session handling, or
    Organization hierarchy resolution.
 
-   :user/applicable-scopes must be supplied by Organization. For a location it
-   normally contains that location, every containing organization group, and
-   the organization itself."
+   :user/applicable-scopes must be supplied by Organization as the authoritative
+   nonempty, target-first, distinct vector accepted by
+   model.authorization-scope. For a Location it normally contains that
+   Location, every containing Organization Group, and the Organization itself."
   (:require
    [com.biffweb.experimental :as biffx]
    [gesso.graph :as graph]
+   [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.user.domain.access :as access]
    [net.humanhelp.site.model.user.domain.identity :as identity]
    [net.humanhelp.site.model.user.domain.invitation :as invitation]
@@ -243,13 +245,16 @@
   (without-nils {:user/id user-id}))
 
 (defn access-query-input
+  "Builds the scoped-access Graph input without manufacturing scope order.
+
+   applicable-scopes must already be the authoritative vector produced by
+   Organization. In particular, sets and other unordered collections are not
+   coerced into vectors here."
   [{:keys [user-id organization-id applicable-scopes]}]
   (without-nils
    {:user/id user-id
     :membership/organization-id organization-id
-    :user/applicable-scopes
-    (when (some? applicable-scopes)
-      (vec applicable-scopes))}))
+    :user/applicable-scopes applicable-scopes}))
 
 (defn scoped-role-assignment-query-input
   [{:keys [organization-id scope]}]
@@ -398,7 +403,8 @@
   (if
    (and
     (uuid? organization-id)
-    (keyword? scope-type)
+    (authorization-scope/scope-type?
+     scope-type)
     (uuid? scope-id))
     (sort-documents
      :role-assignment/created-at
