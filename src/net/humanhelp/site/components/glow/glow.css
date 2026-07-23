@@ -1,9 +1,9 @@
 .humanhelp-glow-frame {
   position: relative;
+  display: block;
+  padding: 0.55rem;
+  margin: -0.55rem;
   isolation: isolate;
-
-  --humanhelp-glow-radius: 1rem;
-  --humanhelp-glow-aura-inset: -0.45rem;
 }
 
 .humanhelp-glow-surface {
@@ -11,39 +11,30 @@
   z-index: 1;
 }
 
-.humanhelp-glow-frame.humanhelp-glow-active::before {
+.humanhelp-glow-active::before {
   content: "";
   position: absolute;
-  inset: var(--humanhelp-glow-aura-inset);
+  inset: 0.15rem;
   z-index: 0;
-  border-radius: var(--humanhelp-glow-radius);
-
+  border-radius: 1rem;
   background:
     radial-gradient(
-      circle,
+      ellipse at center,
       color-mix(in srgb, #f4f8a6 70%, transparent) 0%,
       color-mix(in srgb, #b8ff9c 52%, transparent) 28%,
       color-mix(in srgb, #7fffe8 30%, transparent) 52%,
       transparent 72%
     );
-
   filter: blur(3px);
   opacity: 0.95;
   pointer-events: none;
-
-  animation:
-    humanhelp-glow-frame-pulse
-    1.1s ease-in-out infinite;
+  animation: humanhelp-glow-frame-pulse 1.1s ease-in-out infinite;
 }
 
-.humanhelp-glow-frame.humanhelp-glow-active
-> .humanhelp-glow-surface {
-  border-color:
-    color-mix(in srgb, #f4f8a6 88%, #7fffe8 12%) !important;
-
+.humanhelp-glow-active > .humanhelp-glow-surface {
   background:
     radial-gradient(
-      circle at 50% 45%,
+      ellipse at 50% 45%,
       color-mix(in srgb, #7fffe8 26%, transparent) 0%,
       color-mix(in srgb, var(--primary) 62%, var(--background) 38%) 56%,
       color-mix(in srgb, var(--card) 82%, var(--background) 18%) 100%
@@ -52,26 +43,22 @@
   box-shadow:
     inset 0 0 10px color-mix(in srgb, white 28%, transparent),
     inset 0 0 18px color-mix(in srgb, #7fffe8 42%, transparent),
-    0 0 0 1px color-mix(in srgb, white 38%, transparent),
-    0 0 0 2px color-mix(in srgb, #f4f8a6 96%, transparent),
     0 0 9px color-mix(in srgb, #f4f8a6 96%, transparent),
     0 0 18px color-mix(in srgb, #7fffe8 84%, transparent) !important;
 
-  animation:
-    humanhelp-glow-surface-pulse
-    1.1s ease-in-out infinite;
+  animation: humanhelp-glow-surface-pulse 1.1s ease-in-out infinite;
 }
 
 @keyframes humanhelp-glow-frame-pulse {
   0%,
   100% {
     opacity: 0.55;
-    transform: scale(0.96);
+    transform: scale(0.92);
   }
 
   50% {
     opacity: 1;
-    transform: scale(1.02);
+    transform: scale(1.04);
   }
 }
 
@@ -82,14 +69,13 @@
   }
 
   50% {
-    transform: scale(1.015);
+    transform: scale(1.01);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .humanhelp-glow-frame.humanhelp-glow-active::before,
-  .humanhelp-glow-frame.humanhelp-glow-active
-  > .humanhelp-glow-surface {
+  .humanhelp-glow-active::before,
+  .humanhelp-glow-active > .humanhelp-glow-surface {
     animation: none;
   }
 }
