@@ -6,6 +6,10 @@
    mutations, mutation authorization, messaging, session handling, or
    Organization hierarchy resolution.
 
+   Membership documents include organization-local skill strings. Graph
+   exposes those strings as Membership facts but does not interpret what a
+   skill means or use a skill as an authorization grant.
+
    :user/applicable-scopes must be supplied by Organization as the authoritative
    nonempty, target-first, distinct vector accepted by
    model.authorization-scope. For a Location it normally contains that
@@ -46,6 +50,7 @@
   [:xt/id
    :membership/user
    :membership/organization
+   :membership/skills
    :membership/status
    :membership/revision
    :membership/created-at
@@ -130,6 +135,7 @@
   [[:xt/id :membership/id]
    [:membership/user :membership/user-id]
    [:membership/organization :membership/organization-id]
+   [:membership/skills :membership/skills]
    [:membership/status :membership/status]
    [:membership/revision :membership/revision]
    [:membership/created-at :membership/created-at]

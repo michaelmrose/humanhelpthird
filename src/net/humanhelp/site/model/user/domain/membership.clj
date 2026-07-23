@@ -6,12 +6,18 @@
    supervisor, or administrator authority. Those grants belong to role
    assignments.
 
+   Membership also owns the organization's simple skill labels for the member.
+   HumanHelp treats skills as organization-local canonical strings. It does not
+   interpret what a skill means or what qualifications an Organization requires
+   before assigning one.
+
    This namespace owns membership document invariants, lifecycle transitions,
-   and command construction. It does not query XTDB, enforce one membership per
-   user and organization, authorize actors, alter role assignments, or inspect
-   organization state."
+   skill changes, and command construction. It does not query XTDB, enforce one
+   membership per user and organization, authorize actors, alter role
+   assignments, or inspect organization state."
   (:require
-   [net.humanhelp.site.model.common :as model.common]))
+   [net.humanhelp.site.model.common :as model.common]
+   [net.humanhelp.site.model.user.domain.common :as user.common]))
 
 ;; =============================================================================
 ;; Identity and versioning
@@ -94,6 +100,27 @@
    (for-organization? membership expected-organization-id)))
 
 ;; =============================================================================
+;; Skill facts
+;; =============================================================================
+
+(defn skills
+  [membership]
+  (:membership/skills membership))
+
+(defn has-skill?
+  [membership skill]
+  (let [skill'
+        (user.common/normalize-skill
+         skill)]
+    (and
+     (some?
+      skill')
+
+     (contains?
+      (skills membership)
+      skill'))))
+
+;; =============================================================================
 ;; Validation
 ;; =============================================================================
 
@@ -141,6 +168,9 @@
 
    (uuid?
     (:membership/organization membership))
+
+   (user.common/skills?
+    (:membership/skills membership))
 
    (status?
     (:membership/status membership))
@@ -210,6 +240,10 @@
      :organization-id
      (:organization-id input)
 
+     :skills
+     (user.common/normalize-skills
+      (get input :skills #{}))
+
      :now
      (:now input)}))
 
@@ -218,6 +252,7 @@
     [id
      user-id
      organization-id
+     skills
      now]}]
   (cond-> {}
     (not
@@ -237,6 +272,13 @@
     (assoc
      :organization-id
      "An organization UUID is required.")
+
+    (not
+     (user.common/skills?
+      skills))
+    (assoc
+     :skills
+     "Skills must be a set of canonical non-blank skill names.")
 
     (not
      (model.common/timestamp-value? now))
@@ -349,6 +391,7 @@
          [id
           user-id
           organization-id
+          skills
           now]
          :as normalized}
         (normalize-create-input input)
@@ -375,6 +418,9 @@
       :membership/organization
       organization-id
 
+      :membership/skills
+      skills
+
       :membership/status
       :active
 
@@ -386,6 +432,97 @@
 
       :membership/updated-at
       now})))
+
+;; =============================================================================
+;; Skill transitions
+;; =============================================================================
+
+(defn add-skill
+  [membership {:keys [skill now]}]
+  (ensure-document!
+   membership)
+
+  (ensure!
+   (not
+    (revoked?
+     membership))
+   membership
+   :membership/revoked
+   {:status
+    "A revoked membership cannot be changed."})
+
+  (let [skill'
+        (user.common/normalize-skill
+         skill)]
+    (ensure!
+     (user.common/skill?
+      skill')
+     membership
+     :membership/invalid-skill
+     {:skill
+      "The skill must be a non-blank canonical skill name."})
+
+    (ensure!
+     (not
+      (contains?
+       (:membership/skills membership)
+       skill'))
+     membership
+     :membership/skill-already-present
+     {:skill
+      "The membership already has this skill."})
+
+    (update-membership
+     membership
+     now
+     #(update
+       %
+       :membership/skills
+       conj
+       skill'))))
+
+(defn remove-skill
+  [membership {:keys [skill now]}]
+  (ensure-document!
+   membership)
+
+  (ensure!
+   (not
+    (revoked?
+     membership))
+   membership
+   :membership/revoked
+   {:status
+    "A revoked membership cannot be changed."})
+
+  (let [skill'
+        (user.common/normalize-skill
+         skill)]
+    (ensure!
+     (user.common/skill?
+      skill')
+     membership
+     :membership/invalid-skill
+     {:skill
+      "The skill must be a non-blank canonical skill name."})
+
+    (ensure!
+     (contains?
+      (:membership/skills membership)
+      skill')
+     membership
+     :membership/skill-missing
+     {:skill
+      "The membership does not have this skill."})
+
+    (update-membership
+     membership
+     now
+     #(update
+       %
+       :membership/skills
+       disj
+       skill'))))
 
 ;; =============================================================================
 ;; Lifecycle transitions
@@ -530,6 +667,20 @@
    before
    after
    version))
+
+(defn add-skill-command
+  [membership input]
+  (change-command
+   :add-skill
+   membership
+   (add-skill membership input)))
+
+(defn remove-skill-command
+  [membership input]
+  (change-command
+   :remove-skill
+   membership
+   (remove-skill membership input)))
 
 (defn suspend-command
   [membership input]

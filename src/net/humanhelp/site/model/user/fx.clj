@@ -1,10 +1,12 @@
 (ns net.humanhelp.site.model.user.fx
   "User-owned effectful workflows.
 
-   This first vertical slice provides two operations:
+   This vertical slice provides four operations:
 
    - invite a helper to an active location;
-   - accept a location-scoped helper invitation.
+   - accept a location-scoped helper invitation;
+   - add an organization-local skill to a member;
+   - remove an organization-local skill from a member.
 
    The state machines load facts and authorize the requested business action.
    Pure planning functions construct and compose transaction fragments
@@ -24,6 +26,7 @@
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.fx :as model.fx]
    [net.humanhelp.site.model.user.domain.access :as access]
+   [net.humanhelp.site.model.user.domain.common :as user.common]
    [net.humanhelp.site.model.user.domain.identity :as identity]
    [net.humanhelp.site.model.user.domain.invitation :as invitation]
    [net.humanhelp.site.model.user.domain.membership :as membership]
@@ -355,6 +358,59 @@
     role/version
     role-assignment)])
 
+(defn- require-location-skill-manager!
+  [facts scopes organization-id location-id]
+  (let [user (:user/doc facts)
+        membership-document (current-membership-document facts)
+        assignments (current-role-documents facts)]
+    (when-not (and user membership-document)
+      (fail! :user.fx/incomplete-access-proof
+             "The access result did not include the documents required to prove skill-management authority."
+             {:organization/id organization-id
+              :location/id location-id}))
+
+    (if-let [role-assignment
+             (or
+              (access/effective-assignment-for-role
+               user
+               membership-document
+               assignments
+               scopes
+               :admin)
+
+              (access/effective-assignment-for-role
+               user
+               membership-document
+               assignments
+               scopes
+               :supervisor))]
+      {:user user
+       :membership membership-document
+       :role-assignment role-assignment}
+
+      (fail! :user/not-authorized
+             "Supervisor or administrator authority at this location is required."
+             {:organization/id organization-id
+              :location/id location-id}))))
+
+(defn- distinct-authorization-versions
+  [authorization-versions]
+  (second
+   (reduce
+    (fn [[seen result] authorization-version]
+      (let [target
+            (model.fx/authorization-version-target
+             authorization-version)]
+        (if
+         (contains?
+          seen
+          target)
+          [seen result]
+          [(conj seen target)
+           (conj result authorization-version)])))
+    [#{} []]
+    authorization-versions)))
+
 ;; =============================================================================
 ;; Invitation recipient ownership
 ;; =============================================================================
@@ -442,12 +498,19 @@
      :scope/id (:scope/id scope)}))
 
 (defn- membership-change
-  [membership-document]
-  {:topic :membership
-   :id (:xt/id membership-document)
-   :change/kind :created
-   :user/id (:membership/user membership-document)
-   :organization/id (:membership/organization membership-document)})
+  ([membership-document]
+   (membership-change
+    membership-document
+    :created
+    :create))
+
+  ([membership-document change-kind operation]
+   {:topic :membership
+    :id (:xt/id membership-document)
+    :change/kind change-kind
+    :membership/operation operation
+    :user/id (:membership/user membership-document)
+    :organization/id (:membership/organization membership-document)}))
 
 (defn- role-assignment-change
   [role-assignment]
@@ -960,9 +1023,266 @@
    (assoc ctx :user.fx/input input)))
 
 ;; =============================================================================
+;; Member skill planning
+;; =============================================================================
+
+(defn- require-skill-target-membership!
+  [facts organization-id membership-id]
+  (let [membership-document
+        (require-found!
+         facts
+         :membership/found?
+         :membership/doc
+         :membership/not-found
+         "The membership no longer exists.")]
+    (when-not
+     (=
+      membership-id
+      (:xt/id membership-document))
+      (fail! :membership/inconsistent-facts
+             "The membership document ID does not match the requested membership."
+             {:membership/id membership-id
+              :document-id (:xt/id membership-document)}))
+
+    (when-not
+     (membership/for-organization?
+      membership-document
+      organization-id)
+      (fail! :membership/organization-mismatch
+             "The membership does not belong to the supplied organization."
+             {:organization/id organization-id
+              :membership/id membership-id
+              :actual-organization-id
+              (membership/organization-id membership-document)}))
+
+    (when
+     (membership/revoked?
+      membership-document)
+      (fail! :membership/revoked
+             "A revoked membership cannot have its skills changed."
+             {:organization/id organization-id
+              :membership/id membership-id}))
+
+    membership-document))
+
+(defn plan-member-skill-change
+  "Purely constructs the transaction plan and public result for one authorized
+   organization-local Membership skill change."
+  [{:keys
+    [command
+     location-authorization-versions
+     access-proof
+     target-membership
+     operation
+     skill]}]
+  (let [membership-document
+        (command-document command)
+
+        user-authorization-versions
+        (distinct-authorization-versions
+         (conj
+          (access-proof-authorization-versions
+           access-proof)
+
+          (document-authorization-version
+           membership/entity-type
+           membership/version
+           target-membership)))]
+    {:transaction-plan
+     (transaction-plan
+      (model.fx/compose-transaction-fragments
+       {:authorization-versions
+        location-authorization-versions}
+
+       {:authorization-versions
+        user-authorization-versions}
+
+       {:commands
+        [command]
+
+        :changes
+        [(assoc
+          (membership-change
+           membership-document
+           :updated
+           operation)
+          :membership/skill
+          skill)]}))
+
+     :result
+     {:membership membership-document
+      :skill skill
+      :operation operation}}))
+
+;; =============================================================================
+;; Member skill machine
+;; =============================================================================
+
+(fx/defmachine change-member-skill-machine
+  :start
+  (fn [ctx]
+    (let [input (:user.fx/input ctx)
+          organization-id (:organization-id input)
+          location-id (:location-id input)
+          membership-id (:membership-id input)]
+      {:user.fx/location-facts
+       [:biff.graph.fx/query
+        (location-query-input organization-id location-id)
+        location-context-query]
+
+       :user.fx/target-membership-facts
+       [:biff.graph.fx/query
+        (user.graph/membership-query-input
+         {:membership-id membership-id})
+        user.graph/membership-command-query]
+
+       :biff.fx/next :load-access}))
+
+  :load-access
+  (fn [ctx]
+    (let [input (:user.fx/input ctx)
+          organization-id (:organization-id input)
+          location-id (:location-id input)
+
+          location-context
+          (require-location-context!
+           (:user.fx/location-facts ctx)
+           organization-id
+           location-id)]
+      {:user.fx/location-context location-context
+
+       :user.fx/target-membership-facts
+       (:user.fx/target-membership-facts ctx)
+
+       :user.fx/access-facts
+       [:biff.graph.fx/query
+        (user.graph/access-query-input
+         {:user-id (require-authenticated-user-id! ctx)
+          :organization-id organization-id
+          :applicable-scopes (:scopes location-context)})
+        user.graph/access-query]
+
+       :biff.fx/next :authorize}))
+
+  :authorize
+  (fn [ctx]
+    (let [input (:user.fx/input ctx)
+          organization-id (:organization-id input)
+          location-id (:location-id input)
+          membership-id (:membership-id input)
+
+          access-proof
+          (require-location-skill-manager!
+           (:user.fx/access-facts ctx)
+           (:scopes (:user.fx/location-context ctx))
+           organization-id
+           location-id)
+
+          target-membership
+          (require-skill-target-membership!
+           (:user.fx/target-membership-facts ctx)
+           organization-id
+           membership-id)]
+      {:user.fx/location-context
+       (:user.fx/location-context ctx)
+
+       :user.fx/access-proof
+       access-proof
+
+       :user.fx/target-membership
+       target-membership
+
+       :biff.fx/next :plan}))
+
+  :plan
+  (fn [ctx]
+    (let [input (:user.fx/input ctx)
+          operation (:operation input)
+          target-membership (:user.fx/target-membership ctx)
+          skill
+          (user.common/normalize-skill
+           (:skill input))
+
+          command
+          (case operation
+            :add-skill
+            (membership/add-skill-command
+             target-membership
+             {:skill skill
+              :now (:biff.fx/now ctx)})
+
+            :remove-skill
+            (membership/remove-skill-command
+             target-membership
+             {:skill skill
+              :now (:biff.fx/now ctx)})
+
+            (fail! :user.fx/invalid-skill-operation
+                   "The member skill operation is invalid."
+                   {:operation operation}))
+
+          plan
+          (plan-member-skill-change
+           {:command command
+            :location-authorization-versions
+            (:authorization-versions
+             (:user.fx/location-context ctx))
+            :access-proof
+            (:user.fx/access-proof ctx)
+            :target-membership target-membership
+            :operation operation
+            :skill skill})]
+      {:user.fx/result (:result plan)
+       :user.fx/transaction-plan (:transaction-plan plan)
+       :biff.fx/next :commit}))
+
+  :commit
+  (fn [{:user.fx/keys [result transaction-plan]}]
+    {:user.fx/result result
+     :user.fx/transaction
+     [model.fx/transact-effect transaction-plan]
+     :biff.fx/next :finish})
+
+  :finish
+  (fn [{:user.fx/keys [result transaction]}]
+    {:biff.fx/return
+     (assoc result :transaction transaction)}))
+
+(defn add-member-skill
+  "Adds one organization-local skill to a Membership.
+
+   Input is {:organization-id uuid
+             :location-id uuid
+             :membership-id uuid
+             :skill string}.
+
+   The authenticated actor must have supervisor or administrator authority at
+   the supplied active location. The target Membership must belong to the same
+   Organization and must not be revoked."
+  [ctx input]
+  (change-member-skill-machine
+   (assoc
+    ctx
+    :user.fx/input
+    (assoc input :operation :add-skill))))
+
+(defn remove-member-skill
+  "Removes one organization-local skill from a Membership.
+
+   Authorization and target rules are identical to add-member-skill."
+  [ctx input]
+  (change-member-skill-machine
+   (assoc
+    ctx
+    :user.fx/input
+    (assoc input :operation :remove-skill))))
+
+;; =============================================================================
 ;; Public operation contribution
 ;; =============================================================================
 
 (def operations
   {:user/invite-helper-to-location #'invite-helper-to-location
-   :user/accept-invitation #'accept-invitation})
+   :user/accept-invitation #'accept-invitation
+   :user/add-member-skill #'add-member-skill
+   :user/remove-member-skill #'remove-member-skill})

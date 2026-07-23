@@ -5,6 +5,7 @@
    [gesso.graph :as graph]
    [malli.core :as m]
    [net.humanhelp.site.model.common :as model.common]
+   [net.humanhelp.site.model.request.assignment :as assignment]
    [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.model.request.domain :as domain]
    [net.humanhelp.site.model.request.fx :as request.fx]
@@ -28,6 +29,15 @@
 (def other-request-id
   (uuid "80000000-0000-0000-0000-000000000002"))
 
+(def primary-assignment-id
+  (uuid "81000000-0000-0000-0000-000000000001"))
+
+(def collaborator-assignment-id
+  (uuid "81000000-0000-0000-0000-000000000002"))
+
+(def other-assignment-id
+  (uuid "81000000-0000-0000-0000-000000000003"))
+
 (def organization-id
   (uuid "10000000-0000-0000-0000-000000000001"))
 
@@ -46,8 +56,14 @@
 (def helper-id
   (uuid "50000000-0000-0000-0000-000000000001"))
 
-(def other-helper-id
+(def collaborator-id
   (uuid "50000000-0000-0000-0000-000000000002"))
+
+(def replacement-helper-id
+  (uuid "50000000-0000-0000-0000-000000000003"))
+
+(def manager-id
+  (uuid "50000000-0000-0000-0000-000000000004"))
 
 (def capability-id
   (uuid "60000000-0000-0000-0000-000000000001"))
@@ -116,6 +132,24 @@
     :model/updated-at-key :user/updated-at
     :model/updated-at t1}})
 
+(def manager-guard
+  {:model/entity-type :user
+   :model/expected
+   {:model/id manager-id
+    :model/revision-key :user/revision
+    :model/revision 2
+    :model/updated-at-key :user/updated-at
+    :model/updated-at t1}})
+
+(def replacement-helper-guard
+  {:model/entity-type :user
+   :model/expected
+   {:model/id replacement-helper-id
+    :model/revision-key :user/revision
+    :model/revision 1
+    :model/updated-at-key :user/updated-at
+    :model/updated-at t1}})
+
 (defn open-request
   ([]
    (open-request {}))
@@ -139,22 +173,19 @@
   []
   (domain/claim-request
    (open-request)
-   {:helper-id helper-id
-    :now t1}))
+   {:now t1}))
 
 (defn on-the-way-request
   []
   (domain/mark-request-on-the-way
    (claimed-request)
-   {:helper-id helper-id
-    :now t2}))
+   {:now t2}))
 
 (defn done-request
   []
   (domain/complete-request
    (on-the-way-request)
-   {:helper-id helper-id
-    :now t3}))
+   {:now t3}))
 
 (defn cancelled-request
   []
@@ -162,6 +193,47 @@
    (open-request)
    {:now t1
     :reason :test/customer-cancelled}))
+
+(defn primary-assignment
+  ([]
+   (primary-assignment {}))
+  ([overrides]
+   (assignment/new-assignment
+    (merge
+     {:id primary-assignment-id
+      :request-id request-id
+      :helper-id helper-id
+      :role :primary
+      :source :request/claim
+      :actor-id helper-id
+      :now t1}
+     overrides))))
+
+(defn collaborator-assignment
+  ([]
+   (collaborator-assignment {}))
+  ([overrides]
+   (assignment/new-assignment
+    (merge
+     {:id collaborator-assignment-id
+      :request-id request-id
+      :helper-id collaborator-id
+      :role :collaborator
+      :source :request/collaboration
+      :actor-id helper-id
+      :now t2}
+     overrides))))
+
+(defn ended-assignment
+  ([]
+   (ended-assignment
+    (collaborator-assignment)))
+  ([assignment-document]
+   (assignment/end-assignment
+    assignment-document
+    {:actor-id helper-id
+     :reason :request/collaborator-removed
+     :now t3})))
 
 (defn command-document
   [command]
@@ -186,12 +258,16 @@
     :biff.graph/input
     input)))
 
+(defn private-var
+  [namespace-symbol var-symbol]
+  (ns-resolve
+   namespace-symbol
+   var-symbol))
+
 (defn private-fn
   [namespace-symbol var-symbol]
   (some->
-   (ns-resolve
-    namespace-symbol
-    var-symbol)
+   (private-var namespace-symbol var-symbol)
    var-get))
 
 (defn error-type
@@ -356,7 +432,7 @@
           "x"))}))))))
 
 ;; =============================================================================
-;; Construction, invariants, and schema
+;; Request construction, invariants, and schema
 ;; =============================================================================
 
 (deftest request-construction-test
@@ -396,6 +472,17 @@
     (is
      (false?
       (domain/terminal? request)))
+
+    (is
+     (false?
+      (domain/lifecycle-expects-primary-assignment?
+       request)))
+
+    (is
+     (not
+      (contains?
+       request
+       :request/helper)))
 
     (is
      (=
@@ -473,14 +560,6 @@
       (domain/request-document-consistent?
        (assoc
         request
-        :request/helper
-        helper-id))))
-
-    (is
-     (false?
-      (domain/request-document-consistent?
-       (assoc
-        request
         :request/cancelled-at
         t0))))
 
@@ -489,18 +568,21 @@
       (domain/request-document-consistent?
        (-> request
            (assoc
-            :request/status
-            :on-the-way
-            :request/helper
-            helper-id
-            :request/claimed-at
-            t2
-            :request/on-the-way-at
-            t1
-            :request/revision
-            2
-            :request/updated-at
-            t2)))))
+            :request/status :on-the-way
+            :request/claimed-at t2
+            :request/on-the-way-at t1
+            :request/revision 2
+            :request/updated-at t2)))))
+
+    (testing "the closed persisted schema rejects the removed helper field"
+      (is
+       (false?
+        (m/validate
+         request.schema/request-document-schema
+         (assoc
+          request
+          :request/helper
+          helper-id)))))
 
     (is
      (false?
@@ -512,7 +594,7 @@
         true))))))
 
 (deftest request-schema-registry-test
-  (doseq [request
+  (doseq [document
           [(open-request)
            (claimed-request)
            (on-the-way-request)
@@ -521,12 +603,12 @@
     (is
      (m/validate
       request.schema/request-document-schema
-      request))
+      document))
 
     (is
      (m/validate
       (:request/doc request.schema/schema)
-      request)))
+      document)))
 
   (is
    (m/validate
@@ -552,12 +634,6 @@
     true))
 
   (is
-   (m/validate
-    (:request/include-terminal?
-     request.schema/schema)
-    false))
-
-  (is
    (false?
     (m/validate
      (:request/include-terminal?
@@ -575,7 +651,7 @@
     (:request/doc request.schema/schema))))
 
 ;; =============================================================================
-;; Editing
+;; Request editing and lifecycle
 ;; =============================================================================
 
 (deftest request-editing-test
@@ -631,8 +707,7 @@
         traveling
         (domain/mark-request-on-the-way
          edited
-         {:helper-id helper-id
-          :now t3})
+         {:now t3})
 
         reedited
         (domain/edit-request
@@ -655,9 +730,10 @@
       reedited))
 
     (is
-     (=
-      helper-id
-      (domain/helper-id reedited)))
+     (not
+      (contains?
+       reedited
+       :request/helper)))
 
     (is
      (=
@@ -700,10 +776,6 @@
        {:content minimal-content
         :now t-before})))))
 
-;; =============================================================================
-;; Lifecycle
-;; =============================================================================
-
 (deftest request-lifecycle-happy-path-test
   (let [open
         (open-request)
@@ -711,20 +783,17 @@
         claimed
         (domain/claim-request
          open
-         {:helper-id helper-id
-          :now t1})
+         {:now t1})
 
         traveling
         (domain/mark-request-on-the-way
          claimed
-         {:helper-id helper-id
-          :now t2})
+         {:now t2})
 
         completed
         (domain/complete-request
          traveling
-         {:helper-id helper-id
-          :now t3})]
+         {:now t3})]
     (is
      (=
       :claimed
@@ -757,13 +826,8 @@
       claimed))
 
     (is
-     (domain/actively-assigned?
+     (domain/lifecycle-expects-primary-assignment?
       claimed))
-
-    (is
-     (domain/assigned-to?
-      claimed
-      helper-id))
 
     (is
      (=
@@ -772,6 +836,10 @@
 
     (is
      (domain/on-the-way?
+      traveling))
+
+    (is
+     (domain/lifecycle-expects-primary-assignment?
       traveling))
 
     (is
@@ -784,19 +852,15 @@
       completed))
 
     (is
-     (domain/has-helper?
-      completed))
-
-    (is
      (false?
-      (domain/actively-assigned?
+      (domain/lifecycle-expects-primary-assignment?
        completed)))
 
     (is
-     (false?
-      (domain/assigned-to?
+     (not
+      (contains?
        completed
-       helper-id)))
+       :request/helper)))
 
     (is
      (=
@@ -811,14 +875,12 @@
   (let [unclaimed
         (domain/unclaim-request
          (claimed-request)
-         {:helper-id helper-id
-          :now t2})
+         {:now t2})
 
         reclaimed
         (domain/claim-request
          unclaimed
-         {:helper-id other-helper-id
-          :now t3})]
+         {:now t3})]
     (is
      (domain/open?
       unclaimed))
@@ -827,18 +889,20 @@
      (not
       (contains?
        unclaimed
-       :request/helper)))
-
-    (is
-     (not
-      (contains?
-       unclaimed
        :request/claimed-at)))
 
     (is
-     (=
-      other-helper-id
-      (domain/helper-id reclaimed)))
+     (false?
+      (domain/lifecycle-expects-primary-assignment?
+       unclaimed)))
+
+    (is
+     (domain/claimed?
+      reclaimed))
+
+    (is
+     (domain/lifecycle-expects-primary-assignment?
+      reclaimed))
 
     (is
      (domain/request-document-consistent?
@@ -870,7 +934,7 @@
 
       (is
        (false?
-        (domain/actively-assigned?
+        (domain/lifecycle-expects-primary-assignment?
          cancelled)))
 
       (is
@@ -880,21 +944,11 @@
 (deftest request-invalid-transition-test
   (is
    (=
-    :request/not-assigned-helper
-    (error-type
-     #(domain/unclaim-request
-       (claimed-request)
-       {:helper-id other-helper-id
-        :now t2}))))
-
-  (is
-   (=
     :request/invalid-transition
     (error-type
      #(domain/unclaim-request
        (on-the-way-request)
-       {:helper-id helper-id
-        :now t3}))))
+       {:now t3}))))
 
   (is
    (=
@@ -902,8 +956,7 @@
     (error-type
      #(domain/complete-request
        (open-request)
-       {:helper-id helper-id
-        :now t1}))))
+       {:now t1}))))
 
   (is
    (=
@@ -911,17 +964,7 @@
     (error-type
      #(domain/claim-request
        (claimed-request)
-       {:helper-id other-helper-id
-        :now t2}))))
-
-  (is
-   (=
-    :request/not-assigned-helper
-    (error-type
-     #(domain/complete-request
-       (claimed-request)
-       {:helper-id other-helper-id
-        :now t2}))))
+       {:now t2}))))
 
   (is
    (=
@@ -933,7 +976,7 @@
         :reason :unqualified})))))
 
 ;; =============================================================================
-;; Commands
+;; Request commands and operation vocabulary
 ;; =============================================================================
 
 (deftest request-command-test
@@ -953,8 +996,7 @@
         claim-command
         (domain/claim-command
          created
-         {:helper-id helper-id
-          :now t1})]
+         {:now t1})]
     (is
      (=
       :request
@@ -987,10 +1029,14 @@
       (:model/expected claim-command)))
 
     (is
-     (=
-      helper-id
-      (domain/helper-id
-       (command-document claim-command)))))
+     (domain/claimed?
+      (command-document claim-command)))
+
+    (is
+     (not
+      (contains?
+       (command-document claim-command)
+       :request/helper))))
 
   (is
    (=
@@ -1000,8 +1046,29 @@
      :unclaim
      :mark-on-the-way
      :complete
-     :cancel]
+     :cancel
+     :add-collaborator
+     :remove-collaborator
+     :reassign]
     domain/operation-order))
+
+  (is
+   (=
+    #{:create
+      :edit
+      :claim
+      :unclaim
+      :mark-on-the-way
+      :complete
+      :cancel}
+    domain/document-operations))
+
+  (is
+   (=
+    #{:add-collaborator
+      :remove-collaborator
+      :reassign}
+    domain/assignment-operations))
 
   (is
    (every?
@@ -1009,7 +1076,372 @@
     domain/operation-order)))
 
 ;; =============================================================================
-;; Graph
+;; Request Assignment domain
+;; =============================================================================
+
+(deftest assignment-construction-test
+  (let [primary
+        (primary-assignment)
+
+        collaborator
+        (collaborator-assignment)]
+    (is
+     (=
+      primary-assignment-id
+      (assignment/assignment-id primary)))
+
+    (is
+     (=
+      request-id
+      (assignment/request-id primary)))
+
+    (is
+     (=
+      helper-id
+      (assignment/helper-id primary)))
+
+    (is
+     (assignment/primary?
+      primary))
+
+    (is
+     (assignment/active?
+      primary))
+
+    (is
+     (assignment/active-primary?
+      primary))
+
+    (is
+     (false?
+      (assignment/collaborator?
+       primary)))
+
+    (is
+     (=
+      :request/claim
+      (assignment/source primary)))
+
+    (is
+     (=
+      helper-id
+      (assignment/assigned-by primary)))
+
+    (is
+     (=
+      t1
+      (assignment/assigned-at primary)))
+
+    (is
+     (assignment/document-consistent?
+      primary))
+
+    (is
+     (m/validate
+      request.schema/request-assignment-document-schema
+      primary))
+
+    (is
+     (m/validate
+      (:request-assignment
+       request.schema/schema)
+      primary))
+
+    (is
+     (assignment/collaborator?
+      collaborator))
+
+    (is
+     (assignment/active-collaborator?
+      collaborator))
+
+    (is
+     (assignment/for-helper?
+      collaborator
+      collaborator-id))
+
+    (is
+     (assignment/for-request?
+      collaborator
+      request-id))))
+
+(deftest assignment-create-validation-test
+  (is
+   (=
+    :request-assignment/invalid-create-input
+    (error-type
+     #(assignment/new-assignment
+       {:id nil
+        :request-id nil
+        :helper-id nil
+        :role :invalid
+        :source :unqualified
+        :actor-id "bad"
+        :now nil}))))
+
+  (is
+   (=
+    #{:id
+      :request-id
+      :helper-id
+      :role
+      :source
+      :actor-id
+      :now}
+    (set
+     (keys
+      (assignment/create-input-errors
+       {:id nil
+        :request-id nil
+        :helper-id nil
+        :role :invalid
+        :source :unqualified
+        :actor-id "bad"
+        :now nil}))))))
+
+(deftest assignment-end-lifecycle-test
+  (let [active
+        (collaborator-assignment)
+
+        ended
+        (assignment/end-assignment
+         active
+         {:actor-id helper-id
+          :reason :request/collaborator-removed
+          :now t3})]
+    (is
+     (assignment/ended?
+      ended))
+
+    (is
+     (false?
+      (assignment/active?
+       ended)))
+
+    (is
+     (=
+      t3
+      (assignment/ended-at ended)))
+
+    (is
+     (=
+      helper-id
+      (assignment/ended-by ended)))
+
+    (is
+     (=
+      :request/collaborator-removed
+      (assignment/end-reason ended)))
+
+    (is
+     (=
+      1
+      (assignment/revision ended)))
+
+    (is
+     (=
+      t3
+      (assignment/updated-at ended)))
+
+    (is
+     (assignment/document-consistent?
+      ended))
+
+    (is
+     (m/validate
+      request.schema/request-assignment-document-schema
+      ended))
+
+    (is
+     (=
+      :request-assignment/already-ended
+      (error-type
+       #(assignment/end-assignment
+         ended
+         {:actor-id helper-id
+          :reason :request/collaborator-removed
+          :now t4}))))))
+
+(deftest assignment-collection-facts-test
+  (let [primary
+        (primary-assignment)
+
+        collaborator
+        (collaborator-assignment)
+
+        ended
+        (ended-assignment
+         collaborator)
+
+        assignments
+        [primary
+         collaborator
+         ended]]
+    (is
+     (=
+      [primary
+       collaborator]
+      (assignment/active-assignments
+       assignments)))
+
+    (is
+     (=
+      [ended]
+      (assignment/ended-assignments
+       assignments)))
+
+    (is
+     (=
+      [primary]
+      (assignment/active-primary-assignments
+       assignments)))
+
+    (is
+     (=
+      [collaborator]
+      (assignment/active-collaborator-assignments
+       assignments)))
+
+    (is
+     (=
+      primary
+      (assignment/active-primary-assignment
+       assignments)))
+
+    (is
+     (=
+      collaborator
+      (assignment/active-assignment-for-helper
+       assignments
+       collaborator-id)))
+
+    (is
+     (=
+      #{helper-id
+        collaborator-id}
+      (assignment/active-helper-ids
+       assignments)))
+
+    (is
+     (=
+      #{collaborator-id}
+      (assignment/active-collaborator-helper-ids
+       assignments)))))
+
+(deftest assignment-ambiguity-test
+  (let [another-primary
+        (primary-assignment
+         {:id other-assignment-id
+          :helper-id replacement-helper-id})]
+    (is
+     (=
+      :request-assignment/ambiguous-primary
+      (error-type
+       #(assignment/active-primary-assignment
+         [(primary-assignment)
+          another-primary])))))
+
+  (let [second-for-helper
+        (collaborator-assignment
+         {:id other-assignment-id
+          :helper-id helper-id})]
+    (is
+     (=
+      :request-assignment/ambiguous-helper
+      (error-type
+       #(assignment/active-assignment-for-helper
+         [(primary-assignment)
+          second-for-helper]
+         helper-id))))))
+
+(deftest assignment-command-test
+  (let [create-command
+        (assignment/create-command
+         {:id primary-assignment-id
+          :request-id request-id
+          :helper-id helper-id
+          :role :primary
+          :source :request/claim
+          :actor-id helper-id
+          :now t1})
+
+        created
+        (command-document
+         create-command)
+
+        end-command
+        (assignment/end-command
+         created
+         {:actor-id helper-id
+          :reason :request/unclaimed
+          :now t2})]
+    (is
+     (=
+      assignment/entity-type
+      (:model/entity-type create-command)))
+
+    (is
+     (=
+      :create
+      (:model/operation create-command)))
+
+    (is
+     (nil?
+      (:model/expected create-command)))
+
+    (is
+     (=
+      :end
+      (:model/operation end-command)))
+
+    (is
+     (=
+      (model.common/expected-version
+       created
+       assignment/version)
+      (:model/expected end-command)))
+
+    (is
+     (assignment/ended?
+      (command-document end-command)))))
+
+(deftest assignment-schema-registry-test
+  (let [primary
+        (primary-assignment)
+
+        ended
+        (ended-assignment)]
+    (is
+     (m/validate
+      request.schema/request-assignment-document-schema
+      primary))
+
+    (is
+     (m/validate
+      request.schema/request-assignment-document-schema
+      ended))
+
+    (is
+     (m/validate
+      request.schema/assignment-expected-version-schema
+      (model.common/expected-version
+       primary
+       assignment/version)))
+
+    (is
+     (=
+      request.schema/request-assignment-document-schema
+      (:request-assignment
+       request.schema/schema)))
+
+    (is
+     (=
+      request.schema/request-assignment-document-schema
+      (:request-assignment/doc
+       request.schema/schema)))))
+
+;; =============================================================================
+;; Graph input builders and query contracts
 ;; =============================================================================
 
 (deftest request-graph-input-builder-test
@@ -1046,15 +1478,34 @@
 
   (is
    (=
-    {:request/include-terminal? false}
-    (request.graph/location-requests-query-input
-     {}))))
+    {:request-assignment/id primary-assignment-id}
+    (request.graph/assignment-query-input
+     {:assignment-id primary-assignment-id})))
+
+  (is
+   (=
+    {:request/id request-id
+     :request-assignment/include-ended? false}
+    (request.graph/request-assignments-query-input
+     {:request-id request-id})))
+
+  (is
+   (=
+    {:request/id request-id
+     :request-assignment/include-ended? true}
+    (request.graph/request-assignments-query-input
+     {:request-id request-id
+      :include-ended? true}))))
 
 (deftest request-graph-query-contract-test
   (doseq [value
           [:request/found?
            :request/doc
-           :request/expected-version]]
+           :request/expected-version
+           :request/assignments
+           :request/has-primary-assignment?
+           :request/active-helper-ids
+           :request/active-collaborator-helper-ids]]
     (is
      (query-contains?
       request.graph/request-command-query
@@ -1065,7 +1516,10 @@
            :request/status
            :request/editable?
            :request/claimable?
-           :request/actively-assigned?]]
+           :request/expects-primary-assignment?
+           :request/assignments
+           :request-assignment/doc
+           :request-assignment/active?]]
     (is
      (query-contains?
       request.graph/request-facts-query
@@ -1076,10 +1530,23 @@
            :request/doc
            :request/expected-version
            :request/active?
-           :request/terminal?]]
+           :request/terminal?
+           :request/assignments
+           :request/active-helper-ids]]
     (is
      (query-contains?
       request.graph/location-requests-query
+      value)))
+
+  (doseq [value
+          [:request-assignment/found?
+           :request-assignment/doc
+           :request-assignment/expected-version
+           :request-assignment/active?
+           :request-assignment/primary?]]
+    (is
+     (query-contains?
+      request.graph/assignment-facts-query
       value))))
 
 (deftest request-graph-uses-biff-connection-test
@@ -1116,6 +1583,10 @@
       [[:canonical
         {:select [:xt/id]}]]
       @calls))))
+
+;; =============================================================================
+;; Request Graph resolvers
+;; =============================================================================
 
 (deftest request-field-and-lifecycle-resolver-test
   (let [request-document
@@ -1165,7 +1636,7 @@
 
     (is
      (true?
-      (:request/actively-assigned? facts)))
+      (:request/expects-primary-assignment? facts)))
 
     (is
      (false?
@@ -1174,6 +1645,114 @@
     (is
      (false?
       (:request/terminal? facts)))))
+
+(deftest assignment-field-and-lifecycle-resolver-test
+  (let [document
+        (collaborator-assignment)
+
+        fields
+        (resolve-resolver
+         request.graph/assignment-fields
+         {}
+         {:request-assignment/doc document})
+
+        facts
+        (resolve-resolver
+         request.graph/assignment-lifecycle-facts
+         {}
+         {:request-assignment/doc document})]
+    (is
+     (=
+      collaborator-assignment-id
+      (:request-assignment/id fields)))
+
+    (is
+     (=
+      request-id
+      (:request-assignment/request-id fields)))
+
+    (is
+     (=
+      collaborator-id
+      (:request-assignment/helper-id fields)))
+
+    (is
+     (=
+      :collaborator
+      (:request-assignment/role fields)))
+
+    (is
+     (=
+      (model.common/expected-version
+       document
+       assignment/version)
+      (:request-assignment/expected-version fields)))
+
+    (is
+     (true?
+      (:request-assignment/active? facts)))
+
+    (is
+     (true?
+      (:request-assignment/collaborator? facts)))
+
+    (is
+     (true?
+      (:request-assignment/active-collaborator? facts)))
+
+    (is
+     (false?
+      (:request-assignment/primary? facts)))))
+
+(deftest request-assignment-summary-resolver-test
+  (let [primary
+        (primary-assignment)
+
+        collaborator
+        (collaborator-assignment)
+
+        result
+        (resolve-resolver
+         request.graph/request-assignment-summary
+         {}
+         {:request/doc
+          (claimed-request)
+
+          :request/assignments
+          [{:request-assignment/doc primary}
+           {:request-assignment/doc collaborator}]})]
+    (is
+     (true?
+      (:request/has-primary-assignment? result)))
+
+    (is
+     (=
+      #{helper-id
+        collaborator-id}
+      (:request/active-helper-ids result)))
+
+    (is
+     (=
+      #{collaborator-id}
+      (:request/active-collaborator-helper-ids result)))))
+
+(deftest request-assignment-summary-rejects-wrong-request-test
+  (let [wrong
+        (collaborator-assignment
+         {:id other-assignment-id
+          :request-id other-request-id})]
+    (is
+     (=
+      :request.graph/assignment-request-mismatch
+      (error-type
+       #(resolve-resolver
+         request.graph/request-assignment-summary
+         {}
+         {:request/doc
+          (claimed-request)
+
+          :request/assignments
+          [{:request-assignment/doc wrong}]}))))))
 
 (deftest request-by-id-resolver-test
   (let [calls
@@ -1222,6 +1801,139 @@
        request.graph/request-by-id
        {:biff/conn :connection}
        {:request/id other-request-id})))))
+
+(deftest assignment-by-id-resolver-test
+  (let [calls
+        (atom [])
+
+        document
+        (primary-assignment)]
+    (with-redefs
+     [biffx/q
+      (fn [connectable query]
+        (swap!
+         calls
+         conj
+         [connectable query])
+        [document])]
+
+      (is
+       (=
+        {:request-assignment/found? true
+         :request-assignment/doc document}
+        (resolve-resolver
+         request.graph/assignment-by-id
+         {:biff/conn :connection}
+         {:request-assignment/id primary-assignment-id}))))
+
+    (let [[connectable query]
+          (first @calls)]
+      (is
+       (=
+        :connection
+        connectable))
+
+      (is
+       (=
+        request.graph/assignment-document-columns
+        (:select query)))
+
+      (is
+       (=
+        assignment/entity-type
+        (:from query)))
+
+      (is
+       (query-contains?
+        (:where query)
+        primary-assignment-id)))))
+
+(deftest assignments-for-request-resolver-test
+  (let [primary
+        (primary-assignment)
+
+        collaborator
+        (collaborator-assignment)
+
+        calls
+        (atom [])]
+    (with-redefs
+     [biffx/q
+      (fn [connectable query]
+        (swap!
+         calls
+         conj
+         [connectable query])
+        [primary
+         collaborator])]
+
+      (is
+       (=
+        {:request/assignments
+         [{:request-assignment/doc primary}
+          {:request-assignment/doc collaborator}]}
+        (resolve-resolver
+         request.graph/assignments-for-request
+         {:biff/conn :connection}
+         {:request/id request-id
+          :request-assignment/include-ended? false}))))
+
+    (let [[connectable query]
+          (first @calls)]
+      (is
+       (=
+        :connection
+        connectable))
+
+      (is
+       (=
+        assignment/entity-type
+        (:from query)))
+
+      (is
+       (query-contains?
+        (:where query)
+        [:= :request-assignment/request request-id]))
+
+      (is
+       (query-contains?
+        (:where query)
+        [:= :request-assignment/status :active]))
+
+      (is
+       (=
+        [[:request-assignment/assigned-at :asc]
+         [:xt/id :asc]]
+        (:order-by query)))))
+
+  (let [captured
+        (atom nil)
+
+        ended
+        (ended-assignment)]
+    (with-redefs
+     [biffx/q
+      (fn [_connectable query]
+        (reset!
+         captured
+         query)
+        [ended])]
+
+      (is
+       (=
+        {:request/assignments
+         [{:request-assignment/doc ended}]}
+        (resolve-resolver
+         request.graph/assignments-for-request
+         {:biff/conn :connection}
+         {:request/id request-id
+          :request-assignment/include-ended? true}))))
+
+    (is
+     (false?
+      (query-contains?
+       (:where @captured)
+       [:= :request-assignment/status :active])))))
 
 (deftest location-request-collection-resolver-test
   (let [open
@@ -1322,34 +2034,10 @@
      (false?
       (query-contains?
        (:where @captured)
-       request.graph/active-status-predicate))))
-
-  (let [called?
-        (atom false)]
-    (with-redefs
-     [biffx/q
-      (fn [& _]
-        (reset!
-         called?
-         true)
-        [])]
-
-      (is
-       (=
-        {:request/location-requests []}
-        (resolve-resolver
-         request.graph/requests-at-location
-         {:biff/conn :connection}
-         {:request/organization-id nil
-          :request/location-id location-id
-          :request/include-terminal? false}))))
-
-    (is
-     (false?
-      @called?))))
+       request.graph/active-status-predicate)))))
 
 ;; =============================================================================
-;; FX planning and machine start
+;; FX planning
 ;; =============================================================================
 
 (deftest request-fx-create-plan-test
@@ -1409,21 +2097,6 @@
 
     (is
      (=
-      organization-id
-      (:organization/id change)))
-
-    (is
-     (=
-      location-id
-      (:location/id change)))
-
-    (is
-     (=
-      :open
-      (:request/status change)))
-
-    (is
-     (=
       {:coalesce-key
        [:request request-id]}
       ((:entry-fn transaction-plan)
@@ -1436,34 +2109,68 @@
        plan
        [:result :request])))))
 
-(deftest request-fx-update-plan-test
+(deftest request-fx-claim-plan-with-primary-assignment-test
   (let [before
         (open-request)
 
-        command
+        request-command
         (domain/claim-command
          before
-         {:helper-id helper-id
+         {:now t1})
+
+        assignment-command
+        (assignment/create-command
+         {:id primary-assignment-id
+          :request-id request-id
+          :helper-id helper-id
+          :role :primary
+          :source :request/claim
+          :actor-id helper-id
           :now t1})
+
+        primary
+        (command-document
+         assignment-command)
+
+        assertion
+        {:assert
+         [:= 0
+          {:select [[[:count '*']]]
+           :from 'request-assignment
+           :where
+           [:= :request-assignment/request request-id]}]}
+
+        assignment-change
+        {:topic :request
+         :id request-id
+         :change/kind :updated
+         :request/operation :claim
+         :request/id request-id
+         :request-assignment/id primary-assignment-id
+         :request-assignment/helper helper-id
+         :request-assignment/role :primary
+         :request-assignment/status :active
+         :request-assignment/previous-status nil}
 
         plan
         (request.fx/plan-update-request
          {:before before
-          :command command
-          :location-authorization-versions
-          [location-guard]
-          :actor-authorization-versions
-          [helper-guard]})
+          :command request-command
+          :assignment-commands [assignment-command]
+          :assignment-changes [assignment-change]
+          :assertions [assertion]
+          :location-authorization-versions [location-guard]
+          :actor-authorization-versions [helper-guard]})
 
         transaction-plan
         (:transaction-plan plan)
 
-        change
-        (first
-         (:changes transaction-plan))]
+        changes
+        (:changes transaction-plan)]
     (is
      (=
-      [command]
+      [request-command
+       assignment-command]
       (:commands transaction-plan)))
 
     (is
@@ -1474,47 +2181,271 @@
        transaction-plan)))
 
     (is
-     (empty?
+     (=
+      [assertion]
       (:assertions transaction-plan)))
 
     (is
      (=
-      :updated
-      (:change/kind change)))
+      2
+      (count changes)))
 
     (is
      (=
       :claim
-      (:request/operation change)))
+      (:request/operation
+       (first changes))))
 
     (is
      (=
       :open
-      (:request/previous-status change)))
+      (:request/previous-status
+       (first changes))))
 
     (is
      (=
       :claimed
-      (:request/status change)))
+      (:request/status
+       (first changes))))
 
     (is
      (=
-      helper-id
-      (:request/helper change)))
+      assignment-change
+      (second changes)))
 
     (is
-     (=
-      1
-      (:request/revision change)))
-
-    (is
-     (=
-      helper-id
+     (domain/claimed?
       (get-in
        plan
-       [:result
-        :request
-        :request/helper])))))
+       [:result :request])))
+
+    (is
+     (assignment/active-primary?
+      primary))))
+
+(deftest request-fx-assignment-only-plan-test
+  (let [request-document
+        (claimed-request)
+
+        assignment-command
+        (assignment/create-command
+         {:id collaborator-assignment-id
+          :request-id request-id
+          :helper-id collaborator-id
+          :role :collaborator
+          :source :request/collaboration
+          :actor-id helper-id
+          :now t2})
+
+        collaborator
+        (command-document
+         assignment-command)
+
+        change
+        {:topic :request
+         :id request-id
+         :change/kind :updated
+         :request/operation :add-collaborator
+         :request/id request-id
+         :request-assignment/id collaborator-assignment-id
+         :request-assignment/helper collaborator-id
+         :request-assignment/role :collaborator
+         :request-assignment/status :active
+         :request-assignment/previous-status nil}
+
+        plan
+        (request.fx/plan-assignment-operation
+         {:request-document request-document
+          :operation :add-collaborator
+          :assignment-commands [assignment-command]
+          :assignment-changes [change]
+          :location-authorization-versions [location-guard]
+          :actor-authorization-versions [helper-guard]
+          :target-authorization-versions [replacement-helper-guard]})
+
+        transaction-plan
+        (:transaction-plan plan)]
+    (is
+     (=
+      [assignment-command]
+      (:commands transaction-plan)))
+
+    (is
+     (=
+      [location-guard
+       helper-guard
+       replacement-helper-guard]
+      (:authorization-versions
+       transaction-plan)))
+
+    (is
+     (=
+      [change]
+      (:changes transaction-plan)))
+
+    (is
+     (=
+      request-document
+      (get-in
+       plan
+       [:result :request])))
+
+    (is
+     (=
+      [collaborator]
+      (get-in
+       plan
+       [:result :assignments])))
+
+    (is
+     (=
+      {:coalesce-key
+       [:request request-id]}
+      ((:entry-fn transaction-plan)
+       change)))))
+
+;; =============================================================================
+;; FX claim authorization semantics
+;; =============================================================================
+
+(deftest request-fx-self-claim-authorization-test
+  (let [claim-authorization
+        (private-fn
+         'net.humanhelp.site.model.request.fx
+         'claim-authorization)
+
+        eligible-var
+        (private-var
+         'net.humanhelp.site.model.request.fx
+         'eligible-helper-authorization)
+
+        manager-var
+        (private-var
+         'net.humanhelp.site.model.request.fx
+         'manager-authorization)
+
+        eligible-calls
+        (atom [])
+
+        manager-calls
+        (atom [])]
+    (with-redefs-fn
+      {eligible-var
+       (fn [ctx target-id scope-context skill]
+         (swap!
+          eligible-calls
+          conj
+          [ctx target-id scope-context skill])
+         {:authorization-versions
+          [helper-guard]})
+
+       manager-var
+       (fn [& args]
+         (swap!
+          manager-calls
+          conj
+          args)
+         {:authorization-versions
+          [manager-guard]})}
+      (fn []
+        (is
+         (=
+          {:actor-id helper-id
+           :target-helper-id helper-id
+           :required-skill "forklift operator"
+           :authorization-versions
+           [helper-guard]}
+          (claim-authorization
+           {:current-user/id helper-id}
+           {:skill " Forklift Operator "}
+           {:organization/id organization-id})))))
+
+    (is
+     (=
+      [[{:current-user/id helper-id}
+        helper-id
+        {:organization/id organization-id}
+        "forklift operator"]]
+      @eligible-calls))
+
+    (is
+     (empty?
+      @manager-calls))))
+
+(deftest request-fx-manager-claim-authorization-test
+  (let [claim-authorization
+        (private-fn
+         'net.humanhelp.site.model.request.fx
+         'claim-authorization)
+
+        eligible-var
+        (private-var
+         'net.humanhelp.site.model.request.fx
+         'eligible-helper-authorization)
+
+        manager-var
+        (private-var
+         'net.humanhelp.site.model.request.fx
+         'manager-authorization)
+
+        eligible-calls
+        (atom [])
+
+        manager-calls
+        (atom [])
+
+        scope-context
+        {:organization/id organization-id}]
+    (with-redefs-fn
+      {eligible-var
+       (fn [ctx target-id actual-scope skill]
+         (swap!
+          eligible-calls
+          conj
+          [ctx target-id actual-scope skill])
+         {:authorization-versions
+          [replacement-helper-guard]})
+
+       manager-var
+       (fn [ctx actor-id actual-scope]
+         (swap!
+          manager-calls
+          conj
+          [ctx actor-id actual-scope])
+         {:authorization-versions
+          [manager-guard]})}
+      (fn []
+        (is
+         (=
+          {:actor-id manager-id
+           :target-helper-id replacement-helper-id
+           :required-skill nil
+           :authorization-versions
+           [manager-guard
+            replacement-helper-guard]}
+          (claim-authorization
+           {:current-user/id manager-id}
+           {:helper-id replacement-helper-id}
+           scope-context)))))
+
+    (is
+     (=
+      [[{:current-user/id manager-id}
+        manager-id
+        scope-context]]
+      @manager-calls))
+
+    (is
+     (=
+      [[{:current-user/id manager-id}
+        replacement-helper-id
+        scope-context
+        nil]]
+      @eligible-calls))))
+
+;; =============================================================================
+;; FX machine start and registry
+;; =============================================================================
 
 (deftest request-fx-update-machine-start-test
   (let [ctx
@@ -1549,7 +2480,8 @@
 
     (is
      (=
-      {:request/id request-id}
+      {:request/id request-id
+       :request-assignment/include-ended? false}
       (second descriptor)))
 
     (is
@@ -1571,7 +2503,10 @@
       :request/unclaim
       :request/mark-on-the-way
       :request/complete
-      :request/cancel}
+      :request/cancel
+      :request/add-collaborator
+      :request/remove-collaborator
+      :request/reassign}
     (set
      (keys
       request.fx/operations)))))
@@ -1604,8 +2539,33 @@
 
   (is
    (=
+    request.graph/assignment-document-query
+    request/assignment-document-query))
+
+  (is
+   (=
+    request.graph/request-command-query
+    request/request-command-query))
+
+  (is
+   (=
     request.graph/request-facts-query
     request/request-query))
+
+  (is
+   (=
+    request.graph/assignment-facts-query
+    request/assignment-query))
+
+  (is
+   (=
+    request.graph/active-assignments-query
+    request/active-assignments-query))
+
+  (is
+   (=
+    request.graph/assignment-history-query
+    request/assignment-history-query))
 
   (is
    (=
@@ -1619,23 +2579,23 @@
 
   (is
    (=
-    domain/statuses
-    request/statuses))
-
-  (is
-   (=
-    domain/active-statuses
-    request/active-statuses))
-
-  (is
-   (=
-    domain/terminal-statuses
-    request/terminal-statuses))
+    :request-assignment
+    request/assignment-entity-type))
 
   (is
    (=
     domain/operations
     request/operations-set))
+
+  (is
+   (=
+    assignment/roles
+    request/assignment-roles))
+
+  (is
+   (=
+    assignment/statuses
+    request/assignment-statuses))
 
   (doseq [[key value]
           [[:request/create
@@ -1657,7 +2617,16 @@
             #'request/complete-request]
 
            [:request/cancel
-            #'request/cancel-request]]]
+            #'request/cancel-request]
+
+           [:request/add-collaborator
+            #'request/add-collaborator]
+
+           [:request/remove-collaborator
+            #'request/remove-collaborator]
+
+           [:request/reassign
+            #'request/reassign-request]]]
     (is
      (identical?
       value
@@ -1668,14 +2637,61 @@
   (doseq [symbol
           '[create-command
             new-request
+            new-assignment
+            end-command
             plan-create-request
+            plan-assignment-operation
             request-query-input
-            location-requests-query-input]]
+            assignment-query-input]]
     (is
      (nil?
       (ns-resolve
        'net.humanhelp.site.model.request.core
        symbol)))))
+
+(deftest request-core-assignment-projection-test
+  (let [primary
+        (primary-assignment)
+
+        collaborator
+        (collaborator-assignment)
+
+        facts
+        {:request/assignments
+         [{:request-assignment/doc primary}
+          {:request-assignment/doc collaborator}]}]
+    (is
+     (=
+      [primary
+       collaborator]
+      (request/assignment-documents
+       facts)))
+
+    (is
+     (=
+      primary
+      (request/primary-assignment
+       facts)))
+
+    (is
+     (=
+      [collaborator]
+      (request/collaborator-assignment-documents
+       facts)))
+
+    (is
+     (=
+      helper-id
+      (request/assignment-helper-id
+       primary)))
+
+    (is
+     (request/primary-assignment?
+      primary))
+
+    (is
+     (request/active-collaborator-assignment?
+      collaborator))))
 
 (deftest request-core-read-delegation-test
   (let [queries
@@ -1684,12 +2700,23 @@
         ctx
         {:ctx true}
 
-        facts
+        request-facts
         {:request/found? true
          :request/doc
-         (open-request)}
+         (open-request)
+         :request/assignments []}
 
-        collection
+        assignment-facts
+        {:request-assignment/found? true
+         :request-assignment/doc
+         (primary-assignment)}
+
+        assignment-collection
+        {:request/assignments
+         [{:request-assignment/doc
+           (primary-assignment)}]}
+
+        location-collection
         {:request/location-requests
          [{:request/doc
            (open-request)}]}
@@ -1705,17 +2732,42 @@
          queries
          conj
          [query-ctx input query])
-        (if
-         (=
-          query
-          request/request-query)
-          facts
-          collection))]
+        (cond
+          (= query request/request-query)
+          request-facts
+
+          (= query request/request-command-query)
+          request-facts
+
+          (= query request/assignment-query)
+          assignment-facts
+
+          (= query request/active-assignments-query)
+          assignment-collection
+
+          (= query request/assignment-history-query)
+          assignment-collection
+
+          (= query request/location-requests-query)
+          location-collection
+
+          :else
+          (throw
+           (ex-info
+            "Unexpected public Request query."
+            {:query query}))))]
 
       (is
        (=
-        facts
+        request-facts
         (request/request-facts
+         ctx
+         request-id)))
+
+      (is
+       (=
+        request-facts
+        (request/request-command-facts
          ctx
          request-id)))
 
@@ -1728,39 +2780,100 @@
 
       (is
        (=
-        collection
+        assignment-facts
+        (request/assignment-facts
+         ctx
+         primary-assignment-id)))
+
+      (is
+       (=
+        (primary-assignment)
+        (request/assignment-document
+         ctx
+         primary-assignment-id)))
+
+      (is
+       (=
+        assignment-collection
+        (request/request-assignments
+         ctx
+         request-id)))
+
+      (is
+       (=
+        assignment-collection
+        (request/request-assignment-history
+         ctx
+         request-id)))
+
+      (is
+       (=
+        (:request/assignments
+         assignment-collection)
+        (request/request-assignment-items
+         ctx
+         request-id)))
+
+      (is
+       (=
+        (:request/assignments
+         assignment-collection)
+        (request/request-assignment-history-items
+         ctx
+         request-id)))
+
+      (is
+       (=
+        location-collection
         (request/location-requests
          ctx
          location-input)))
 
       (is
        (=
-        (:request/location-requests collection)
+        (:request/location-requests
+         location-collection)
         (request/location-request-items
          ctx
          location-input))))
 
     (is
-     (=
-      [[ctx
-        {:request/id request-id}
-        request/request-query]
+     (some
+      #{[ctx
+         {:request/id request-id
+          :request-assignment/include-ended? false}
+         request/request-query]}
+      @queries))
 
-       [ctx
-        {:request/id request-id}
-        request/request-query]
+    (is
+     (some
+      #{[ctx
+         {:request/id request-id
+          :request-assignment/include-ended? false}
+         request/request-command-query]}
+      @queries))
 
-       [ctx
-        {:request/organization-id organization-id
-         :request/location-id location-id
-         :request/include-terminal? true}
-        request/location-requests-query]
+    (is
+     (some
+      #{[ctx
+         {:request-assignment/id primary-assignment-id}
+         request/assignment-query]}
+      @queries))
 
-       [ctx
-        {:request/organization-id organization-id
-         :request/location-id location-id
-         :request/include-terminal? true}
-        request/location-requests-query]]
+    (is
+     (some
+      #{[ctx
+         {:request/id request-id
+          :request-assignment/include-ended? false}
+         request/active-assignments-query]}
+      @queries))
+
+    (is
+     (some
+      #{[ctx
+         {:request/id request-id
+          :request-assignment/include-ended? true}
+         request/assignment-history-query]}
       @queries))))
 
 (deftest request-core-operation-delegation-test
@@ -1778,9 +2891,7 @@
         (swap!
          calls
          conj
-         [:create
-          actual-ctx
-          actual-input])
+         [:create actual-ctx actual-input])
         :create)
 
       request.fx/edit-request
@@ -1788,9 +2899,7 @@
         (swap!
          calls
          conj
-         [:edit
-          actual-ctx
-          actual-input])
+         [:edit actual-ctx actual-input])
         :edit)
 
       request.fx/claim-request
@@ -1798,9 +2907,7 @@
         (swap!
          calls
          conj
-         [:claim
-          actual-ctx
-          actual-input])
+         [:claim actual-ctx actual-input])
         :claim)
 
       request.fx/unclaim-request
@@ -1808,9 +2915,7 @@
         (swap!
          calls
          conj
-         [:unclaim
-          actual-ctx
-          actual-input])
+         [:unclaim actual-ctx actual-input])
         :unclaim)
 
       request.fx/mark-request-on-the-way
@@ -1818,9 +2923,7 @@
         (swap!
          calls
          conj
-         [:mark-on-the-way
-          actual-ctx
-          actual-input])
+         [:mark-on-the-way actual-ctx actual-input])
         :mark-on-the-way)
 
       request.fx/complete-request
@@ -1828,9 +2931,7 @@
         (swap!
          calls
          conj
-         [:complete
-          actual-ctx
-          actual-input])
+         [:complete actual-ctx actual-input])
         :complete)
 
       request.fx/cancel-request
@@ -1838,10 +2939,32 @@
         (swap!
          calls
          conj
-         [:cancel
-          actual-ctx
-          actual-input])
-        :cancel)]
+         [:cancel actual-ctx actual-input])
+        :cancel)
+
+      request.fx/add-collaborator
+      (fn [actual-ctx actual-input]
+        (swap!
+         calls
+         conj
+         [:add-collaborator actual-ctx actual-input])
+        :add-collaborator)
+
+      request.fx/remove-collaborator
+      (fn [actual-ctx actual-input]
+        (swap!
+         calls
+         conj
+         [:remove-collaborator actual-ctx actual-input])
+        :remove-collaborator)
+
+      request.fx/reassign-request
+      (fn [actual-ctx actual-input]
+        (swap!
+         calls
+         conj
+         [:reassign actual-ctx actual-input])
+        :reassign)]
 
       (is
        (=
@@ -1894,16 +3017,43 @@
 
       (is
        (=
-        :claim
-        (request/perform-action
+        :add-collaborator
+        (request/add-collaborator
          ctx
-         :claim
-         input))))
+         input)))
+
+      (is
+       (=
+        :remove-collaborator
+        (request/remove-collaborator
+         ctx
+         input)))
+
+      (is
+       (=
+        :reassign
+        (request/reassign-request
+         ctx
+         input)))
+
+      (doseq [operation
+              [:claim
+               :add-collaborator
+               :remove-collaborator
+               :reassign]]
+        (is
+         (=
+          operation
+          (request/perform-action
+           ctx
+           operation
+           input)))))
 
     (is
      (=
-      8
-      (count @calls)))
+      14
+      (count
+       @calls)))
 
     (is
      (every?

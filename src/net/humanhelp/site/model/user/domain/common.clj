@@ -5,7 +5,13 @@
    This namespace owns:
 
    - canonical email and phone values;
+   - organization-local skill names;
    - User-model role values.
+
+   Skills are intentionally simple organization-local strings. HumanHelp does
+   not define what a skill means, what qualifications establish it, or whether
+   two organizations use the same requirements for similarly named skills.
+   Membership owns which skills an employee has within one Organization.
 
    Structural HumanHelp authorization scopes are owned by
    net.humanhelp.site.model.authorization-scope. Compatibility aliases remain
@@ -90,6 +96,65 @@
     (re-matches
      phone-pattern
      value))))
+
+;; =============================================================================
+;; Skill values
+;; =============================================================================
+
+(def skill-max
+  120)
+
+(defn normalize-skill
+  "Returns the canonical representation of an organization-local skill name.
+
+   Skills are compared as case-insensitive strings. HumanHelp deliberately
+   assigns no universal semantic meaning to the resulting value."
+  [value]
+  (when
+   (string? value)
+    (let [value'
+          (.toLowerCase
+           ^String
+           (str/trim value)
+           Locale/ROOT)]
+      (when-not
+       (str/blank? value')
+        value'))))
+
+(defn skill?
+  [value]
+  (and
+   (string? value)
+
+   (=
+    value
+    (normalize-skill value))
+
+   (<=
+    (count value)
+    skill-max)))
+
+(defn normalize-skills
+  "Canonicalizes a collection of organization-local skill names.
+
+   Returns a set so Membership cannot contain duplicate skills. Invalid values
+   remain represented by nil in the result and are rejected by skills?."
+  [values]
+  (when
+   (coll? values)
+    (into
+     #{}
+     (map normalize-skill)
+     values)))
+
+(defn skills?
+  [value]
+  (and
+   (set? value)
+
+   (every?
+    skill?
+    value)))
 
 ;; =============================================================================
 ;; Role values

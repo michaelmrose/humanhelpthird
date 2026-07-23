@@ -11,6 +11,9 @@
    collection. For a Location, it normally contains the Location scope, every
    containing Organization Group scope, and the Organization scope.
 
+   Membership owns organization-local skill strings. Access exposes those
+   skills as facts but does not interpret their meaning or treat them as roles.
+
    Structural authorization-scope validation is shared through
    model.authorization-scope. Effective role and capability policy remains
    owned by User."
@@ -146,6 +149,37 @@
     (organization-affiliated?
      user
      memberships))))
+
+;; =============================================================================
+;; Skill composition
+;; =============================================================================
+
+(defn member-skills
+  "Returns the organization-local skill set for an access-enabled membership.
+
+   Suspended or otherwise access-disabled memberships expose no effective skill
+   set for operational helper selection."
+  [user membership]
+  (if
+   (access-enabled-membership?
+    user
+    membership)
+    (membership/skills
+     membership)
+    #{}))
+
+(defn has-skill?
+  "Returns true when an access-enabled membership has the requested
+   organization-local skill."
+  [user membership expected-skill]
+  (and
+   (access-enabled-membership?
+    user
+    membership)
+
+   (membership/has-skill?
+    membership
+    expected-skill)))
 
 ;; =============================================================================
 ;; Role-assignment composition
@@ -340,9 +374,13 @@
 (def invite-helper-to-location-capability
   :user/invite-helper-to-location)
 
+(def manage-member-skills-capability
+  :user/manage-member-skills)
+
 (def capabilities
   "Capabilities currently emitted in a public User access context."
-  #{invite-helper-to-location-capability})
+  #{invite-helper-to-location-capability
+    manage-member-skills-capability})
 
 (defn capability?
   [value]
@@ -357,7 +395,14 @@
      roles
      :admin)
     (conj
-     invite-helper-to-location-capability)))
+     invite-helper-to-location-capability
+     manage-member-skills-capability)
+
+    (contains?
+     roles
+     :supervisor)
+    (conj
+     manage-member-skills-capability)))
 
 (defn access-context
   "Returns a compact, consumer-facing access value for one Organization scope.
@@ -366,9 +411,13 @@
    role-assignment documents. It is safe for views and other models to consume
    without depending on User's internal Graph shape.
 
+   Membership skills are exposed as organization-local strings. Their presence
+   does not itself grant helper authority; roles and scopes still determine
+   whether the User may act at the target.
+
    organization-id and applicable-scopes must come from a trusted Organization
    read. Invalid or mismatched documents fail closed: the result contains no
-   Membership, roles, or capabilities."
+   Membership, roles, skills, or capabilities."
   [user membership role-assignments applicable-scopes organization-id]
   (when
    (and
@@ -407,6 +456,13 @@
             role/assigned-role)
            effective-assignments)
 
+          skills
+          (if
+           organization-membership?
+            (membership/skills
+             membership)
+            #{})
+
           capability-set
           (capabilities-for-roles
            roles)]
@@ -428,6 +484,9 @@
        :membership/active?
        (boolean
         organization-membership?)
+
+       :membership/skills
+       skills
 
        :user/effective-roles
        roles
@@ -479,6 +538,9 @@
 
    (boolean?
     (:membership/active? value))
+
+   (user.common/skills?
+    (:membership/skills value))
 
    (set?
     (:user/effective-roles value))
@@ -535,6 +597,11 @@
     (some?
      (:membership/id value)))
 
+   (or
+    (:membership/active? value)
+    (empty?
+     (:membership/skills value)))
+
    (=
     (:user/capabilities value)
     (capabilities-for-roles
@@ -561,3 +628,12 @@
   (has-capability?
    access-context
    invite-helper-to-location-capability))
+
+(defn can-manage-member-skills?
+  "Returns true when this access context may display member-skill management UI.
+
+   The write workflow must still reload and reauthorize against current data."
+  [access-context]
+  (has-capability?
+   access-context
+   manage-member-skills-capability))
