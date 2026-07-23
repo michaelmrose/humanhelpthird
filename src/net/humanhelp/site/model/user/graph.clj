@@ -18,6 +18,7 @@
    [com.biffweb.experimental :as biffx]
    [gesso.graph :as graph]
    [net.humanhelp.site.model.authorization-scope :as authorization-scope]
+   [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.user.domain.access :as access]
    [net.humanhelp.site.model.user.domain.identity :as identity]
    [net.humanhelp.site.model.user.domain.invitation :as invitation]
@@ -273,6 +274,54 @@
 ;; XTDB reads
 ;; =============================================================================
 
+(def ^:private timestamp-keys-by-entity-type
+  {identity/entity-type
+   [:user/created-at
+    :user/updated-at
+    :user/phone-verified-at
+    :user/email-verified-at
+    :user/suspended-at
+    :user/deleted-at]
+
+   membership/entity-type
+   [:membership/created-at
+    :membership/updated-at
+    :membership/suspended-at
+    :membership/revoked-at]
+
+   role/entity-type
+   [:role-assignment/created-at
+    :role-assignment/updated-at
+    :role-assignment/revoked-at]
+
+   invitation/entity-type
+   [:invitation/created-at
+    :invitation/updated-at
+    :invitation/expires-at
+    :invitation/accepted-at
+    :invitation/declined-at
+    :invitation/revoked-at]})
+
+(defn- normalize-loaded-document
+  [entity-type document]
+  (when document
+    (reduce
+     (fn [document timestamp-key]
+       (if
+        (contains?
+         document
+         timestamp-key)
+         (update
+          document
+          timestamp-key
+          model.common/normalize-timestamp)
+         document))
+     document
+     (get
+      timestamp-keys-by-entity-type
+      entity-type
+      []))))
+
 (defn- q
   [ctx query]
   (biffx/q
@@ -283,11 +332,15 @@
   [ctx table columns id]
   (when
    (uuid? id)
-    (first
-     (q ctx
-        {:select columns
-         :from table
-         :where [:= :xt/id id]}))))
+    (when-let [document
+               (first
+                (q ctx
+                   {:select columns
+                    :from table
+                    :where [:= :xt/id id]}))]
+      (normalize-loaded-document
+       table
+       document))))
 
 (defn- exactly-one-or-nil!
   [documents error-data]
@@ -310,10 +363,14 @@
 
 (defn- rows
   [ctx table columns where]
-  (q ctx
-     {:select columns
-      :from table
-      :where where}))
+  (mapv
+   (partial
+    normalize-loaded-document
+    table)
+   (q ctx
+      {:select columns
+       :from table
+       :where where})))
 
 (defn- load-user
   [ctx user-id]

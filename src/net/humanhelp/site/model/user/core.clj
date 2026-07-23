@@ -584,6 +584,16 @@
 ;; Effectful operations
 ;; =============================================================================
 
+(defn create-user
+  "Creates one User identity through the User FX workflow.
+
+   Input accepts the public identity creation fields, including canonical
+   :phone or :email and the corresponding verification flag."
+  [ctx input]
+  (user.fx/create-user
+   ctx
+   input))
+
 (defn invite-helper-to-location
   "Invites a helper to one active Location.
 
@@ -628,7 +638,8 @@
 
 (def operations
   "Effectful operations currently exposed by the User model."
-  {:user/invite-helper-to-location #'invite-helper-to-location
+  {:user/create-user #'create-user
+   :user/invite-helper-to-location #'invite-helper-to-location
    :user/accept-invitation #'accept-invitation
    :user/add-member-skill #'add-member-skill
    :user/remove-member-skill #'remove-member-skill})
