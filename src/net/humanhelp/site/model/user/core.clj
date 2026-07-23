@@ -11,6 +11,7 @@
    - stable raw Graph query contracts and compatibility reads;
    - normalized required entity and aggregate reads;
    - a compact, document-free scoped access context for consumers;
+   - organization-local Membership skill facts;
    - the currently supported effectful User operations;
    - selected pure User values and predicates.
 
@@ -42,7 +43,8 @@
     (ex-info
      message
      (cond-> {:error/type error-type}
-       (some? details) (assoc :error/details details))))))
+       (some? details)
+       (assoc :error/details details))))))
 
 ;; =============================================================================
 ;; Model registration
@@ -85,7 +87,7 @@
   user.graph/user-command-query)
 
 (def membership-query
-  "Loads a membership lookup result with :membership/found? and
+  "Loads a Membership lookup result with :membership/found? and
    :membership/doc."
   user.graph/membership-command-query)
 
@@ -95,20 +97,20 @@
   user.graph/role-assignment-command-query)
 
 (def invitation-query
-  "Loads an invitation lookup result with :invitation/found? and
+  "Loads an Invitation lookup result with :invitation/found? and
    :invitation/doc."
   user.graph/invitation-command-query)
 
 (def customer-query
-  "Loads one user, their memberships, and derived customer facts."
+  "Loads one User, their Memberships, and derived customer facts."
   user.graph/customer-query)
 
 (def active-role-assignments-at-scope-query
-  "Loads active assignments at one exact organization scope."
+  "Loads active assignments at one exact Organization scope."
   user.graph/active-role-assignments-at-scope-query)
 
 ;; User's detailed scoped-access Graph query remains private. It contains full
-;; identity, membership, and role-assignment documents needed to derive a safe
+;; identity, Membership, and role-assignment documents needed to derive a safe
 ;; public access context. Consumers should call access-context instead.
 (def ^:private access-proof-query
   user.graph/access-query)
@@ -120,8 +122,8 @@
 (defn user-facts
   "Loads a User identity by one supported lookup.
 
-   lookup may contain :user-id, :phone, or :email. The result follows
-   user-query and contains :user/found? plus optional :user/doc."
+   lookup may contain exactly one of :user-id, :phone, or :email. The result
+   follows user-query and contains :user/found? plus optional :user/doc."
   [ctx lookup]
   (graph/query
    ctx
@@ -129,7 +131,7 @@
    user-query))
 
 (defn membership-facts
-  "Loads one membership by UUID."
+  "Loads one Membership by UUID."
   [ctx membership-id]
   (graph/query
    ctx
@@ -147,7 +149,7 @@
    role-assignment-query))
 
 (defn invitation-facts
-  "Loads one invitation by UUID.
+  "Loads one Invitation by UUID.
 
    Raw-token lookup and hashing remain internal to accept-invitation."
   [ctx invitation-id]
@@ -158,15 +160,16 @@
    invitation-query))
 
 (defn customer-facts
-  "Loads customer/organization-affiliation facts for one user UUID."
+  "Loads customer/Organization-affiliation facts for one User UUID."
   [ctx user-id]
   (graph/query
    ctx
-   (user.graph/customer-query-input {:user-id user-id})
+   (user.graph/customer-query-input
+    {:user-id user-id})
    customer-query))
 
 (defn active-role-assignments-at-scope
-  "Loads active role assignments at one exact scope in an organization."
+  "Loads active role assignments at one exact scope in an Organization."
   [ctx organization-id scope]
   (graph/query
    ctx
@@ -174,6 +177,10 @@
     {:organization-id organization-id
      :scope scope})
    active-role-assignments-at-scope-query))
+
+;; =============================================================================
+;; Normalized required reads
+;; =============================================================================
 
 (defn- require-uuid!
   [value error-type message details]
@@ -204,8 +211,7 @@
   (let [document
         (get facts document-key)]
     (when-not
-     (document-predicate
-      document)
+     (document-predicate document)
       (fail!
        :user.core/invalid-read-result
        "User Graph returned a found entity without a valid document."
@@ -217,42 +223,29 @@
     document))
 
 (defn- user-lookup?
-  [{:keys
-    [user-id
-     phone
-     email]
-    :as lookup}]
+  [{:keys [user-id phone email] :as lookup}]
   (and
-   (map?
-    lookup)
+   (map? lookup)
 
    (=
     1
     (count
      (filter
       some?
-      [user-id
-       phone
-       email])))
+      [user-id phone email])))
 
    (or
     (and
-     (some?
-      user-id)
-     (uuid?
-      user-id))
+     (some? user-id)
+     (uuid? user-id))
 
     (and
-     (some?
-      phone)
-     (user.common/phone?
-      phone))
+     (some? phone)
+     (user.common/phone? phone))
 
     (and
-     (some?
-      email)
-     (user.common/email?
-      email)))))
+     (some? email)
+     (user.common/email? email)))))
 
 (defn require-user
   "Returns one valid User document or throws.
@@ -261,17 +254,14 @@
    :user-id, :phone, or :email."
   [ctx lookup]
   (when-not
-   (user-lookup?
-    lookup)
+   (user-lookup? lookup)
     (fail!
      :user/invalid-lookup
      "A User lookup must contain exactly one valid user ID, phone, or email."
      {:lookup lookup}))
 
   (require-document!
-   (user-facts
-    ctx
-    lookup)
+   (user-facts ctx lookup)
    :user/found?
    :user/doc
    identity/document-consistent?
@@ -289,9 +279,7 @@
    {:membership/id membership-id})
 
   (require-document!
-   (membership-facts
-    ctx
-    membership-id)
+   (membership-facts ctx membership-id)
    :membership/found?
    :membership/doc
    membership/document-consistent?
@@ -309,9 +297,7 @@
    {:role-assignment/id role-assignment-id})
 
   (require-document!
-   (role-assignment-facts
-    ctx
-    role-assignment-id)
+   (role-assignment-facts ctx role-assignment-id)
    :role-assignment/found?
    :role-assignment/doc
    role/document-consistent?
@@ -331,9 +317,7 @@
    {:invitation/id invitation-id})
 
   (require-document!
-   (invitation-facts
-    ctx
-    invitation-id)
+   (invitation-facts ctx invitation-id)
    :invitation/found?
    :invitation/doc
    invitation/document-consistent?
@@ -354,9 +338,7 @@
    {:user/id user-id})
 
   (let [facts
-        (customer-facts
-         ctx
-         user-id)
+        (customer-facts ctx user-id)
 
         user
         (require-document!
@@ -377,53 +359,46 @@
         (mapv
          :membership/doc
          membership-nodes)]
-
     (when-not
      (every?
-      #(access/membership-for-user?
-        user
-        %)
+      #(and
+        (membership/document-consistent? %)
+        (membership/for-user? % user-id))
       memberships)
       (fail!
-       :user.core/invalid-customer-facts
-       "User Graph returned invalid Membership documents for customer status."
+       :user.core/invalid-read-result
+       "User Graph returned an invalid Membership collection."
        {:user/id user-id
         :facts facts}))
 
-    (let [organization-affiliated?
-          (access/organization-affiliated?
-           user
-           memberships)
-
-          customer?
-          (access/customer?
-           user
-           memberships)]
-
-      {:user user
-       :memberships memberships
-       :organization-affiliated? organization-affiliated?
-       :customer? customer?})))
+    {:user user
+     :memberships memberships
+     :organization-affiliated?
+     (access/organization-affiliated?
+      user
+      memberships)
+     :customer?
+     (access/customer?
+      user
+      memberships)}))
 
 (defn active-role-assignment-documents-at-scope
   "Returns valid active role-assignment documents at one exact scope.
 
-   This normalizes active-role-assignments-at-scope without exposing Graph
-   envelope nodes."
+   This normalized read is useful to model code that needs the documents for
+   later authorization-version guards."
   [ctx organization-id scope]
   (require-uuid!
    organization-id
-   :organization/invalid-id
+   :user/invalid-organization-id
    "Organization ID must be a UUID."
-   {:organization/id organization-id
-    :scope scope})
+   {:organization/id organization-id})
 
   (when-not
-   (authorization-scope/scope-reference?
-    scope)
+   (authorization-scope/scope-reference? scope)
     (fail!
      :user/invalid-scope
-     "Role-assignment scope must be a valid authorization-scope reference."
+     "A valid authorization scope is required."
      {:organization/id organization-id
       :scope scope}))
 
@@ -433,33 +408,26 @@
          organization-id
          scope)
 
+        nodes
+        (or
+         (:user/active-role-assignments-at-scope facts)
+         [])
+
         documents
         (mapv
          :role-assignment/doc
-         (or
-          (:user/active-role-assignments-at-scope facts)
-          []))]
-
+         nodes)]
     (when-not
      (every?
       #(and
-        (role/document-consistent?
-         %)
-
-        (role/active?
-         %)
-
-        (role/for-organization?
-         %
-         organization-id)
-
-        (authorization-scope/same-scope?
-         scope
-         (role/scope %)))
+        (role/document-consistent? %)
+        (role/active? %)
+        (role/for-organization? % organization-id)
+        (role/at-scope? % scope))
       documents)
       (fail!
-       :user.core/invalid-role-assignment-collection
-       "User Graph returned an invalid active role-assignment collection."
+       :user.core/invalid-read-result
+       "User Graph returned an invalid exact-scope role-assignment collection."
        {:organization/id organization-id
         :scope scope
         :facts facts}))
@@ -467,21 +435,20 @@
     documents))
 
 ;; =============================================================================
-;; Organization scope-context contract
+;; Organization-owned scope context
 ;; =============================================================================
 
 (def scope-context?
-  "Shared structural Organization authorization-scope context predicate."
+  "Returns true for the stable Organization-owned authorization-scope context."
   authorization-scope/scope-context?)
 
 (defn- require-scope-context!
   [scope-context]
   (when-not
-   (scope-context?
-    scope-context)
+   (scope-context? scope-context)
     (fail!
      :user/invalid-scope-context
-     "User access requires a valid Organization authorization-scope context."
+     "A valid Organization scope context is required."
      {:scope-context scope-context}))
 
   {:organization-id
@@ -496,52 +463,25 @@
    :operational?
    (:scope/operational? scope-context)})
 
-(defn- access-proof-facts
-  [ctx user-id organization-id applicable-scopes]
-  (graph/query
-   ctx
-   (user.graph/access-query-input
-    {:user-id user-id
-     :organization-id organization-id
-     :applicable-scopes applicable-scopes})
-   access-proof-query))
-
-(defn- current-membership-document
-  [facts]
-  (when (:user/current-membership-found? facts)
-    (get-in facts
-            [:user/current-membership
-             :membership/doc])))
-
-(defn- current-role-assignment-documents
-  [facts]
-  (mapv
-   :role-assignment/doc
-   (get-in facts
-           [:user/current-membership
-            :membership/role-assignments])))
-
 (defn access-context
-  "Loads a compact scoped User access value for views and other models.
+  "Returns a compact User access context at an Organization-owned scope.
 
-   Input:
+   input is:
 
-     {:user-id user-id
+     {:user-id       uuid
       :scope-context organization-scope-context}
 
-   The scope context must be produced by Organization. The returned map contains
-   no User, Membership, or Role Assignment documents and does not expose User's
-   internal Graph result shape.
+   Organization owns scope hierarchy and operational state. User owns identity,
+   Membership, roles, skills, and User capabilities.
 
-   The write operation must always reload and reauthorize current facts; this
-   context is suitable for rendering and downstream policy composition, not as
-   a mutation security boundary."
+   The result contains no raw User-model documents. Membership skills are
+   organization-local strings and do not themselves grant authority."
   [ctx {:keys [user-id scope-context]}]
-  (when-not (uuid? user-id)
-    (fail!
-     :user/invalid-user-id
-     "User access requires a UUID user ID."
-     {:user-id user-id}))
+  (require-uuid!
+   user-id
+   :user/invalid-user-id
+   "Scoped access requires a UUID User ID."
+   {:user/id user-id})
 
   (let [{:keys
          [organization-id
@@ -552,70 +492,149 @@
          scope-context)
 
         facts
-        (access-proof-facts
+        (graph/query
          ctx
-         user-id
-         organization-id
-         applicable-scopes)]
-    (when-not (:user/found? facts)
-      (fail!
-       :user/not-found
-       "The requested user does not exist."
-       {:user/id user-id}))
+         (user.graph/access-query-input
+          {:user-id user-id
+           :organization-id organization-id
+           :applicable-scopes applicable-scopes})
+         access-proof-query)
 
-    (let [user (:user/doc facts)
-          membership-document
-          (current-membership-document facts)
-          role-assignments
-          (if membership-document
-            (current-role-assignment-documents facts)
-            [])
-          context
+        user
+        (require-document!
+         facts
+         :user/found?
+         :user/doc
+         identity/document-consistent?
+         :user/not-found
+         "The requested User does not exist."
+         {:user/id user-id
+          :organization/id organization-id})
+
+        membership-node
+        (when
+         (true?
+          (:user/current-membership-found? facts))
+          (:user/current-membership facts))
+
+        membership-document
+        (:membership/doc membership-node)
+
+        role-assignments
+        (mapv
+         :role-assignment/doc
+         (or
+          (:membership/role-assignments membership-node)
+          []))]
+
+    (when
+     membership-node
+      (when-not
+       (and
+        (membership/document-consistent?
+         membership-document)
+
+        (membership/for-user?
+         membership-document
+         user-id)
+
+        (membership/for-organization?
+         membership-document
+         organization-id)
+
+        (access/current-membership?
+         membership-document)
+
+        (every?
+         #(access/assignment-for-membership?
+           membership-document
+           %)
+         role-assignments))
+        (fail!
+         :user.core/invalid-read-result
+         "User Graph returned an invalid scoped Membership access result."
+         {:user/id user-id
+          :organization/id organization-id
+          :facts facts})))
+
+    (let [public-context
           (access/access-context
            user
            membership-document
            role-assignments
            applicable-scopes
            organization-id)]
-      (when-not context
+      (when-not
+       (access/access-context?
+        public-context)
         (fail!
-         :user/inconsistent-access-facts
-         "User Graph returned facts that cannot form a valid access context."
+         :user.core/invalid-access-context
+         "User access facts could not be normalized into a valid public context."
          {:user/id user-id
           :organization/id organization-id
-          :scope/target target}))
+          :facts facts}))
 
-      (assoc context
-             :scope/target target
-             :scope/operational? operational?
-             :user/display-name (:user/display-name user)))))
+      (assoc
+       public-context
+       :scope/target target
+       :scope/operational? operational?
+       :user/display-name (:user/display-name user)))))
 
 ;; =============================================================================
-;; Public effectful operations
+;; Effectful operations
 ;; =============================================================================
 
 (defn invite-helper-to-location
-  "Invites a helper to one active location.
+  "Invites a helper to one active Location.
 
-   input contains :organization-id, :location-id, and exactly one of :phone or
-   :email. The caller is responsible for delivering the returned raw token."
+   User FX reloads and authorizes all current facts before committing."
   [ctx input]
-  (user.fx/invite-helper-to-location ctx input))
+  (user.fx/invite-helper-to-location
+   ctx
+   input))
 
 (defn accept-invitation
-  "Accepts a pending location-scoped helper invitation for the authenticated
-   user. input is {:token raw-bearer-token}."
+  "Accepts a pending location-scoped helper invitation for the signed-in User."
   [ctx input]
-  (user.fx/accept-invitation ctx input))
+  (user.fx/accept-invitation
+   ctx
+   input))
+
+(defn add-member-skill
+  "Adds one organization-local skill to a Membership.
+
+   input is:
+
+     {:organization-id uuid
+      :location-id     uuid
+      :membership-id   uuid
+      :skill           string}
+
+   User FX reloads the Location, actor access, and target Membership before
+   committing."
+  [ctx input]
+  (user.fx/add-member-skill
+   ctx
+   input))
+
+(defn remove-member-skill
+  "Removes one organization-local skill from a Membership.
+
+   Authorization and input shape are the same as add-member-skill."
+  [ctx input]
+  (user.fx/remove-member-skill
+   ctx
+   input))
 
 (def operations
-  "Public User operation registry. Entries point at this facade rather than
-   the internal FX namespace."
+  "Effectful operations currently exposed by the User model."
   {:user/invite-helper-to-location #'invite-helper-to-location
-   :user/accept-invitation #'accept-invitation})
+   :user/accept-invitation #'accept-invitation
+   :user/add-member-skill #'add-member-skill
+   :user/remove-member-skill #'remove-member-skill})
 
 ;; =============================================================================
-;; Shared User values
+;; Public entity and vocabulary values
 ;; =============================================================================
 
 (def user-entity-type
@@ -642,44 +661,32 @@
 (def invite-helper-to-location-capability
   access/invite-helper-to-location-capability)
 
+(def manage-member-skills-capability
+  access/manage-member-skills-capability)
+
+;; =============================================================================
+;; Shared scalar values
+;; =============================================================================
+
 (defn role?
   [value]
   (user.common/role? value))
 
-(def scope-type?
-  authorization-scope/scope-type?)
+(defn scope-type?
+  [value]
+  (authorization-scope/scope-type? value))
 
-(def scope-reference?
-  authorization-scope/scope-reference?)
+(defn scope-reference?
+  [value]
+  (authorization-scope/scope-reference? value))
 
-(def same-scope?
-  authorization-scope/same-scope?)
+(defn same-scope?
+  [a b]
+  (authorization-scope/same-scope? a b))
 
 (defn capability?
   [value]
   (access/capability? value))
-
-(def organization-scope
-  authorization-scope/organization-scope)
-
-(def organization-group-scope
-  authorization-scope/organization-group-scope)
-
-(def location-scope
-  authorization-scope/location-scope)
-
-(def organization-scope?
-  authorization-scope/organization-scope?)
-
-(def organization-group-scope?
-  authorization-scope/organization-group-scope?)
-
-(def location-scope?
-  authorization-scope/location-scope?)
-
-;; =============================================================================
-;; Identity values and facts
-;; =============================================================================
 
 (defn normalize-phone
   [value]
@@ -704,6 +711,59 @@
 (defn display-name?
   [value]
   (identity/display-name? value))
+
+(defn normalize-skill
+  "Returns the canonical organization-local representation of skill."
+  [value]
+  (user.common/normalize-skill value))
+
+(defn skill?
+  [value]
+  (user.common/skill? value))
+
+(defn normalize-skills
+  [values]
+  (user.common/normalize-skills values))
+
+(defn skills?
+  [value]
+  (user.common/skills? value))
+
+;; =============================================================================
+;; Authorization-scope values
+;; =============================================================================
+
+(defn organization-scope
+  [organization-id]
+  (authorization-scope/organization-scope organization-id))
+
+(defn organization-group-scope
+  [organization-group-id]
+  (authorization-scope/organization-group-scope organization-group-id))
+
+(defn location-scope
+  [location-id]
+  (authorization-scope/location-scope location-id))
+
+(defn organization-scope?
+  [value]
+  (authorization-scope/organization-scope? value))
+
+(defn organization-group-scope?
+  [value]
+  (authorization-scope/organization-group-scope? value))
+
+(defn location-scope?
+  [value]
+  (authorization-scope/location-scope? value))
+
+;; =============================================================================
+;; User identity facts
+;; =============================================================================
+
+(defn user-status?
+  [value]
+  (identity/status? value))
 
 (defn user-active?
   [user]
@@ -745,6 +805,10 @@
 ;; Membership facts
 ;; =============================================================================
 
+(defn membership-status?
+  [value]
+  (membership/status? value))
+
 (defn membership-active?
   [membership-document]
   (membership/active? membership-document))
@@ -773,17 +837,42 @@
   [membership-document organization-id]
   (membership/for-organization? membership-document organization-id))
 
+(defn membership-skills
+  "Returns the organization-local skill set stored on Membership."
+  [membership-document]
+  (membership/skills membership-document))
+
+(defn membership-has-skill?
+  "Returns true when Membership carries the canonicalized organization-local
+   skill string."
+  [membership-document skill]
+  (membership/has-skill?
+   membership-document
+   skill))
+
 (defn current-membership?
   [membership-document]
   (access/current-membership? membership-document))
 
+(defn current-membership-for-user?
+  [user membership-document]
+  (access/current-membership-for-user?
+   user
+   membership-document))
+
 (defn access-enabled-membership?
   [user membership-document]
-  (access/access-enabled-membership? user membership-document))
+  (access/access-enabled-membership?
+   user
+   membership-document))
 
 ;; =============================================================================
 ;; Role-assignment facts
 ;; =============================================================================
+
+(defn role-assignment-status?
+  [value]
+  (role/status? value))
 
 (defn role-assignment-active?
   [role-assignment]
@@ -809,17 +898,37 @@
   [role-assignment]
   (role/scope role-assignment))
 
-(defn role-assignment-grants?
-  [role-assignment membership-id assigned-role scope]
-  (role/grants?
+(defn role-assignment-for-membership?
+  [role-assignment membership-id]
+  (role/for-membership?
    role-assignment
-   membership-id
-   assigned-role
-   scope))
+   membership-id))
+
+(defn role-assignment-for-organization?
+  [role-assignment organization-id]
+  (role/for-organization?
+   role-assignment
+   organization-id))
+
+(defn role-assignment-grants-role?
+  [role-assignment expected-role]
+  (role/grants-role?
+   role-assignment
+   expected-role))
+
+(defn role-assignment-at-scope?
+  [role-assignment expected-scope]
+  (role/at-scope?
+   role-assignment
+   expected-scope))
 
 ;; =============================================================================
 ;; Invitation facts
 ;; =============================================================================
+
+(defn invitation-status?
+  [value]
+  (invitation/status? value))
 
 (defn invitation-pending?
   [invitation-document]
@@ -841,22 +950,6 @@
   [invitation-document]
   (invitation/expired? invitation-document))
 
-(defn invitation-terminal?
-  [invitation-document]
-  (invitation/terminal? invitation-document))
-
-(defn invitation-organization-id
-  [invitation-document]
-  (invitation/organization-id invitation-document))
-
-(defn invitation-offered-role
-  [invitation-document]
-  (invitation/offered-role invitation-document))
-
-(defn invitation-scope
-  [invitation-document]
-  (invitation/scope invitation-document))
-
 (defn invitation-recipient-type
   [invitation-document]
   (invitation/recipient-type invitation-document))
@@ -865,13 +958,9 @@
   [invitation-document]
   (invitation/recipient-value invitation-document))
 
-(defn invitation-addressed-to?
-  [invitation-document contact]
-  (invitation/addressed-to? invitation-document contact))
-
-(defn invitation-usable-at?
-  [invitation-document now]
-  (invitation/usable-at? invitation-document now))
+(defn invitation-scope
+  [invitation-document]
+  (invitation/scope invitation-document))
 
 ;; =============================================================================
 ;; Composed access facts and capabilities
@@ -879,20 +968,40 @@
 
 (defn organization-affiliated?
   [user memberships]
-  (access/organization-affiliated? user memberships))
+  (access/organization-affiliated?
+   user
+   memberships))
 
 (defn customer?
   [user memberships]
-  (access/customer? user memberships))
+  (access/customer?
+   user
+   memberships))
 
-(def applicable-scopes?
-  authorization-scope/applicable-scopes?)
+(defn member-skills
+  "Returns the effective organization-local skill set for an access-enabled
+   Membership. Suspended or otherwise access-disabled Memberships yield #{}."
+  [user membership-document]
+  (access/member-skills
+   user
+   membership-document))
+
+(defn member-has-skill?
+  "Returns true when an access-enabled Membership has skill."
+  [user membership-document skill]
+  (access/has-skill?
+   user
+   membership-document
+   skill))
+
+(defn applicable-scopes?
+  [value]
+  (access/applicable-scopes? value))
 
 (defn access-context?
   [value]
   (and
-   (access/access-context?
-    value)
+   (access/access-context? value)
 
    (authorization-scope/scope-reference?
     (:scope/target value))
@@ -914,11 +1023,23 @@
 
    invite-helper-to-location always reloads and reauthorizes current facts."
   [access-context]
-  (access/can-invite-helper? access-context))
+  (access/can-invite-helper?
+   access-context))
+
+(defn can-manage-member-skills?
+  "Returns true when an access context may display Membership skill-management
+   UI.
+
+   add-member-skill and remove-member-skill always reload and reauthorize
+   current facts."
+  [access-context]
+  (access/can-manage-member-skills?
+   access-context))
 
 ;; These lower-level composition helpers remain available for model code that
 ;; already owns the required documents. Views and request-board reads should
 ;; normally consume access-context instead.
+
 (defn effective-assignments
   [user membership-document role-assignments applicable-scopes]
   (access/effective-assignments

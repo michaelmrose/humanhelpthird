@@ -2,10 +2,10 @@
   "Malli schemas for persisted User-model documents and Graph attributes.
 
    Structural schemas describe the shape and scalar types of User identities,
-   Memberships, role assignments, invitations, and User Graph values. Complete
-   lifecycle and cross-field invariants remain owned by the corresponding
-   domain namespace and are applied as the final predicate of each document
-   schema.
+   Memberships, role assignments, invitations, organization-local skill names,
+   and User Graph values. Complete lifecycle and cross-field invariants remain
+   owned by the corresponding domain namespace and are applied as the final
+   predicate of each document schema.
 
    Shared structural authorization-scope values are validated through
    model.authorization-scope. This namespace does not query XTDB, authorize
@@ -46,6 +46,20 @@
    {:error/message "must be a canonical HumanHelp email address"}
    user.common/email?])
 
+(def skill-schema
+  [:fn
+   {:error/message "must be a canonical organization-local skill name"}
+   user.common/skill?])
+
+(def skills-schema
+  [:and
+   [:set skill-schema]
+
+   [:fn
+    {:error/message
+     "must be a set of canonical organization-local skill names"}
+    user.common/skills?]])
+
 (def role-schema
   [:fn
    {:error/message "must be helper, supervisor, or admin"}
@@ -66,7 +80,6 @@
    [:fn
     {:error/message "must be a valid HumanHelp authorization-scope reference"}
     authorization-scope/scope-reference?]])
-
 
 (def applicable-scopes-schema
   [:and
@@ -155,6 +168,7 @@
     [:xt/id :uuid]
     [:membership/user :uuid]
     [:membership/organization :uuid]
+    [:membership/skills skills-schema]
 
     [:membership/status
      [:fn
@@ -191,7 +205,7 @@
 
    [:fn
     {:error/message
-     "The membership lifecycle fields are inconsistent."}
+     "The membership lifecycle or skill fields are inconsistent."}
     membership/document-consistent?]])
 
 ;; =============================================================================
@@ -336,6 +350,8 @@
    ::reason reason-schema
    ::phone phone-schema
    ::email email-schema
+   ::skill skill-schema
+   ::skills skills-schema
    ::role role-schema
    ::scope-type scope-type-schema
    ::scope-reference scope-reference-schema
@@ -347,6 +363,8 @@
    :scope/reference scope-reference-schema
 
    :user/role role-schema
+   :user/skill skill-schema
+   :user/skills skills-schema
    :user/scope-type scope-type-schema
    :user/scope-reference scope-reference-schema
    :user/applicable-scopes applicable-scopes-schema
@@ -389,6 +407,7 @@
    :membership/found? :boolean
    :membership/user-id :uuid
    :membership/organization-id :uuid
+   :membership/skills skills-schema
    :membership/status
    [:fn membership/status?]
    :membership/revision revision-schema

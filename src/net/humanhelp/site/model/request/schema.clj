@@ -1,17 +1,19 @@
 (ns net.humanhelp.site.model.request.schema
-  "Malli schemas for persisted Request documents and Request-owned Graph values.
+  "Malli schemas for persisted Request-model documents and Request-owned Graph
+   values.
 
-   The closed Request table schema describes the exact persisted document
-   shape. Complete ownership, content, assignment, lifecycle, timestamp, and
-   cross-field invariants remain owned by request.domain and are applied as the
-   final document predicate.
+   The Request table schema describes the persisted Request lifecycle document.
+   Helper participation is persisted separately as Request Assignment documents.
 
-   This registry also defines the scalar attributes and Request-owned value
-   objects consumed and produced by Gesso Graph resolvers. It does not describe
-   User access contexts, Organization scope contexts, FX working state,
-   transaction plans, or Gesso Live changes."
+   Complete Request lifecycle invariants remain owned by request.domain.
+   Complete assignment invariants remain owned by request.assignment.
+
+   Cross-document rules such as exactly one active primary assignment for a
+   claimed Request are intentionally not expressed here; Request Graph and FX
+   establish those facts from current persistence state."
   (:require
    [net.humanhelp.site.model.common :as model.common]
+   [net.humanhelp.site.model.request.assignment :as assignment]
    [net.humanhelp.site.model.request.domain :as request]))
 
 ;; =============================================================================
@@ -27,6 +29,11 @@
   [:int {:min 0}])
 
 (def reason-schema
+  [:fn
+   {:error/message "must be a qualified keyword"}
+   qualified-keyword?])
+
+(def qualified-keyword-schema
   [:fn
    {:error/message "must be a qualified keyword"}
    qualified-keyword?])
@@ -55,7 +62,7 @@
     request/requestor-reference?]])
 
 ;; =============================================================================
-;; Customer-editable content
+;; Customer-editable Request content
 ;; =============================================================================
 
 (def title-schema
@@ -76,8 +83,11 @@
      " characters")}
    (fn [value]
      (and
-      (string? value)
-      (request/details? value)))])
+      (string?
+       value)
+
+      (request/details?
+       value)))])
 
 (def location-detail-schema
   [:fn
@@ -88,8 +98,11 @@
      " characters")}
    (fn [value]
      (and
-      (string? value)
-      (request/location-detail? value)))])
+      (string?
+       value)
+
+      (request/location-detail?
+       value)))])
 
 (def content-schema
   [:and
@@ -98,10 +111,12 @@
      title-schema]
 
     [:details
-     [:maybe details-schema]]
+     [:maybe
+      details-schema]]
 
     [:location-detail
-     [:maybe location-detail-schema]]]
+     [:maybe
+      location-detail-schema]]]
 
    [:fn
     {:error/message
@@ -109,7 +124,7 @@
     request/content?]])
 
 ;; =============================================================================
-;; Lifecycle values
+;; Request lifecycle values
 ;; =============================================================================
 
 (def status-schema
@@ -121,12 +136,8 @@
 (def operation-schema
   [:fn
    {:error/message
-    "must be a supported Request operation"}
+    "must be a supported Request-model operation"}
    request/operation?])
-
-;; =============================================================================
-;; Request expected-version value
-;; =============================================================================
 
 (def expected-version-schema
   [:map {:closed true}
@@ -141,6 +152,42 @@
 
    [:model/updated-at-key
     [:= :request/updated-at]]
+
+   [:model/updated-at
+    instant-schema]])
+
+;; =============================================================================
+;; Request Assignment values
+;; =============================================================================
+
+(def assignment-role-schema
+  [:fn
+   {:error/message
+    "must be primary or collaborator"}
+   assignment/role?])
+
+(def assignment-status-schema
+  [:fn
+   {:error/message
+    "must be active or ended"}
+   assignment/status?])
+
+(def assignment-source-schema
+  qualified-keyword-schema)
+
+(def assignment-expected-version-schema
+  [:map {:closed true}
+   [:model/id
+    :uuid]
+
+   [:model/revision-key
+    [:= :request-assignment/revision]]
+
+   [:model/revision
+    revision-schema]
+
+   [:model/updated-at-key
+    [:= :request-assignment/updated-at]]
 
    [:model/updated-at
     instant-schema]])
@@ -190,10 +237,6 @@
     [:request/updated-at
      instant-schema]
 
-    [:request/helper
-     {:optional true}
-     :uuid]
-
     [:request/claimed-at
      {:optional true}
      instant-schema]
@@ -216,8 +259,66 @@
 
    [:fn
     {:error/message
-     "The Request ownership, content, assignment, lifecycle, or version fields are inconsistent."}
+     "The Request ownership, content, lifecycle, or version fields are inconsistent."}
     request/request-document-consistent?]])
+
+;; =============================================================================
+;; Persisted Request Assignment document
+;; =============================================================================
+
+(def request-assignment-document-schema
+  [:and
+   [:map {:closed true}
+    [:xt/id
+     :uuid]
+
+    [:request-assignment/request
+     :uuid]
+
+    [:request-assignment/helper
+     :uuid]
+
+    [:request-assignment/role
+     assignment-role-schema]
+
+    [:request-assignment/status
+     assignment-status-schema]
+
+    [:request-assignment/source
+     assignment-source-schema]
+
+    [:request-assignment/assigned-by
+     {:optional true}
+     :uuid]
+
+    [:request-assignment/assigned-at
+     instant-schema]
+
+    [:request-assignment/revision
+     revision-schema]
+
+    [:request-assignment/created-at
+     instant-schema]
+
+    [:request-assignment/updated-at
+     instant-schema]
+
+    [:request-assignment/ended-at
+     {:optional true}
+     instant-schema]
+
+    [:request-assignment/ended-by
+     {:optional true}
+     :uuid]
+
+    [:request-assignment/end-reason
+     {:optional true}
+     reason-schema]]
+
+   [:fn
+    {:error/message
+     "The Request Assignment identity, role, lifecycle, or version fields are inconsistent."}
+    assignment/document-consistent?]])
 
 ;; =============================================================================
 ;; Biff/Malli registry contribution
@@ -226,8 +327,9 @@
 (def schema
   "Malli schemas contributed by the Request model.
 
-   :request validates complete persisted Request documents. Attribute keys
-   validate Request-owned Graph inputs and outputs."
+   :request validates complete persisted Request documents.
+   :request-assignment validates complete persisted helper-assignment documents.
+   Attribute keys validate Request-owned Graph inputs and outputs."
   {::instant
    instant-schema
 
@@ -264,14 +366,32 @@
    ::expected-version
    expected-version-schema
 
+   ::assignment-role
+   assignment-role-schema
+
+   ::assignment-status
+   assignment-status-schema
+
+   ::assignment-source
+   assignment-source-schema
+
+   ::assignment-expected-version
+   assignment-expected-version-schema
+
+   ;; --------------------------------------------------------------------------
    ;; Requestor value attributes
+   ;; --------------------------------------------------------------------------
+
    :requestor/type
    requestor-type-schema
 
    :requestor/id
    :uuid
 
+   ;; --------------------------------------------------------------------------
    ;; Request lookup and collection inputs
+   ;; --------------------------------------------------------------------------
+
    :request/id
    :uuid
 
@@ -293,7 +413,10 @@
    :request/include-terminal?
    :boolean
 
+   ;; --------------------------------------------------------------------------
    ;; Request ownership
+   ;; --------------------------------------------------------------------------
+
    :request/requestor-type
    requestor-type-schema
 
@@ -303,7 +426,10 @@
    :request/requestor
    requestor-reference-schema
 
+   ;; --------------------------------------------------------------------------
    ;; Request content
+   ;; --------------------------------------------------------------------------
+
    :request/title
    title-schema
 
@@ -316,7 +442,10 @@
    :request/content
    content-schema
 
+   ;; --------------------------------------------------------------------------
    ;; Request lifecycle and version
+   ;; --------------------------------------------------------------------------
+
    :request/status
    status-schema
 
@@ -331,9 +460,6 @@
 
    :request/updated-at
    instant-schema
-
-   :request/helper
-   :uuid
 
    :request/claimed-at
    instant-schema
@@ -353,7 +479,10 @@
    :request/expected-version
    expected-version-schema
 
-   ;; Pure lifecycle facts
+   ;; --------------------------------------------------------------------------
+   ;; Pure Request lifecycle facts
+   ;; --------------------------------------------------------------------------
+
    :request/open?
    :boolean
 
@@ -393,15 +522,121 @@
    :request/cancellable?
    :boolean
 
-   :request/has-helper?
+   :request/expects-primary-assignment?
    :boolean
 
-   :request/actively-assigned?
+   ;; --------------------------------------------------------------------------
+   ;; Request Assignment lookup and collection inputs
+   ;; --------------------------------------------------------------------------
+
+   :request-assignment/id
+   :uuid
+
+   :request-assignment/found?
    :boolean
 
-   ;; Complete persisted Request document
+   :request-assignment/request
+   :uuid
+
+   :request-assignment/request-id
+   :uuid
+
+   :request-assignment/helper
+   :uuid
+
+   :request-assignment/helper-id
+   :uuid
+
+   :request-assignment/include-ended?
+   :boolean
+
+   ;; --------------------------------------------------------------------------
+   ;; Request Assignment persisted/projected values
+   ;; --------------------------------------------------------------------------
+
+   :request-assignment/role
+   assignment-role-schema
+
+   :request-assignment/status
+   assignment-status-schema
+
+   :request-assignment/source
+   assignment-source-schema
+
+   :request-assignment/assigned-by
+   :uuid
+
+   :request-assignment/assigned-at
+   instant-schema
+
+   :request-assignment/revision
+   revision-schema
+
+   :request-assignment/created-at
+   instant-schema
+
+   :request-assignment/updated-at
+   instant-schema
+
+   :request-assignment/ended-at
+   instant-schema
+
+   :request-assignment/ended-by
+   :uuid
+
+   :request-assignment/end-reason
+   reason-schema
+
+   :request-assignment/expected-version
+   assignment-expected-version-schema
+
+   ;; --------------------------------------------------------------------------
+   ;; Request Assignment derived facts
+   ;; --------------------------------------------------------------------------
+
+   :request-assignment/active?
+   :boolean
+
+   :request-assignment/ended?
+   :boolean
+
+   :request-assignment/primary?
+   :boolean
+
+   :request-assignment/collaborator?
+   :boolean
+
+   :request-assignment/active-primary?
+   :boolean
+
+   :request-assignment/active-collaborator?
+   :boolean
+
+   ;; --------------------------------------------------------------------------
+   ;; Aggregate assignment facts attached to Request Graph results
+   ;; --------------------------------------------------------------------------
+
+   :request/has-primary-assignment?
+   :boolean
+
+   :request/active-helper-ids
+   [:set :uuid]
+
+   :request/active-collaborator-helper-ids
+   [:set :uuid]
+
+   ;; --------------------------------------------------------------------------
+   ;; Complete persisted documents
+   ;; --------------------------------------------------------------------------
+
    :request/doc
    request-document-schema
 
    :request
-   request-document-schema})
+   request-document-schema
+
+   :request-assignment/doc
+   request-assignment-document-schema
+
+   :request-assignment
+   request-assignment-document-schema})

@@ -2,8 +2,11 @@
   "Pure rules for persisted HumanHelp user identity documents.
 
    This namespace owns identity values, identity lifecycle transitions, and
-   command construction. It does not query XTDB, enforce contact uniqueness,
-   authorize actors, send verification messages, or manage sessions."
+   command construction. A persisted User must retain at least one phone number
+   or email address.
+
+   It does not query XTDB, enforce contact uniqueness, authorize actors, send
+   verification messages, manage workplace credentials, or manage sessions."
   (:require
    [clojure.string :as str]
    [net.humanhelp.site.model.common :as model.common]

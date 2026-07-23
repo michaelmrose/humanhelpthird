@@ -7,18 +7,19 @@
    Organization supplies one authoritative Location hierarchy context and the
    authorization-version guards for every Organization document that established
    it. User supplies current identity, Membership, and role facts. Request FX
-   rechecks the operation policy, constructs one Request command, and delegates
-   the final atomic transaction to the shared model.fx effect.
+   rechecks operation policy, coordinates Request Assignment records when
+   helper participation changes, and delegates the final atomic transaction to
+   the shared model.fx effect.
 
-   This namespace does not query XTDB directly, format transactions, execute
-   transactions, dispatch Gesso Live invalidations, or duplicate the shared
-   authorization-version machinery. Capability-authenticated Request writes and
-   supervisor overrides remain intentionally unsupported."
+   Request documents own lifecycle. Request Assignment documents own the
+   primary helper and collaborators. Capability-authenticated Request writes
+   remain intentionally unsupported."
   (:require
    [gesso.fx :as fx]
    [net.humanhelp.site.model.common :as model.common]
    [net.humanhelp.site.model.fx :as model.fx]
    [net.humanhelp.site.model.organization.core :as organization]
+   [net.humanhelp.site.model.request.assignment :as assignment]
    [net.humanhelp.site.model.request.domain :as request]
    [net.humanhelp.site.model.request.graph :as request.graph]
    [net.humanhelp.site.model.user.core :as user]))
@@ -34,7 +35,9 @@
     :edit
     :claim
     :mark-on-the-way
-    :complete})
+    :complete
+    :add-collaborator
+    :reassign})
 
 (def owner-operations
   "Operations reserved for the authenticated User requestor."
@@ -42,15 +45,17 @@
     :cancel})
 
 (def effective-helper-operations
-  "Operations requiring a currently effective helper role at the Location."
-  #{:claim
-    :mark-on-the-way
-    :complete})
+  "Operations requiring the active primary helper to still have effective
+   helper authority at the Location. Claim establishes the primary assignment."
+  #{:mark-on-the-way
+    :complete
+    :add-collaborator})
 
-(def assigned-helper-operations
-  "Cleanup operations requiring current assignment ownership but not a still
+(def primary-helper-operations
+  "Operations requiring active primary-assignment ownership but not a still
    effective helper role."
-  #{:unclaim})
+  #{:unclaim
+    :remove-collaborator})
 
 ;; =============================================================================
 ;; Errors and machine plumbing
@@ -391,100 +396,71 @@
        scope))
     scopes)))
 
-(defn- helper-authorization
-  "Reloads and rechecks every User document that establishes effective helper
-   authority. The compact access context supplies the current Membership ID;
-   the final authorization decision is recomputed from the loaded User,
-   Membership, and role-assignment documents that are guarded in the same
-   transaction."
-  [ctx user-id scope-context]
-  (let [organization-id
-        (:organization/id scope-context)
-
-        scopes
-        (vec
-         (:scope/applicable scope-context))
-
+(defn- role-authorization
+  "Reloads and guards the User, Membership, and one effective role assignment
+   that establishes one of expected-roles at scope-context."
+  [ctx user-id scope-context expected-roles]
+  (let [organization-id (:organization/id scope-context)
+        scopes (vec (:scope/applicable scope-context))
         public-access
         (user/access-context
          ctx
          {:user-id user-id
-          :scope-context scope-context})]
-
-    (when-not
-     (true?
-      (:user/helper? public-access))
-      (fail!
-       :user/not-authorized
-       "Effective helper authority at this Location is required."
-       {:user/id user-id
-        :organization/id organization-id
-        :scope/target
-        (:scope/target scope-context)}))
-
-    (let [membership-id
-          (or
-           (:membership/id public-access)
-           (fail!
-            :request.fx/incomplete-helper-authorization
-            "Helper access did not identify a Membership."
-            {:user/id user-id
-             :organization/id organization-id}))
-
-          user-document
-          (require-active-user-document!
-           ctx
-           user-id)
-
-          membership-document
-          (user/require-membership
-           ctx
-           membership-id)
-
-          assignments
-          (role-documents-at-scopes
-           ctx
-           organization-id
-           scopes)
-
-          helper-assignment
-          (user/effective-assignment-for-role
+          :scope-context scope-context})
+        membership-id
+        (or
+         (:membership/id public-access)
+         (fail!
+          :request.fx/incomplete-user-authorization
+          "User access did not identify an active Membership."
+          {:user/id user-id
+           :organization/id organization-id}))
+        user-document
+        (require-active-user-document! ctx user-id)
+        membership-document
+        (user/require-membership ctx membership-id)
+        assignments
+        (role-documents-at-scopes ctx organization-id scopes)
+        role-assignment
+        (some
+         #(user/effective-assignment-for-role
            user-document
            membership-document
            assignments
            scopes
-           :helper)]
+           %)
+         expected-roles)]
+    (when-not role-assignment
+      (fail!
+       :user/not-authorized
+       "The User does not have the required role at this Location."
+       {:user/id user-id
+        :organization/id organization-id
+        :scope/target (:scope/target scope-context)
+        :required-roles (set expected-roles)}))
+    {:user/id user-id
+     :organization/id organization-id
+     :scope/target (:scope/target scope-context)
+     :user/document user-document
+     :membership/document membership-document
+     :role-assignment/document role-assignment
+     :authorization-versions
+     [(document-authorization-version
+       user/user-entity-type user-version user-document)
+      (document-authorization-version
+       user/membership-entity-type membership-version membership-document)
+      (document-authorization-version
+       user/role-assignment-entity-type
+       role-assignment-version
+       role-assignment)]}))
 
-      (when-not
-       helper-assignment
-        (fail!
-         :user/not-authorized
-         "Helper authority changed while it was being loaded."
-         {:user/id user-id
-          :organization/id organization-id
-          :scope/target
-          (:scope/target scope-context)}))
+(defn- helper-authorization
+  [ctx user-id scope-context]
+  (role-authorization ctx user-id scope-context [:helper]))
 
-      {:user/id user-id
-       :organization/id organization-id
-       :scope/target
-       (:scope/target scope-context)
-
-       :authorization-versions
-       [(document-authorization-version
-         user/user-entity-type
-         user-version
-         user-document)
-
-        (document-authorization-version
-         user/membership-entity-type
-         membership-version
-         membership-document)
-
-        (document-authorization-version
-         user/role-assignment-entity-type
-         role-assignment-version
-         helper-assignment)]})))
+(defn- manager-authorization
+  [ctx user-id scope-context]
+  (role-authorization ctx user-id scope-context [:admin :supervisor]))
 
 ;; =============================================================================
 ;; Request actor policy
@@ -525,53 +501,161 @@
      ctx
      user-id)))
 
-(defn- assigned-helper-authorization
-  [ctx request-document]
-  (let [user-id
-        (require-authenticated-user-id!
-         ctx)]
+(defn- assignment-documents
+  [request-facts]
+  (mapv :request-assignment/doc
+        (or (:request/assignments request-facts) [])))
 
-    (when-not
-     (request/assigned-to?
-      request-document
-      user-id)
+(defn- require-active-assignments!
+  [request-document request-facts]
+  (let [request-id (request/request-id request-document)
+        assignments (assignment-documents request-facts)]
+    (doseq [assignment-document assignments]
+      (assignment/require-document assignment-document)
+      (when-not (and (assignment/active? assignment-document)
+                     (assignment/for-request? assignment-document request-id))
+        (fail!
+         :request.fx/invalid-active-assignment
+         "Request Graph returned an invalid active Request Assignment."
+         {:request/id request-id
+          :request-assignment/id
+          (assignment/assignment-id assignment-document)})))
+    (cond
+      (request/lifecycle-expects-primary-assignment? request-document)
+      (when-not (assignment/active-primary-assignment assignments)
+        (fail!
+         :request/missing-primary-assignment
+         "The Request lifecycle requires an active primary helper assignment."
+         {:request/id request-id
+          :request/status (request/status request-document)}))
+
+      (seq assignments)
+      (fail!
+       :request.fx/assignment-state-mismatch
+       "The Request lifecycle does not allow active assignments."
+       {:request/id request-id
+        :request/status (request/status request-document)
+        :request/active-assignment-count (count assignments)}))
+    assignments))
+
+(defn- require-primary-assignment!
+  [request-document assignments]
+  (or (assignment/active-primary-assignment assignments)
+      (fail!
+       :request/missing-primary-assignment
+       "The Request requires an active primary helper assignment."
+       {:request/id (request/request-id request-document)
+        :request/status (request/status request-document)})))
+
+(defn- require-primary-owned-by!
+  [request-document assignments user-id]
+  (let [primary (require-primary-assignment! request-document assignments)]
+    (when-not (assignment/for-helper? primary user-id)
       (fail!
        :request/not-authorized
-       "Only the currently assigned helper may perform this action."
-       {:request/id
-        (request/request-id request-document)
+       "Only the active primary helper may perform this action."
+       {:request/id (request/request-id request-document)
         :user/id user-id
-        :request/helper
-        (request/helper-id request-document)}))
+        :request/primary-helper (assignment/helper-id primary)}))
+    primary))
 
-    (active-user-authorization
-     ctx
-     user-id)))
+(defn- primary-helper-authorization
+  [ctx request-document assignments scope-context require-effective-helper?]
+  (let [user-id (require-authenticated-user-id! ctx)
+        primary (require-primary-owned-by!
+                 request-document assignments user-id)
+        authorization
+        (if require-effective-helper?
+          (helper-authorization ctx user-id scope-context)
+          (active-user-authorization ctx user-id))]
+    (assoc authorization :request/primary-assignment primary)))
+
+(defn- normalize-required-skill!
+  [value]
+  (when (some? value)
+    (let [skill (user/normalize-skill value)]
+      (when-not (user/skill? skill)
+        (fail!
+         :request/invalid-skill
+         "The requested helper skill is invalid."
+         {:skill value}))
+      skill)))
+
+(defn- eligible-helper-authorization
+  [ctx helper-id scope-context skill]
+  (let [authorization (helper-authorization ctx helper-id scope-context)]
+    (when (and skill
+               (not (user/membership-has-skill?
+                     (:membership/document authorization)
+                     skill)))
+      (fail!
+       :request/helper-missing-skill
+       "The selected helper does not have the required Organization skill."
+       {:user/id helper-id
+        :organization/id (:organization/id scope-context)
+        :skill skill}))
+    authorization))
+
+(defn- assignment-authorization-version
+  [assignment-document]
+  (document-authorization-version
+   assignment/entity-type
+   assignment/version
+   assignment-document))
+
+(defn- distinct-authorization-versions
+  [authorization-versions]
+  (second
+   (reduce
+    (fn [[seen result] authorization-version]
+      (let [target (model.fx/authorization-version-target authorization-version)]
+        (if (contains? seen target)
+          [seen result]
+          [(conj seen target) (conj result authorization-version)])))
+    [#{} []]
+    authorization-versions)))
+
+(defn- claim-authorization
+  [ctx input scope-context]
+  (let [actor-id (require-authenticated-user-id! ctx)
+        target-helper-id (or (:helper-id input) actor-id)
+        skill (normalize-required-skill! (:skill input))]
+    (if (= actor-id target-helper-id)
+      (let [target-authorization
+            (eligible-helper-authorization
+             ctx target-helper-id scope-context skill)]
+        {:actor-id actor-id
+         :target-helper-id target-helper-id
+         :required-skill skill
+         :authorization-versions
+         (:authorization-versions target-authorization)})
+      (let [manager
+            (manager-authorization ctx actor-id scope-context)
+            target-authorization
+            (eligible-helper-authorization
+             ctx target-helper-id scope-context skill)]
+        {:actor-id actor-id
+         :target-helper-id target-helper-id
+         :required-skill skill
+         :authorization-versions
+         (distinct-authorization-versions
+          (concat
+           (:authorization-versions manager)
+           (:authorization-versions target-authorization)))}))))
 
 (defn- operation-authorization
-  [ctx operation request-document scope-context]
+  [ctx operation request-document assignments scope-context]
   (cond
-    (contains?
-     owner-operations
-     operation)
-    (owner-authorization
-     ctx
-     request-document)
+    (contains? owner-operations operation)
+    (owner-authorization ctx request-document)
 
-    (contains?
-     assigned-helper-operations
-     operation)
-    (assigned-helper-authorization
-     ctx
-     request-document)
+    (contains? primary-helper-operations operation)
+    (primary-helper-authorization
+     ctx request-document assignments scope-context false)
 
-    (contains?
-     effective-helper-operations
-     operation)
-    (helper-authorization
-     ctx
-     (require-authenticated-user-id! ctx)
-     scope-context)
+    (contains? effective-helper-operations operation)
+    (primary-helper-authorization
+     ctx request-document assignments scope-context true)
 
     :else
     (fail!
@@ -636,16 +720,21 @@
      before
      request/status)
 
-    :request/helper
-    (request/helper-id after)
-
-    :request/previous-helper
-    (some->
-     before
-     request/helper-id)
-
     :request/revision
     (request/revision after)}))
+
+(defn- assignment-change
+  [before after operation]
+  {:topic :request
+   :id (assignment/request-id after)
+   :change/kind :updated
+   :request/operation operation
+   :request/id (assignment/request-id after)
+   :request-assignment/id (assignment/assignment-id after)
+   :request-assignment/helper (assignment/helper-id after)
+   :request-assignment/role (assignment/role after)
+   :request-assignment/status (assignment/status after)
+   :request-assignment/previous-status (some-> before assignment/status)})
 
 (defn- transaction-plan
   [fragment]
@@ -742,6 +831,9 @@
   [{:keys
     [before
      command
+     assignment-commands
+     assignment-changes
+     assertions
      location-authorization-versions
      actor-authorization-versions]}]
   (request/require-request-document
@@ -763,6 +855,14 @@
     (require-command!
      command
      operation)
+
+    (doseq [assignment-command assignment-commands]
+      (when-not (= assignment/entity-type
+                   (:model/entity-type assignment-command))
+        (fail!
+         :request.fx/invalid-assignment-command
+         "The workflow contains an invalid Request Assignment command."
+         {:command assignment-command})))
 
     (let [after
           (command-document
@@ -815,24 +915,108 @@
          {:authorization-versions
           actor-authorization-versions}
 
-         {:commands
-          [command]
+         {:assertions assertions
+          :commands
+          (into [command] assignment-commands)
 
           :changes
-          [(request-change
-            before
-            after
-            operation)]}))
+          (into
+           [(request-change before after operation)]
+           assignment-changes)}))
 
        :result
        {:request after}})))
+
+(defn plan-assignment-operation
+  "Constructs an assignment-only Request transaction plan."
+  [{:keys [request-document operation assignment-commands assignment-changes
+           assertions location-authorization-versions
+           actor-authorization-versions target-authorization-versions]}]
+  (request/require-request-document request-document)
+
+  (when-not (request/assignment-operation? operation)
+    (fail!
+     :request.fx/invalid-assignment-operation
+     "The operation is not a Request Assignment operation."
+     {:operation operation}))
+
+  (doseq [assignment-command assignment-commands]
+    (when-not (= assignment/entity-type (:model/entity-type assignment-command))
+      (fail!
+       :request.fx/invalid-assignment-command
+       "The workflow contains an invalid Request Assignment command."
+       {:command assignment-command})))
+
+  {:transaction-plan
+   (transaction-plan
+    (model.fx/compose-transaction-fragments
+     {:authorization-versions location-authorization-versions}
+     {:authorization-versions actor-authorization-versions}
+     {:authorization-versions target-authorization-versions}
+     {:assertions assertions
+      :commands assignment-commands
+      :changes assignment-changes}))
+
+   :result
+   {:request request-document
+    :assignments (mapv command-document assignment-commands)}})
+
+;; =============================================================================
+;; Assignment transaction helpers
+;; =============================================================================
+
+(defn- assert-no-active-assignment-for-helper
+  [request-id helper-id]
+  (model.fx/assert-none
+   assignment/entity-type
+   [:and
+    [:= :request-assignment/request request-id]
+    [:= :request-assignment/helper helper-id]
+    [:= :request-assignment/status :active]]))
+
+(defn- assert-no-active-assignments
+  [request-id]
+  (model.fx/assert-none
+   assignment/entity-type
+   [:and
+    [:= :request-assignment/request request-id]
+    [:= :request-assignment/status :active]]))
+
+(defn- create-assignment-command
+  [id request-id helper-id role source actor-id now]
+  (assignment/create-command
+   {:id id
+    :request-id request-id
+    :helper-id helper-id
+    :role role
+    :source source
+    :actor-id actor-id
+    :now now}))
+
+(defn- end-assignment-commands
+  [assignments actor-id reason now]
+  (mapv
+   #(assignment/end-command
+     %
+     {:actor-id actor-id
+      :reason reason
+      :now now})
+   assignments))
+
+(defn- end-assignment-changes
+  [assignments commands operation]
+  (mapv
+   (fn [before command]
+     (assignment-change before (command-document command) operation))
+   assignments
+   commands))
 
 ;; =============================================================================
 ;; Domain-command selection
 ;; =============================================================================
 
 (defn- update-command
-  [operation request-document input user-id now]
+  [operation request-document input now]
   (case operation
     :edit
     (request/edit-command
@@ -846,38 +1030,22 @@
     :claim
     (request/claim-command
      request-document
-     {:helper-id
-      user-id
-
-      :now
-      now})
+     {:now now})
 
     :unclaim
     (request/unclaim-command
      request-document
-     {:helper-id
-      user-id
-
-      :now
-      now})
+     {:now now})
 
     :mark-on-the-way
     (request/mark-on-the-way-command
      request-document
-     {:helper-id
-      user-id
-
-      :now
-      now})
+     {:now now})
 
     :complete
     (request/complete-command
      request-document
-     {:helper-id
-      user-id
-
-      :now
-      now})
+     {:now now})
 
     :cancel
     (request/cancel-command
@@ -1032,110 +1200,368 @@
 (fx/defmachine update-request-machine
   :start
   (fn [ctx]
-    (let [input
-          (:request.fx/input ctx)
-
-          operation
-          (require-operation!
-           (:request.fx/operation ctx))
-
+    (let [input (:request.fx/input ctx)
+          operation (require-operation! (:request.fx/operation ctx))
           request-id
           (require-uuid!
            (:request-id input)
            :request/invalid-request-id
            "A Request UUID is required."
-           {:request/id
-            (:request-id input)})]
-
-      {:request.fx/base-ctx
-       ctx
-
-       :request.fx/input
-       input
-
-       :request.fx/operation
-       operation
-
-       :request.fx/request-id
-       request-id
-
+           {:request/id (:request-id input)})]
+      {:request.fx/base-ctx ctx
+       :request.fx/input input
+       :request.fx/operation operation
+       :request.fx/request-id request-id
        :request.fx/request-facts
        [:biff.graph.fx/query
-        (request.graph/request-query-input
-         {:request-id request-id})
+        (assoc (request.graph/request-query-input {:request-id request-id})
+               :request-assignment/include-ended? false)
         request.graph/request-command-query]
-
-       :biff.fx/next
-       :plan}))
+       :biff.fx/next :plan}))
 
   :plan
   (fn [{:request.fx/keys
-        [base-ctx
-         input
-         operation
-         request-id
-         request-facts]}]
-    (let [document
-          (require-request-document!
-           request-facts
-           request-id)
-
-          organization-id
-          (request/organization-id
-           document)
-
-          location-id
-          (request/location-id
-           document)
-
+        [base-ctx input operation request-id request-facts]}]
+    (let [document (require-request-document! request-facts request-id)
+          assignments (require-active-assignments! document request-facts)
+          organization-id (request/organization-id document)
+          location-id (request/location-id document)
           location-authorization
           (require-location-authorization!
            base-ctx
            organization-id
            location-id
-           (contains?
-            operational-location-operations
-            operation))
+           (contains? operational-location-operations operation))
+          scope-context (:scope-context location-authorization)
+          actor-id (require-authenticated-user-id! base-ctx)
+          now (:biff.fx/now base-ctx)
+          seed (:biff.fx/seed base-ctx)]
+      (case operation
+        :claim
+        (do
+          (when (seq assignments)
+            (fail!
+             :request/assignments-already-active
+             "An open Request cannot be claimed while active assignments exist."
+             {:request/id request-id}))
+          (let [{:keys
+                 [actor-id
+                  target-helper-id
+                  required-skill
+                  authorization-versions]}
+                (claim-authorization base-ctx input scope-context)
+                [assignment-id _] (fx/uuid7 seed now)
+                request-command (update-command operation document input now)
+                assignment-command
+                (create-assignment-command
+                 assignment-id
+                 request-id
+                 target-helper-id
+                 :primary
+                 (if (= actor-id target-helper-id)
+                   :request/claim
+                   :request/manager-claim)
+                 actor-id
+                 now)
+                assignment-document (command-document assignment-command)
+                plan
+                (plan-update-request
+                 {:before document
+                  :command request-command
+                  :assignment-commands [assignment-command]
+                  :assignment-changes
+                  [(assignment-change nil assignment-document :claim)]
+                  :assertions
+                  [(assert-no-active-assignments request-id)]
+                  :location-authorization-versions
+                  (:authorization-versions location-authorization)
+                  :actor-authorization-versions authorization-versions})]
+            {:request.fx/result
+             (cond-> (assoc (:result plan)
+                            :primary-assignment assignment-document)
+               required-skill
+               (assoc :required-skill required-skill))
+             :request.fx/transaction-plan (:transaction-plan plan)
+             :biff.fx/next :commit}))
 
-          actor-authorization
-          (operation-authorization
-           base-ctx
-           operation
-           document
-           (:scope-context
-            location-authorization))
+        :unclaim
+        (let [actor-authorization
+              (operation-authorization
+               base-ctx operation document assignments scope-context)
+              request-command (update-command operation document input now)
+              assignment-commands
+              (end-assignment-commands
+               assignments actor-id :request/unclaimed now)
+              assignment-changes
+              (end-assignment-changes
+               assignments assignment-commands :unclaim)
+              plan
+              (plan-update-request
+               {:before document
+                :command request-command
+                :assignment-commands assignment-commands
+                :assignment-changes assignment-changes
+                :location-authorization-versions
+                (:authorization-versions location-authorization)
+                :actor-authorization-versions
+                (:authorization-versions actor-authorization)})]
+          {:request.fx/result (:result plan)
+           :request.fx/transaction-plan (:transaction-plan plan)
+           :biff.fx/next :commit})
 
-          user-id
-          (require-authenticated-user-id!
-           base-ctx)
+        :complete
+        (let [actor-authorization
+              (operation-authorization
+               base-ctx operation document assignments scope-context)
+              request-command (update-command operation document input now)
+              assignment-commands
+              (end-assignment-commands
+               assignments actor-id :request/completed now)
+              assignment-changes
+              (end-assignment-changes
+               assignments assignment-commands :complete)
+              plan
+              (plan-update-request
+               {:before document
+                :command request-command
+                :assignment-commands assignment-commands
+                :assignment-changes assignment-changes
+                :location-authorization-versions
+                (:authorization-versions location-authorization)
+                :actor-authorization-versions
+                (:authorization-versions actor-authorization)})]
+          {:request.fx/result (:result plan)
+           :request.fx/transaction-plan (:transaction-plan plan)
+           :biff.fx/next :commit})
 
-          command
-          (update-command
-           operation
-           document
-           input
-           user-id
-           (:biff.fx/now base-ctx))
+        :cancel
+        (let [actor-authorization
+              (operation-authorization
+               base-ctx operation document assignments scope-context)
+              request-command (update-command operation document input now)
+              assignment-commands
+              (end-assignment-commands
+               assignments actor-id :request/cancelled now)
+              assignment-changes
+              (end-assignment-changes
+               assignments assignment-commands :cancel)
+              plan
+              (plan-update-request
+               {:before document
+                :command request-command
+                :assignment-commands assignment-commands
+                :assignment-changes assignment-changes
+                :location-authorization-versions
+                (:authorization-versions location-authorization)
+                :actor-authorization-versions
+                (:authorization-versions actor-authorization)})]
+          {:request.fx/result (:result plan)
+           :request.fx/transaction-plan (:transaction-plan plan)
+           :biff.fx/next :commit})
 
-          plan
-          (plan-update-request
-           {:before document
-            :command command
-            :location-authorization-versions
-            (:authorization-versions
-             location-authorization)
-            :actor-authorization-versions
-            (:authorization-versions
-             actor-authorization)})]
+        :add-collaborator
+        (let [actor-authorization
+              (operation-authorization
+               base-ctx operation document assignments scope-context)
+              primary (:request/primary-assignment actor-authorization)
+              helper-id
+              (require-uuid!
+               (:helper-id input)
+               :request/invalid-helper
+               "A collaborator User UUID is required."
+               {:helper-id (:helper-id input)})
+              _ (when (= actor-id helper-id)
+                  (fail!
+                   :request/helper-already-assigned
+                   "The primary helper is already assigned to this Request."
+                   {:request/id request-id :helper-id helper-id}))
+              _ (when (assignment/active-assignment-for-helper
+                       assignments helper-id)
+                  (fail!
+                   :request/helper-already-assigned
+                   "The helper already has an active assignment on this Request."
+                   {:request/id request-id :helper-id helper-id}))
+              skill (normalize-required-skill! (:skill input))
+              target-authorization
+              (eligible-helper-authorization
+               base-ctx helper-id scope-context skill)
+              [assignment-id _] (fx/uuid7 seed now)
+              assignment-command
+              (create-assignment-command
+               assignment-id request-id helper-id :collaborator
+               :request/collaboration actor-id now)
+              assignment-document (command-document assignment-command)
+              plan
+              (plan-assignment-operation
+               {:request-document document
+                :operation :add-collaborator
+                :assignment-commands [assignment-command]
+                :assignment-changes
+                [(assignment-change
+                  nil assignment-document :add-collaborator)]
+                :assertions
+                [(assert-no-active-assignment-for-helper request-id helper-id)]
+                :location-authorization-versions
+                (:authorization-versions location-authorization)
+                :actor-authorization-versions
+                (conj (:authorization-versions actor-authorization)
+                      (assignment-authorization-version primary))
+                :target-authorization-versions
+                (:authorization-versions target-authorization)})]
+          {:request.fx/result
+           (assoc (:result plan)
+                  :collaborator-assignment assignment-document
+                  :required-skill skill)
+           :request.fx/transaction-plan (:transaction-plan plan)
+           :biff.fx/next :commit})
 
-      {:request.fx/result
-       (:result plan)
+        :remove-collaborator
+        (let [actor-authorization
+              (operation-authorization
+               base-ctx operation document assignments scope-context)
+              primary (:request/primary-assignment actor-authorization)
+              helper-id
+              (require-uuid!
+               (:helper-id input)
+               :request/invalid-helper
+               "A collaborator User UUID is required."
+               {:helper-id (:helper-id input)})
+              collaborator
+              (or
+               (some
+                #(when (and (assignment/active-collaborator? %)
+                            (assignment/for-helper? % helper-id))
+                   %)
+                assignments)
+               (fail!
+                :request/collaborator-not-found
+                "The helper is not an active collaborator on this Request."
+                {:request/id request-id :helper-id helper-id}))
+              assignment-command
+              (assignment/end-command
+               collaborator
+               {:actor-id actor-id
+                :reason :request/collaborator-removed
+                :now now})
+              after (command-document assignment-command)
+              plan
+              (plan-assignment-operation
+               {:request-document document
+                :operation :remove-collaborator
+                :assignment-commands [assignment-command]
+                :assignment-changes
+                [(assignment-change
+                  collaborator after :remove-collaborator)]
+                :location-authorization-versions
+                (:authorization-versions location-authorization)
+                :actor-authorization-versions
+                (conj (:authorization-versions actor-authorization)
+                      (assignment-authorization-version primary))})]
+          {:request.fx/result
+           (assoc (:result plan) :collaborator-assignment after)
+           :request.fx/transaction-plan (:transaction-plan plan)
+           :biff.fx/next :commit})
 
-       :request.fx/transaction-plan
-       (:transaction-plan plan)
+        :reassign
+        (let [_ (when-not (request/claimed? document)
+                  (fail!
+                   :request/not-reassignable
+                   "Primary reassignment currently requires a claimed Request."
+                   {:request/id request-id
+                    :request/status (request/status document)}))
+              actor-authorization
+              (manager-authorization base-ctx actor-id scope-context)
+              current-primary
+              (require-primary-assignment! document assignments)
+              target-helper-id
+              (require-uuid!
+               (:helper-id input)
+               :request/invalid-helper
+               "A replacement primary helper User UUID is required."
+               {:helper-id (:helper-id input)})
+              _ (when (assignment/for-helper? current-primary target-helper-id)
+                  (fail!
+                   :request/helper-already-primary
+                   "The selected helper is already the primary helper."
+                   {:request/id request-id
+                    :helper-id target-helper-id}))
+              target-existing
+              (assignment/active-assignment-for-helper
+               assignments target-helper-id)
+              _ (when (and target-existing
+                           (not (assignment/active-collaborator?
+                                 target-existing)))
+                  (fail!
+                   :request/helper-already-assigned
+                   "The selected helper already has an incompatible active assignment."
+                   {:request/id request-id
+                    :helper-id target-helper-id}))
+              skill (normalize-required-skill! (:skill input))
+              target-authorization
+              (eligible-helper-authorization
+               base-ctx target-helper-id scope-context skill)
+              [assignment-id _] (fx/uuid7 seed now)
+              assignments-to-end
+              (cond-> [current-primary]
+                target-existing
+                (conj target-existing))
+              end-commands
+              (end-assignment-commands
+               assignments-to-end actor-id :request/reassigned now)
+              create-command
+              (create-assignment-command
+               assignment-id request-id target-helper-id :primary
+               :request/reassignment actor-id now)
+              new-primary (command-document create-command)
+              assignment-commands
+              (conj end-commands create-command)
+              assignment-changes
+              (into
+               (end-assignment-changes
+                assignments-to-end end-commands :reassign)
+               [(assignment-change nil new-primary :reassign)])
+              plan
+              (plan-assignment-operation
+               {:request-document document
+                :operation :reassign
+                :assignment-commands assignment-commands
+                :assignment-changes assignment-changes
+                :location-authorization-versions
+                (:authorization-versions location-authorization)
+                :actor-authorization-versions
+                (:authorization-versions actor-authorization)
+                :target-authorization-versions
+                (:authorization-versions target-authorization)})]
+          {:request.fx/result
+           (cond-> (assoc (:result plan)
+                          :previous-primary-assignment
+                          (command-document (first end-commands))
+                          :primary-assignment new-primary)
+             skill
+             (assoc :required-skill skill))
+           :request.fx/transaction-plan (:transaction-plan plan)
+           :biff.fx/next :commit})
 
-       :biff.fx/next
-       :commit}))
+        ;; edit and mark-on-the-way remain Request-only changes.
+        (let [actor-authorization
+              (operation-authorization
+               base-ctx operation document assignments scope-context)
+              command (update-command operation document input now)
+              primary (:request/primary-assignment actor-authorization)
+              authorization-versions
+              (cond-> (:authorization-versions actor-authorization)
+                (and (= :mark-on-the-way operation) primary)
+                (conj (assignment-authorization-version primary)))
+              plan
+              (plan-update-request
+               {:before document
+                :command command
+                :location-authorization-versions
+                (:authorization-versions location-authorization)
+                :actor-authorization-versions authorization-versions})]
+          {:request.fx/result (:result plan)
+           :request.fx/transaction-plan (:transaction-plan plan)
+           :biff.fx/next :commit}))))
 
   :commit
   commit-state
@@ -1162,7 +1588,12 @@
    input))
 
 (defn claim-request
-  "Claims an open Request for the signed-in effective helper."
+  "Claims an open Request.
+
+   With no :helper-id, the signed-in effective helper claims it personally.
+   With a different :helper-id, the signed-in actor must be an effective
+   supervisor or administrator and the selected User must be an effective
+   helper. Optional :skill constrains the selected helper."
   [ctx input]
   (run-update
    ctx
@@ -1207,6 +1638,31 @@
    :cancel
    input))
 
+(defn add-collaborator
+  "Adds one effective Location helper as a collaborator.
+
+   The signed-in primary helper remains responsible for the Request. :skill is
+   optional and, when supplied, must match an organization-local Membership
+   skill on the collaborator."
+  [ctx input]
+  (run-update ctx :add-collaborator input))
+
+(defn remove-collaborator
+  "Ends one collaborator assignment. The signed-in actor must be the active
+   primary helper."
+  [ctx input]
+  (run-update ctx :remove-collaborator input))
+
+(defn reassign-request
+  "Replaces the active primary helper on a claimed Request.
+
+   The signed-in actor must be an effective supervisor or administrator at the
+   Request Location. A target helper who is currently a collaborator is
+   promoted atomically by ending that collaborator assignment and creating the
+   new primary assignment."
+  [ctx input]
+  (run-update ctx :reassign input))
+
 (defn perform-action
   "Dispatches one supported existing-Request operation."
   [ctx operation input]
@@ -1241,6 +1697,21 @@
      ctx
      input)
 
+    :add-collaborator
+    (add-collaborator
+     ctx
+     input)
+
+    :remove-collaborator
+    (remove-collaborator
+     ctx
+     input)
+
+    :reassign
+    (reassign-request
+     ctx
+     input)
+
     (fail!
      :request.fx/unsupported-operation
      "The requested Request action is not supported."
@@ -1267,4 +1738,13 @@
    #'complete-request
 
    :request/cancel
-   #'cancel-request})
+   #'cancel-request
+
+   :request/add-collaborator
+   #'add-collaborator
+
+   :request/remove-collaborator
+   #'remove-collaborator
+
+   :request/reassign
+   #'reassign-request})
