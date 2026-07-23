@@ -31,6 +31,7 @@
 (def helper-role-id (uuid "50000000-0000-0000-0000-000000000001"))
 (def admin-role-id (uuid "50000000-0000-0000-0000-000000000002"))
 (def duplicate-helper-role-id (uuid "50000000-0000-0000-0000-000000000003"))
+(def supervisor-role-id (uuid "50000000-0000-0000-0000-000000000004"))
 (def invitation-id (uuid "60000000-0000-0000-0000-000000000001"))
 (def generated-membership-id (uuid "70000000-0000-0000-0000-000000000001"))
 (def generated-role-id (uuid "70000000-0000-0000-0000-000000000002"))
@@ -158,12 +159,23 @@
            (user.common/normalize-phone "  +12065550123  ")))
     (is (= "Person Name"
            (identity/normalize-display-name "  Person Name  ")))
+    (is (= "forklift operator"
+           (user.common/normalize-skill "  Forklift Operator  ")))
+    (is (= #{"forklift operator" "paint mixer"}
+           (user.common/normalize-skills
+            [" Forklift Operator "
+             "paint mixer"
+             "FORKLIFT OPERATOR"])))
     (is (user.common/email? canonical-email))
     (is (user.common/phone? canonical-phone))
+    (is (user.common/skill? "forklift operator"))
+    (is (user.common/skills? #{"forklift operator" "paint mixer"}))
     (is (identity/display-name? "Person")))
   (testing "invalid values fail validation"
     (is (false? (user.common/email? "not-an-email")))
     (is (false? (user.common/phone? "2065550123")))
+    (is (false? (user.common/skill? " Forklift Operator ")))
+    (is (false? (user.common/skill? "")))
     (is (false? (identity/display-name? "   ")))))
 (deftest identity-create-and-schema-test
   (let [document
@@ -257,11 +269,81 @@
     (is (= membership-id (:xt/id document)))
     (is (= user-id (membership/user-id document)))
     (is (= organization-id (membership/organization-id document)))
+    (is (= #{} (membership/skills document)))
     (is (membership/active? document))
     (is (membership/for-user? document user-id))
     (is (membership/for-organization? document organization-id))
     (is (membership/document-consistent? document))
     (is (m/validate user.schema/membership-document-schema document))))
+(deftest membership-skill-test
+  (let [original
+        (active-membership
+         {:skills #{" Forklift Operator "
+                    "paint mixer"
+                    "FORKLIFT OPERATOR"}})
+        added
+        (membership/add-skill
+         original
+         {:skill "  Spanish Speaker  "
+          :now t1})
+        removed
+        (membership/remove-skill
+         added
+         {:skill "PAINT MIXER"
+          :now t2})]
+    (is (= #{"forklift operator" "paint mixer"}
+           (membership/skills original)))
+    (is (membership/has-skill? original "Forklift Operator"))
+    (is (membership/has-skill? original " forklift operator "))
+    (is (false? (membership/has-skill? original "spanish speaker")))
+    (is (= #{"forklift operator" "paint mixer" "spanish speaker"}
+           (membership/skills added)))
+    (is (= 1 (:membership/revision added)))
+    (is (= t1 (:membership/updated-at added)))
+    (is (= #{"forklift operator" "spanish speaker"}
+           (membership/skills removed)))
+    (is (= 2 (:membership/revision removed)))
+    (is (= :membership/skill-already-present
+           (error-type
+            #(membership/add-skill
+              original
+              {:skill "FORKLIFT OPERATOR"
+               :now t1}))))
+    (is (= :membership/skill-missing
+           (error-type
+            #(membership/remove-skill
+              original
+              {:skill "spanish speaker"
+               :now t1}))))
+    (is (= :membership/invalid-skill
+           (error-type
+            #(membership/add-skill
+              original
+              {:skill "   "
+               :now t1}))))
+    (is (membership/document-consistent? added))
+    (is (membership/document-consistent? removed))
+    (is (m/validate user.schema/membership-document-schema added))
+    (is (m/validate user.schema/membership-document-schema removed))))
+
+(deftest membership-skill-command-test
+  (let [original (active-membership)
+        add-command
+        (membership/add-skill-command
+         original
+         {:skill "Forklift Operator"
+          :now t1})
+        added (command-document add-command)
+        remove-command
+        (membership/remove-skill-command
+         added
+         {:skill "forklift operator"
+          :now t2})]
+    (is (= :add-skill (:model/operation add-command)))
+    (is (= #{"forklift operator"} (:membership/skills added)))
+    (is (= :remove-skill (:model/operation remove-command)))
+    (is (= #{} (:membership/skills (command-document remove-command))))))
+
 (deftest membership-lifecycle-test
   (let [original (active-membership)
         suspended
@@ -420,6 +502,10 @@
     (is (access/current-membership? membership-document))
     (is (access/current-membership? suspended))
     (is (access/access-enabled-membership? user-document membership-document))
+    (is (= #{} (access/member-skills user-document membership-document)))
+    (is (= #{} (access/member-skills user-document suspended)))
+    (is (false?
+         (access/has-skill? user-document membership-document "forklift operator")))
     (is (false?
          (access/access-enabled-membership? user-document suspended)))
     (is (access/organization-affiliated?
@@ -517,7 +603,9 @@
             applicable-scopes)))))
 (deftest public-access-context-test
   (let [user-document (active-user)
-        membership-document (active-membership)
+        membership-document
+        (active-membership
+         {:skills #{"forklift operator" "paint mixer"}})
         helper (role-assignment)
         admin
         (role-assignment
@@ -534,10 +622,14 @@
     (is (access/access-context? context))
     (is (= user-id (:user/id context)))
     (is (= membership-id (:membership/id context)))
+    (is (= #{"forklift operator" "paint mixer"}
+           (:membership/skills context)))
     (is (= #{:helper :admin} (:user/effective-roles context)))
-    (is (= #{:user/invite-helper-to-location}
+    (is (= #{:user/invite-helper-to-location
+             :user/manage-member-skills}
            (:user/capabilities context)))
     (is (access/can-invite-helper? context))
+    (is (access/can-manage-member-skills? context))
     (is (not-any?
          #(contains? context %)
          [:user/doc :membership/doc :role-assignment/doc]))
@@ -545,6 +637,28 @@
          (access/access-context?
           (assoc context
                  :user/capabilities #{}))))))
+(deftest supervisor-skill-management-capability-test
+  (let [user-document (active-user)
+        membership-document (active-membership)
+        supervisor
+        (role-assignment
+         {:id supervisor-role-id
+          :role :supervisor
+          :scope location-scope})
+        context
+        (access/access-context
+         user-document
+         membership-document
+         [supervisor]
+         applicable-scopes
+         organization-id)]
+    (is (access/access-context? context))
+    (is (= #{:supervisor} (:user/effective-roles context)))
+    (is (= #{:user/manage-member-skills}
+           (:user/capabilities context)))
+    (is (access/can-manage-member-skills? context))
+    (is (false? (access/can-invite-helper? context)))))
+
 (deftest public-access-context-without-membership-test
   (let [context
         (access/access-context
@@ -556,6 +670,7 @@
     (is (access/access-context? context))
     (is (nil? (:membership/id context)))
     (is (false? (:membership/active? context)))
+    (is (= #{} (:membership/skills context)))
     (is (= #{} (:user/effective-roles context)))
     (is (= #{} (:user/capabilities context)))
     (is (false? (access/can-invite-helper? context)))))
@@ -568,8 +683,14 @@
          (:role-assignment user.schema/schema)))
   (is (= user.schema/invitation-document-schema
          (:invitation user.schema/schema)))
+  (is (m/validate (::user.schema/skill user.schema/schema)
+                  "forklift operator"))
+  (is (m/validate (::user.schema/skills user.schema/schema)
+                  #{"forklift operator" "paint mixer"}))
   (is (m/validate (:user/doc user.schema/schema) (active-user)))
-  (is (m/validate (:membership/doc user.schema/schema) (active-membership)))
+  (is (m/validate (:membership/doc user.schema/schema)
+                  (active-membership
+                   {:skills #{"forklift operator"}})))
   (is (m/validate (:role-assignment/doc user.schema/schema) (role-assignment)))
   (is (m/validate (:invitation/doc user.schema/schema) (pending-invitation))))
 (deftest graph-input-builder-test
@@ -619,7 +740,13 @@
        (:user/invite-helper-to-location user/operations)))
   (is (identical?
        #'user/accept-invitation
-       (:user/accept-invitation user/operations))))
+       (:user/accept-invitation user/operations)))
+  (is (identical?
+       #'user/add-member-skill
+       (:user/add-member-skill user/operations)))
+  (is (identical?
+       #'user/remove-member-skill
+       (:user/remove-member-skill user/operations))))
 (deftest core-scope-context-validation-test
   (is (user/scope-context? scope-context))
   (is (false?
@@ -641,7 +768,9 @@
          :user/doc (active-user)
          :user/current-membership-found? true
          :user/current-membership
-         {:membership/doc (active-membership)
+         {:membership/doc
+          (active-membership
+           {:skills #{"forklift operator"}})
           :membership/role-assignments
           [{:role-assignment/doc (role-assignment)}
            {:role-assignment/doc
@@ -668,8 +797,10 @@
     (is (user/access-context? context))
     (is (= location-scope (:scope/target context)))
     (is (= "Person" (:user/display-name context)))
+    (is (= #{"forklift operator"} (:membership/skills context)))
     (is (= #{:helper :admin} (:user/effective-roles context)))
     (is (user/can-invite-helper? context))
+    (is (user/can-manage-member-skills? context))
     (is (not-any?
          #(contains? context %)
          [:user/doc :membership/doc :role-assignment/doc]))))
@@ -687,8 +818,10 @@
             :scope-context scope-context}))]
     (is (user/access-context? context))
     (is (nil? (:membership/id context)))
+    (is (= #{} (:membership/skills context)))
     (is (= #{} (:user/effective-roles context)))
-    (is (false? (user/can-invite-helper? context)))))
+    (is (false? (user/can-invite-helper? context)))
+    (is (false? (user/can-manage-member-skills? context)))))
 (deftest core-access-context-errors-test
   (is (= :user/invalid-user-id
          (error-type
@@ -740,7 +873,9 @@
            (second (nth @calls 5))))))
 (deftest core-write-delegation-test
   (let [invite-call (atom nil)
-        accept-call (atom nil)]
+        accept-call (atom nil)
+        add-skill-call (atom nil)
+        remove-skill-call (atom nil)]
     (with-redefs
      [user.fx/invite-helper-to-location
       (fn [ctx input]
@@ -749,7 +884,15 @@
       user.fx/accept-invitation
       (fn [ctx input]
         (reset! accept-call [ctx input])
-        :accepted)]
+        :accepted)
+      user.fx/add-member-skill
+      (fn [ctx input]
+        (reset! add-skill-call [ctx input])
+        :skill-added)
+      user.fx/remove-member-skill
+      (fn [ctx input]
+        (reset! remove-skill-call [ctx input])
+        :skill-removed)]
       (is (= :invited
              (user/invite-helper-to-location
               {:ctx true}
@@ -757,13 +900,56 @@
       (is (= :accepted
              (user/accept-invitation
               {:ctx true}
-              {:token raw-token}))))
+              {:token raw-token})))
+      (is (= :skill-added
+             (user/add-member-skill
+              {:ctx true}
+              {:organization-id organization-id
+               :location-id location-id
+               :membership-id membership-id
+               :skill "forklift operator"})))
+      (is (= :skill-removed
+             (user/remove-member-skill
+              {:ctx true}
+              {:organization-id organization-id
+               :location-id location-id
+               :membership-id membership-id
+               :skill "forklift operator"}))))
     (is (= [{:ctx true}
             {:organization-id organization-id}]
            @invite-call))
     (is (= [{:ctx true}
             {:token raw-token}]
-           @accept-call))))
+           @accept-call))
+    (is (= [{:ctx true}
+            {:organization-id organization-id
+             :location-id location-id
+             :membership-id membership-id
+             :skill "forklift operator"}]
+           @add-skill-call))
+    (is (= [{:ctx true}
+            {:organization-id organization-id
+             :location-id location-id
+             :membership-id membership-id
+             :skill "forklift operator"}]
+           @remove-skill-call))))
+(deftest core-skill-contract-test
+  (let [membership-document
+        (active-membership
+         {:skills #{"forklift operator" "paint mixer"}})]
+    (is (= "forklift operator"
+           (user/normalize-skill " Forklift Operator ")))
+    (is (user/skill? "forklift operator"))
+    (is (= #{"forklift operator" "paint mixer"}
+           (user/membership-skills membership-document)))
+    (is (user/membership-has-skill?
+         membership-document
+         "FORKLIFT OPERATOR"))
+    (is (= user.common/roles user/roles))
+    (is (= access/capabilities user/capabilities))
+    (is (= :user/manage-member-skills
+           user/manage-member-skills-capability))))
+
 (deftest invitation-token-test
   (let [hash-a (user.fx/hash-token raw-token)
         hash-b (user.fx/hash-token raw-token)
@@ -884,6 +1070,49 @@
     (is (= (command-document command) (:invitation result)))
     (is (not= raw-token
               (:invitation/token-hash (:invitation result))))))
+(deftest plan-member-skill-change-test
+  (let [target-membership (active-membership)
+        command
+        (membership/add-skill-command
+         target-membership
+         {:skill "Forklift Operator"
+          :now t1})
+        inviter (admin-user)
+        inviter-membership
+        (active-membership
+         {:id other-membership-id
+          :user-id admin-user-id})
+        admin-role (admin-assignment)
+        plan
+        (user.fx/plan-member-skill-change
+         {:command command
+          :location-authorization-versions location-authorization-versions
+          :access-proof
+          {:user inviter
+           :membership inviter-membership
+           :role-assignment admin-role}
+          :target-membership target-membership
+          :operation :add-skill
+          :skill "forklift operator"})
+        transaction-plan (:transaction-plan plan)
+        result (:result plan)]
+    (is (= [command] (:commands transaction-plan)))
+    (is (= 5 (count (:authorization-versions transaction-plan))))
+    (is (= 0 (count (:assertions transaction-plan))))
+    (is (= #{:membership}
+           (topic-set (:changes transaction-plan))))
+    (is (= :updated
+           (:change/kind (first (:changes transaction-plan)))))
+    (is (= :add-skill
+           (:membership/operation (first (:changes transaction-plan)))))
+    (is (= "forklift operator"
+           (:membership/skill (first (:changes transaction-plan)))))
+    (is (= #{"forklift operator"}
+           (get-in result [:membership :membership/skills])))
+    (is (= :add-skill (:operation result)))
+    (is (= "forklift operator" (:skill result)))
+    (is (ifn? (:entry-fn transaction-plan)))))
+
 (deftest plan-invitation-acceptance-creates-missing-documents-test
   (let [plan
         (user.fx/plan-invitation-acceptance
@@ -1035,6 +1264,32 @@
      :user/supervisor? false
      :user/admin? true
      :user/staff? true}))
+(defn supervisor-access-facts
+  []
+  (let [supervisor (admin-user)
+        membership-document
+        (active-membership
+         {:id other-membership-id
+          :user-id admin-user-id})
+        assignment
+        (role-assignment
+         {:id supervisor-role-id
+          :membership-id other-membership-id
+          :role :supervisor
+          :scope location-scope})]
+    {:user/found? true
+     :user/doc supervisor
+     :user/current-membership-found? true
+     :user/current-membership
+     {:membership/doc membership-document
+      :membership/role-assignments
+      [{:role-assignment/doc assignment}]}
+     :user/effective-roles #{:supervisor}
+     :user/helper? false
+     :user/supervisor? true
+     :user/admin? false
+     :user/staff? true}))
+
 (defn committed-result
   []
   {:commit/status :committed
@@ -1116,6 +1371,175 @@
               {:organization-id organization-id
                :location-id location-id
                :email canonical-email}))))))
+(deftest add-member-skill-machine-happy-path-test
+  (let [target-membership (active-membership)
+        captured-plan (atom nil)
+        graph-handler
+        (fn [_ctx _input query]
+          (cond
+            (= query user.fx/location-context-query)
+            (location-facts)
+
+            (= query user.graph/membership-command-query)
+            {:membership/found? true
+             :membership/doc target-membership}
+
+            (= query user.graph/access-query)
+            (supervisor-access-facts)
+
+            :else
+            (throw
+             (ex-info "Unexpected Graph query."
+                      {:query query}))))
+        transaction-handler
+        (fn [_ctx plan]
+          (reset! captured-plan plan)
+          (committed-result))
+        result
+        (user.fx/add-member-skill
+         {:current-user/id admin-user-id
+          :biff.fx/handlers
+          {:biff.graph.fx/query graph-handler
+           model.fx/transact-effect transaction-handler}}
+         {:organization-id organization-id
+          :location-id location-id
+          :membership-id membership-id
+          :skill "  Forklift Operator  "})]
+    (is (= "forklift operator" (:skill result)))
+    (is (= :add-skill (:operation result)))
+    (is (= #{"forklift operator"}
+           (get-in result [:membership :membership/skills])))
+    (is (= :committed
+           (get-in result [:transaction :commit/status])))
+    (is (= 1 (count (:commands @captured-plan))))
+    (is (= 5 (count (:authorization-versions @captured-plan))))
+    (is (= #{:membership}
+           (topic-set (:changes @captured-plan))))))
+
+(deftest remove-member-skill-machine-happy-path-test
+  (let [target-membership
+        (active-membership
+         {:skills #{"forklift operator" "paint mixer"}})
+        captured-plan (atom nil)
+        graph-handler
+        (fn [_ctx _input query]
+          (cond
+            (= query user.fx/location-context-query)
+            (location-facts)
+
+            (= query user.graph/membership-command-query)
+            {:membership/found? true
+             :membership/doc target-membership}
+
+            (= query user.graph/access-query)
+            (admin-access-facts)
+
+            :else
+            (throw
+             (ex-info "Unexpected Graph query."
+                      {:query query}))))
+        transaction-handler
+        (fn [_ctx plan]
+          (reset! captured-plan plan)
+          (committed-result))
+        result
+        (user.fx/remove-member-skill
+         {:current-user/id admin-user-id
+          :biff.fx/handlers
+          {:biff.graph.fx/query graph-handler
+           model.fx/transact-effect transaction-handler}}
+         {:organization-id organization-id
+          :location-id location-id
+          :membership-id membership-id
+          :skill "FORKLIFT OPERATOR"})]
+    (is (= "forklift operator" (:skill result)))
+    (is (= :remove-skill (:operation result)))
+    (is (= #{"paint mixer"}
+           (get-in result [:membership :membership/skills])))
+    (is (= :committed
+           (get-in result [:transaction :commit/status])))
+    (is (= #{:membership}
+           (topic-set (:changes @captured-plan))))))
+
+(deftest member-skill-machine-authorization-test
+  (let [target-membership (active-membership)
+        helper-access
+        (let [facts (admin-access-facts)
+              helper
+              (role-assignment
+               {:id helper-role-id
+                :membership-id other-membership-id
+                :role :helper
+                :scope location-scope})]
+          (-> facts
+              (assoc :user/admin? false
+                     :user/helper? true
+                     :user/effective-roles #{:helper})
+              (assoc-in
+               [:user/current-membership
+                :membership/role-assignments]
+               [{:role-assignment/doc helper}])))
+        graph-handler
+        (fn [_ctx _input query]
+          (cond
+            (= query user.fx/location-context-query)
+            (location-facts)
+
+            (= query user.graph/membership-command-query)
+            {:membership/found? true
+             :membership/doc target-membership}
+
+            (= query user.graph/access-query)
+            helper-access
+
+            :else
+            nil))]
+    (is (= :user/not-authorized
+           (error-type
+            #(user.fx/add-member-skill
+              {:current-user/id admin-user-id
+               :biff.fx/handlers
+               {:biff.graph.fx/query graph-handler
+                model.fx/transact-effect
+                (fn [& _]
+                  (throw
+                   (AssertionError.
+                    "Must not commit.")))}}
+              {:organization-id organization-id
+               :location-id location-id
+               :membership-id membership-id
+               :skill "forklift operator"}))))))
+
+(deftest member-skill-machine-target-validation-test
+  (let [wrong-organization-membership
+        (active-membership
+         {:organization-id other-organization-id})
+        graph-handler
+        (fn [_ctx _input query]
+          (cond
+            (= query user.fx/location-context-query)
+            (location-facts)
+
+            (= query user.graph/membership-command-query)
+            {:membership/found? true
+             :membership/doc wrong-organization-membership}
+
+            (= query user.graph/access-query)
+            (admin-access-facts)
+
+            :else
+            nil))]
+    (is (= :membership/organization-mismatch
+           (error-type
+            #(user.fx/add-member-skill
+              {:current-user/id admin-user-id
+               :biff.fx/handlers
+               {:biff.graph.fx/query graph-handler}}
+              {:organization-id organization-id
+               :location-id location-id
+               :membership-id membership-id
+               :skill "forklift operator"}))))))
+
 (deftest accept-invitation-machine-happy-path-test
   (let [invitation-document
         (pending-invitation {:expires-at far-future})
