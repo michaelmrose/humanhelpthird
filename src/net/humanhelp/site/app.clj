@@ -122,9 +122,21 @@
         :selected-location-id
         location-selection/default-location-id}))))
 
+(defn create-request!
+  [_ctx]
+  {:status 501
+   :headers
+   {"content-type"
+    "text/plain; charset=utf-8"}
+   :body
+   "Request creation is wired, but persisted Location selection is not connected yet."})
+
 (def handlers
   {routes/page-id
-   app-page})
+   app-page
+
+   routes/create-request-id
+   create-request!})
 
 (def resolvers
   (vec

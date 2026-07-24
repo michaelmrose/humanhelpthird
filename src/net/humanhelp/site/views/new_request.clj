@@ -1,6 +1,5 @@
 (ns net.humanhelp.site.views.new-request
   (:require
-   [com.biffweb :as biff]
    [gesso.core :as g]
    [net.humanhelp.site.routes :as routes]
    [net.humanhelp.ui :as ui]))
@@ -17,92 +16,6 @@
   (or
    (get errors field)
    (get errors (name field))))
-
-(defn- error-text
-  [errors field]
-  (when-let [message
-             (field-error errors field)]
-    [:p
-     {:class "mt-1 font-body text-xs-theme leading-body"
-      :style {:color "var(--destructive)"}}
-     message]))
-
-(defn- input-field
-  [{:keys
-    [field
-     label
-     value
-     placeholder
-     maxlength
-     required?
-     errors]}]
-  [:label
-   {:class "block"}
-
-   [:span
-    {:class
-     "mb-2 block font-heading text-sm-theme leading-heading tracking-heading weight-semibold-theme"}
-    label]
-
-   [:input
-    (cond->
-     {:type "text"
-      :name (name field)
-      :value value
-      :placeholder placeholder
-      :maxlength maxlength
-      :class
-      "control-theme w-full rounded-md border border-border bg-background px-3 py-2 font-body text-sm-theme"}
-
-      required?
-      (assoc
-       :required true)
-
-      (field-error errors field)
-      (assoc
-       :aria-invalid "true"))]
-
-   (error-text
-    errors
-    field)])
-
-(defn- details-field
-  [values errors]
-  [:label
-   {:class "block"}
-
-   [:span
-    {:class
-     "mb-1 block font-heading text-sm-theme leading-heading tracking-heading weight-semibold-theme"}
-    "Anything else we should know?"]
-
-   [:span
-    {:class
-     "mb-2 block font-body text-xs-theme leading-body"
-     :style
-     {:color "var(--muted-foreground)"}}
-    "Optional"]
-
-   [:textarea
-    (cond->
-     {:name "details"
-      :maxlength 500
-      :rows 5
-      :placeholder
-      "Add any details that would help someone understand what you need."
-      :class
-      "control-theme w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-body text-sm-theme"}
-
-      (field-error errors :details)
-      (assoc
-       :aria-invalid "true"))
-    (field-value
-     values
-     :details)]
-
-   (error-text
-    errors
-    :details)])
 
 (defn page
   [ctx
@@ -121,54 +34,55 @@
 
    [:section
     {:class
-     "mx-auto w-full max-w-xl px-4 py-10 sm:px-6 sm:py-14"}
+     "section-theme mx-auto w-full max-w-xl px-container py-10 sm:py-14"}
 
     [:header
-     {:class "mb-8 text-center"}
+     {:class
+      "title-stack-theme text-center"}
 
-     [:h1
-      {:class
-       "font-heading text-2xl-theme leading-heading tracking-heading weight-semibold-theme"}
-      "How can we help?"]
+     (g/page-title
+      {:text "How can we help?"})
 
-     [:p
-      {:class
-       "mx-auto mt-2 max-w-md font-body text-sm-theme leading-body"
-       :style
-       {:color "var(--muted-foreground)"}}
-      "Tell us what you need and someone nearby can help."]]
+     (g/muted-text
+      {:text
+       "Tell us what you need and get help."
+       :class
+       "mx-auto max-w-md"})]
 
     [:div
      {:class
-      "mb-8 flex items-center justify-between gap-4 rounded-xl border border-border bg-card px-5 py-4"}
+      "flex flex-col gap-list"}
 
-     [:div
-      {:class "min-w-0"}
+     (g/label-text
+      {:text "Your location"})
 
-      [:div
-       {:class
-        "font-body text-xs-theme leading-body weight-semibold-theme"
-        :style
-        {:color "var(--muted-foreground)"}}
-       "Your location"]
+     (g/card
+      {:class
+       "radius-md border-theme pad-card"}
+      (g/group
+       {:align :between
+        :wrap? false}
 
-      [:div
-       {:class
-        "mt-1 font-heading text-lg-theme leading-heading tracking-heading weight-semibold-theme"}
-       (:location/name location)]]
+       (g/card-title
+        {:text
+         (:location/name location)})
 
-     [:a
-      {:href routes/base-path
-       :class
-       "font-body text-sm-theme leading-body weight-semibold-theme"
-       :style
-       {:color "var(--primary)"
-        :text-decoration "none"}}
-      "Change"]]
+       [:a
+        {:href routes/base-path
+         :class "btn-link"}
+        "Change"]))]
 
-    (biff/form
-     {:action routes/base-path
-      :method "post"}
+    (g/form
+     ctx
+     {:post
+      (routes/create-request-url)
+
+      :attrs
+      {:action
+       (routes/create-request-url)
+
+       :method
+       "post"}}
 
      [:input
       {:type "hidden"
@@ -177,43 +91,95 @@
        (str
         (:location/id location))}]
 
-     [:div
-      {:class "space-y-6"}
+     (when
+      (seq errors)
+       (g/alert
+        {:variant :destructive
+         :title "Please check your request"
+         :content
+         "Correct the highlighted fields and try again."}))
 
-      (input-field
-       {:field :title
-        :label "What do you need?"
-        :value
-        (field-value
-         values
-         :title)
-        :placeholder
-        "For example: Help finding an item"
-        :maxlength 60
+     [:div
+      {:class
+       "flex flex-col gap-section"}
+
+      (g/field
+       {:for "title"
+        :class "gap-list"
+        :label-text "What do you need?"
         :required? true
-        :errors errors})
+        :error
+        (field-error
+         errors
+         :title)
 
-      (details-field
-       values
-       errors)
+        :control
+        (g/input
+         {:id "title"
+          :name "title"
+          :value
+          (field-value
+           values
+           :title)
+          :placeholder
+          "For example: Help finding an item"
+          :maxlength 60
+          :required? true})})
 
-      (input-field
-       {:field :location-detail
-        :label "Where should we find you?"
-        :value
-        (field-value
-         values
+      (g/field
+       {:for "details"
+        :class "gap-list"
+        :label-text
+        "Anything else we should know?"
+        :description "Optional"
+        :error
+        (field-error
+         errors
+         :details)
+
+        :control
+        (g/textarea
+         {:id "details"
+          :name "details"
+          :value
+          (field-value
+           values
+           :details)
+          :maxlength 500
+          :rows 5
+          :placeholder
+          "Add any details that would help someone understand what you need."
+          :class "resize-y"})})
+
+      (g/field
+       {:for "location-detail"
+        :class "gap-list"
+        :label-text
+        "Where should we find you?"
+        :error
+        (field-error
+         errors
          :location-detail)
-        :placeholder
-        "For example: Aisle 8 near the freezer case"
-        :maxlength 120
-        :errors errors})]
 
-     [:div
-      {:class "mt-8 flex justify-end"}
+        :control
+        (g/input
+         {:id "location-detail"
+          :name "location-detail"
+          :value
+          (field-value
+           values
+           :location-detail)
+          :placeholder
+          "For example: Aisle 8 near the freezer case"
+          :maxlength 120})})]
 
+     (g/group
+      {:align :end}
       (g/button
        {:variant :primary
         :text "Get help"
         :attrs
-        {:type "submit"}})])]))
+        {:type "submit"}})))
+
+    (g/scroll-buffer
+     {:size :sm})]))

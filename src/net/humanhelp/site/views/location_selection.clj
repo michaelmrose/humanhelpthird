@@ -52,23 +52,20 @@
 
      [:label
       {:class
-       "flex cursor-pointer items-center gap-4 rounded-xl border border-border bg-card px-5 py-4 text-card-foreground"}
+       "interactive-row-theme radius-xl border-theme flex cursor-pointer items-center gap-inline bg-card text-card-foreground"}
 
-      [:input
-       (cond->
-        {:type "radio"
-         :name routes/location-id-param
-         :value (str location-id)}
-
-         selected?
-         (assoc
-          :checked true))]
+      (g/radio
+       {:name routes/location-id-param
+        :value (str location-id)
+        :checked selected?})
 
       [:span
-       {:class "min-w-0 flex-1"}
+       {:class
+        "min-w-0 flex-1"}
 
        [:span
-        {:class "flex flex-wrap items-center gap-x-3 gap-y-1"}
+        {:class
+         "cluster-theme items-center"}
 
         [:span
          {:class
@@ -77,17 +74,14 @@
 
         (when
          likely?
-          [:span
-           {:class
-            "font-body text-xs-theme leading-body weight-semibold-theme"}
-           "Most likely"])]
+          (g/badge
+           {:text "Most likely"
+            :variant :secondary}))]
 
-       [:span
-        {:class
-         "mt-1 block font-body text-sm-theme leading-body"
-         :style
-         {:color "var(--muted-foreground)"}}
-        (:location/distance location)]]])))
+       (g/muted-text
+        {:as :span
+         :text (:location/distance location)
+         :class "block text-sm-theme"})]])))
 
 (defn page
   [ctx
@@ -97,7 +91,14 @@
   (let [selected-location-id
         (or
          selected-location-id
-         default-location-id)]
+         default-location-id)
+
+        location-options
+        (map
+         #(location-option
+           %
+           selected-location-id)
+         mock-locations)]
     (ui/page-shell
      ctx
      {:user user
@@ -105,45 +106,38 @@
 
      [:section
       {:class
-       "mx-auto w-full max-w-xl px-4 py-10 sm:px-6 sm:py-14"}
+       "section-theme mx-auto w-full max-w-xl px-container py-10 sm:py-14"}
 
       [:header
-       {:class "mb-8 text-center"}
+       {:class
+        "title-stack-theme text-center"}
 
-       [:h1
-        {:class
-         "font-heading text-2xl-theme leading-heading tracking-heading weight-semibold-theme"}
-        "Where are you?"]
+       (g/page-title
+        {:text "Where are you?"})
 
-       [:p
-        {:class
-         "mx-auto mt-2 max-w-md font-body text-sm-theme leading-body"
-         :style
-         {:color "var(--muted-foreground)"}}
-        "Choose the location where you need help."]]
+       (g/muted-text
+        {:text "Choose the location where you need help."
+         :class "mx-auto max-w-md"})]
 
       [:form
        {:method "get"
-        :action routes/base-path}
+        :action routes/base-path
+        :class "form-theme"}
 
-       [:fieldset
-        {:class "space-y-4"}
-
-        [:legend
-         {:class "sr-only"}
-         "Choose your location"]
-
-        (for
-         [location mock-locations]
-          (location-option
-           location
-           selected-location-id))]
+       (apply
+        g/radio-group
+        {:class "gap-list"
+         :attrs
+         {:aria-label "Choose your location"}}
+        location-options)
 
        [:div
-        {:class "mt-8 flex justify-end"}
+        {:class
+         "cluster-theme justify-end"}
 
         (g/button
          {:variant :primary
           :text "Continue"
           :attrs
           {:type "submit"}})]]])))
+

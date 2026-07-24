@@ -38,12 +38,18 @@
 (def page-id
   :site/new-request-page)
 
+(def create-request-id
+  :site/create-request)
+
 ;; -----------------------------------------------------------------------------
 ;; Relative routes
 ;; -----------------------------------------------------------------------------
 
 (def page-route
   "")
+
+(def create-request-route
+  "/requests")
 
 ;; -----------------------------------------------------------------------------
 ;; Route specs
@@ -52,7 +58,11 @@
 (def route-specs
   [{:id page-id
     :method :get
-    :route page-route}])
+    :route page-route}
+
+   {:id create-request-id
+    :method :post
+    :route create-request-route}])
 
 (def route-spec-by-id
   (into
@@ -126,17 +136,16 @@
     handlers
     nil))
   ([handlers {:keys [middleware]}]
-   [[base-path
-     (cond-> {}
-       (seq middleware)
-       (assoc
-        :middleware
-        middleware))
-
-     (route-entry
-      handlers
-      (route-spec
-       page-id))]]))
+   [(into
+     [base-path
+      (cond-> {}
+        (seq middleware)
+        (assoc
+         :middleware
+         middleware))]
+     (map
+      (partial route-entry handlers)
+      route-specs))]))
 
 ;; -----------------------------------------------------------------------------
 ;; URL encoding
@@ -217,3 +226,10 @@
   (page-url
    {:location-id
     location-id}))
+
+
+(defn create-request-url
+  []
+  (str
+   base-path
+   create-request-route))
