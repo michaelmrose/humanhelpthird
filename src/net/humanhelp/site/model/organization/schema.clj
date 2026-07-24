@@ -41,41 +41,27 @@
    organization/status?])
 
 (def scope-type-schema
-  [:fn
-   {:error/message
-    "must be organization, organization-group, or location"}
-   authorization-scope/scope-type?])
+  "Compatibility alias for the shared authorization-scope schema."
+  authorization-scope/scope-type-schema)
 
 (def parent-scope-type-schema
-  [:fn
-   {:error/message "must be organization or organization-group"}
-   authorization-scope/parent-scope-type?])
+  "Compatibility alias for the shared parent-scope schema."
+  authorization-scope/parent-scope-type-schema)
 
 (def scope-reference-schema
-  [:and
-   [:map {:closed true}
-    [:scope/type scope-type-schema]
-    [:scope/id :uuid]]
-
-   [:fn
-    {:error/message
-     "must be a valid HumanHelp authorization-scope reference"}
-    authorization-scope/scope-reference?]])
+  "Compatibility alias for the shared authorization-scope reference schema."
+  authorization-scope/scope-reference-schema)
 
 (def parent-scope-reference-schema
-  [:and
-   scope-reference-schema
-
-   [:fn
-    {:error/message
-     "must refer to an organization or organization group"}
-    authorization-scope/parent-scope-reference?]])
+  "Compatibility alias for the shared parent-scope reference schema."
+  authorization-scope/parent-scope-reference-schema)
 
 (def scope-reference-vector-schema
-  [:vector scope-reference-schema])
+  [:vector
+   scope-reference-schema])
 
 ;; =============================================================================
-;; Generic authorization-version guards
+;; Organization authorization-version guards
 ;; =============================================================================
 
 (def expected-version-schema
@@ -105,17 +91,8 @@
 ;; =============================================================================
 
 (def scope-context-schema
-  [:and
-   [:map {:closed true}
-    [:organization/id :uuid]
-    [:scope/target scope-reference-schema]
-    [:scope/applicable scope-reference-vector-schema]
-    [:scope/operational? :boolean]]
-
-   [:fn
-    {:error/message
-     "The authorization-scope context must be target-first, organization-last, unique, and structurally valid."}
-    authorization-scope/scope-context?]])
+  "Compatibility alias for the shared authorization-scope context schema."
+  authorization-scope/scope-context-schema)
 
 ;; =============================================================================
 ;; Organization document
@@ -284,8 +261,11 @@
   "Malli schemas contributed by the Organization model.
 
    Table keywords validate complete persisted documents. Attribute keywords are
-   registered independently for Gesso Graph input/output validation and for
-   other models consuming Organization authorization-scope contexts."
+   registered independently for Gesso Graph input/output validation.
+
+   Shared :scope/* registry attributes belong to model.authorization-scope.
+   Generic :model/* values may appear inside Organization-owned value schemas,
+   but are not registered here as Organization attributes."
   {::instant
    instant-schema
 
@@ -324,37 +304,6 @@
 
    ::authorization-versions
    authorization-versions-schema
-
-   ;; Shared HumanHelp authorization-scope values
-   :scope/type
-   scope-type-schema
-
-   :scope/id
-   :uuid
-
-   :scope/reference
-   scope-reference-schema
-
-   :scope/target
-   scope-reference-schema
-
-   :scope/applicable
-   scope-reference-vector-schema
-
-   :scope/operational?
-   :boolean
-
-   :scope/context
-   scope-context-schema
-
-   :model/entity-type
-   [:enum
-    :organization
-    :organization-group
-    :location]
-
-   :model/expected
-   expected-version-schema
 
    ;; Organization attributes
    :organization/id

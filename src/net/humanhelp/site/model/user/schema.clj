@@ -66,29 +66,16 @@
    user.common/role?])
 
 (def scope-type-schema
-  [:fn
-   {:error/message
-    "must be organization, organization-group, or location"}
-   authorization-scope/scope-type?])
+  "Compatibility alias for the shared authorization-scope type schema."
+  authorization-scope/scope-type-schema)
 
 (def scope-reference-schema
-  [:and
-   [:map {:closed true}
-    [:scope/type scope-type-schema]
-    [:scope/id :uuid]]
-
-   [:fn
-    {:error/message "must be a valid HumanHelp authorization-scope reference"}
-    authorization-scope/scope-reference?]])
+  "Compatibility alias for the shared authorization-scope reference schema."
+  authorization-scope/scope-reference-schema)
 
 (def applicable-scopes-schema
-  [:and
-   [:vector scope-reference-schema]
-
-   [:fn
-    {:error/message
-     "must be a nonempty, target-first, distinct vector of authorization scopes"}
-    authorization-scope/applicable-scopes?]])
+  "Compatibility alias for the shared applicable-scopes schema."
+  authorization-scope/applicable-scopes-schema)
 
 ;; =============================================================================
 ;; User identity document
@@ -344,7 +331,9 @@
   "Malli schemas contributed by the User model.
 
    Table keywords validate complete persisted documents. Attribute keywords are
-   also registered independently for Gesso Graph input and output validation."
+   also registered independently for Gesso Graph input and output validation.
+
+   Shared :scope/* registry attributes belong to model.authorization-scope."
   {::instant instant-schema
    ::revision revision-schema
    ::reason reason-schema
@@ -357,11 +346,7 @@
    ::scope-reference scope-reference-schema
    ::applicable-scopes applicable-scopes-schema
 
-   ;; Shared authorization-scope and User Graph values
-   :scope/type scope-type-schema
-   :scope/id :uuid
-   :scope/reference scope-reference-schema
-
+   ;; User Graph values derived from shared authorization scopes
    :user/role role-schema
    :user/skill skill-schema
    :user/skills skills-schema

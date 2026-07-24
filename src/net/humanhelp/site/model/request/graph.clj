@@ -162,6 +162,10 @@
    request-required-field-pairs
    request-optional-field-pairs))
 
+(def expected-version-value-query
+  "Graph shape for model.common/expected-version value objects."
+  [:*])
+
 (def request-field-query
   "Request-owned scalar projections and stable value objects derived from
    :request/doc."
@@ -181,7 +185,8 @@
       [:requestor/type
        :requestor/id]}
 
-     :request/expected-version])))
+     {:request/expected-version
+      expected-version-value-query}])))
 
 (def request-lifecycle-query
   "Pure lifecycle facts derived only from :request/doc.
@@ -269,7 +274,8 @@
        [:? graph-key])
      assignment-optional-field-pairs)
 
-    [:request-assignment/expected-version])))
+    [{:request-assignment/expected-version
+      expected-version-value-query}])))
 
 (def assignment-lifecycle-query
   [:request-assignment/active?
@@ -367,6 +373,41 @@
 ;; XTDB2 reads
 ;; =============================================================================
 
+(def ^:private timestamp-keys-by-entity-type
+  {request/request-entity-type
+   [:request/created-at
+    :request/updated-at
+    :request/claimed-at
+    :request/on-the-way-at
+    :request/completed-at
+    :request/cancelled-at]
+
+   assignment/entity-type
+   [:request-assignment/assigned-at
+    :request-assignment/created-at
+    :request-assignment/updated-at
+    :request-assignment/ended-at]})
+
+(defn- normalize-loaded-document
+  [entity-type document]
+  (when document
+    (reduce
+     (fn [document timestamp-key]
+       (if
+        (contains?
+         document
+         timestamp-key)
+         (update
+          document
+          timestamp-key
+          model.common/normalize-timestamp)
+         document))
+     document
+     (get
+      timestamp-keys-by-entity-type
+      entity-type
+      []))))
+
 (defn- q
   "Runs an ordinary Request-model read through Biff's XTDB2 helper."
   [ctx query]
@@ -379,14 +420,18 @@
   (when
    document
     (request/require-request-document
-     document)))
+     (normalize-loaded-document
+      request/request-entity-type
+      document))))
 
 (defn- valid-loaded-assignment
   [document]
   (when
    document
     (assignment/require-document
-     document)))
+     (normalize-loaded-document
+      assignment/entity-type
+      document))))
 
 (defn- load-request
   [ctx request-id]
@@ -964,8 +1009,8 @@
    {[:? :request-assignment/doc]
     assignment-document-query}
 
-   [:?
-    :request-assignment/expected-version]])
+   {[:? :request-assignment/expected-version]
+    expected-version-value-query}])
 
 (def active-assignments-query
   "Loads active Request Assignments for one Request.
@@ -1018,8 +1063,8 @@
     {[:? :request/doc]
      request-document-query}
 
-    [:?
-     :request/expected-version]]
+    {[:? :request/expected-version]
+     expected-version-value-query}]
    request-assignment-query))
 
 (def request-facts-query

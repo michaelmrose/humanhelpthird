@@ -88,6 +88,13 @@
 (def location-document-query
   [:*])
 
+
+(def scope-context-value-query
+  [:*])
+
+(def authorization-versions-value-query
+  [:*])
+
 ;; =============================================================================
 ;; Graph field projections
 ;; =============================================================================
@@ -244,6 +251,47 @@
 ;; XTDB reads
 ;; =============================================================================
 
+(def ^:private timestamp-keys-by-entity-type
+  {organization/organization-entity-type
+   [:organization/created-at
+    :organization/updated-at
+    :organization/suspended-at
+    :organization/closed-at]
+
+   organization/organization-group-entity-type
+   [:organization-group/created-at
+    :organization-group/updated-at
+    :organization-group/moved-at
+    :organization-group/suspended-at
+    :organization-group/closed-at]
+
+   organization/location-entity-type
+   [:location/created-at
+    :location/updated-at
+    :location/moved-at
+    :location/suspended-at
+    :location/closed-at]})
+
+(defn- normalize-loaded-document
+  [entity-type document]
+  (when document
+    (reduce
+     (fn [document timestamp-key]
+       (if
+        (contains?
+         document
+         timestamp-key)
+         (update
+          document
+          timestamp-key
+          model.common/normalize-timestamp)
+         document))
+     document
+     (get
+      timestamp-keys-by-entity-type
+      entity-type
+      []))))
+
 (defn- q
   [ctx query]
   (biffx/q
@@ -254,12 +302,16 @@
   [ctx table columns id]
   (when
    (uuid? id)
-    (first
-     (q
-      ctx
-      {:select columns
-       :from table
-       :where [:= :xt/id id]}))))
+    (when-let [document
+               (first
+                (q
+                 ctx
+                 {:select columns
+                  :from table
+                  :where [:= :xt/id id]}))]
+      (normalize-loaded-document
+       table
+       document))))
 
 (defn- load-organization
   [ctx organization-id]
@@ -628,8 +680,10 @@
    :output
    [[:? :organization/active?]
     [:? :organization/operational?]
-    [:? :organization/scope-context]
-    [:? :organization/authorization-versions]]}
+    {[:? :organization/scope-context]
+     scope-context-value-query}
+    {[:? :organization/authorization-versions]
+     authorization-versions-value-query}]}
   [_ctx {:organization/keys [doc]}]
   (dissoc
    (organization-context-facts doc)
@@ -687,8 +741,10 @@
      organization-group-document-query}
     {[:? :organization-group/applicable-scopes]
      [:scope/type :scope/id]}
-    [:? :organization-group/scope-context]
-    [:? :organization-group/authorization-versions]]}
+    {[:? :organization-group/scope-context]
+     scope-context-value-query}
+    {[:? :organization-group/authorization-versions]
+     authorization-versions-value-query}]}
   [ctx {:organization-group/keys [doc]}]
   (dissoc
    (organization-group-context-facts ctx doc)
@@ -747,8 +803,10 @@
      organization-group-document-query}
     {[:? :location/applicable-scopes]
      [:scope/type :scope/id]}
-    [:? :location/scope-context]
-    [:? :location/authorization-versions]]}
+    {[:? :location/scope-context]
+     scope-context-value-query}
+    {[:? :location/authorization-versions]
+     authorization-versions-value-query}]}
   [ctx {:location/keys [doc]}]
   (dissoc
    (location-context-facts ctx doc)
@@ -784,8 +842,10 @@
    [:? :organization/operational?]
    {[:? :organization/scope]
     [:scope/type :scope/id]}
-   [:? :organization/scope-context]
-   [:? :organization/authorization-versions]])
+   {[:? :organization/scope-context]
+    scope-context-value-query}
+   {[:? :organization/authorization-versions]
+    authorization-versions-value-query}])
 
 (def organization-group-scope-context-query
   [:organization-group/found?
@@ -800,8 +860,10 @@
     organization-group-document-query}
    {[:? :organization-group/applicable-scopes]
     [:scope/type :scope/id]}
-   [:? :organization-group/scope-context]
-   [:? :organization-group/authorization-versions]])
+   {[:? :organization-group/scope-context]
+    scope-context-value-query}
+   {[:? :organization-group/authorization-versions]
+    authorization-versions-value-query}])
 
 (def location-context-query
   "Stable Organization Graph contract consumed by User and Request.
@@ -821,8 +883,10 @@
     organization-group-document-query}
    {[:? :location/applicable-scopes]
     [:scope/type :scope/id]}
-   [:? :location/scope-context]
-   [:? :location/authorization-versions]])
+   {[:? :location/scope-context]
+    scope-context-value-query}
+   {[:? :location/authorization-versions]
+    authorization-versions-value-query}])
 
 ;; =============================================================================
 ;; Resolver collection

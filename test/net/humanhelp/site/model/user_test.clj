@@ -964,7 +964,7 @@
 (deftest model-fx-assertion-helper-test
   (is (= {:assert
           [:= 0
-           {:select [[[:count '*']]]
+           {:select [[[:count '*]]]
             :from 'invitation
             :where [:= :xt/id invitation-id]}]}
          (model.fx/assert-document-absent
@@ -972,7 +972,7 @@
           invitation-id)))
   (is (= {:assert
           [:= 1
-           {:select [[[:count '*']]]
+           {:select [[[:count '*]]]
             :from 'location
             :where
             [:and

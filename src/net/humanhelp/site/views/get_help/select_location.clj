@@ -1,32 +1,9 @@
-(ns net.humanhelp.site.views.location-selection
+(ns net.humanhelp.site.views.get-help.select-location
   (:require
    [gesso.core :as g]
    [net.humanhelp.site.components.glow.core :as glow]
    [net.humanhelp.site.routes :as routes]
-   [net.humanhelp.ui :as ui])
-  (:import
-   [java.util UUID]))
-
-(def mock-locations
-  [{:location/id
-    (UUID/fromString "30000000-0000-0000-0000-000000000001")
-    :location/name "Northgate"
-    :location/distance "0.3 mi away"
-    :location/likely? true}
-
-   {:location/id
-    (UUID/fromString "30000000-0000-0000-0000-000000000002")
-    :location/name "Lake City"
-    :location/distance "2.1 mi away"}
-
-   {:location/id
-    (UUID/fromString "30000000-0000-0000-0000-000000000003")
-    :location/name "University Village"
-    :location/distance "3.8 mi away"}])
-
-(def default-location-id
-  (:location/id
-   (first mock-locations)))
+   [net.humanhelp.ui :as ui]))
 
 (defn- location-option
   [location selected-location-id]
@@ -43,9 +20,7 @@
          selected-location-id)]
     (glow/glow
      {:active?
-      (and
-       likely?
-       selected?)
+      likely?
 
       :class
       "block"}
@@ -87,18 +62,20 @@
   [ctx
    {:keys
     [user
+     locations
      selected-location-id]}]
   (let [selected-location-id
         (or
          selected-location-id
-         default-location-id)
+         (:location/id
+          (first locations)))
 
         location-options
         (map
          #(location-option
            %
            selected-location-id)
-         mock-locations)]
+         locations)]
     (ui/page-shell
      ctx
      {:user user
@@ -116,8 +93,10 @@
         {:text "Where are you?"})
 
        (g/muted-text
-        {:text "Choose the location where you need help."
-         :class "mx-auto max-w-md"})]
+        {:text
+         "Choose the location where you need help."
+         :class
+         "mx-auto max-w-md"})]
 
       [:form
        {:method "get"
@@ -128,7 +107,8 @@
         g/radio-group
         {:class "gap-list"
          :attrs
-         {:aria-label "Choose your location"}}
+         {:aria-label
+          "Choose your location"}}
         location-options)
 
        [:div

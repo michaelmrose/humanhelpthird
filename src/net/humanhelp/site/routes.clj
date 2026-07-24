@@ -1,68 +1,59 @@
 (ns net.humanhelp.site.routes
-  "Route facts and URL builders for the real HumanHelp site app.
-
-   The ordinary customer flow lives at one stable /app entrypoint:
-
-     authenticate -> choose location -> describe request -> wait for help
-
-   Location selection is flow state carried by the same /app URL rather than a
-   separate route. QR codes therefore enter the exact same flow by supplying
-   location-id, and later other preselected values, as query parameters.
-
-   routes.clj owns route facts and URL construction.
-   site.app owns handlers and middleware."
   (:require
    [clojure.string :as str])
   (:import
    [java.net URLEncoder]
    [java.nio.charset StandardCharsets]))
 
-;; -----------------------------------------------------------------------------
-;; Base
-;; -----------------------------------------------------------------------------
-
 (def base-path
   "/app")
-
-;; -----------------------------------------------------------------------------
-;; Flow parameter names
-;; -----------------------------------------------------------------------------
 
 (def location-id-param
   "location-id")
 
-;; -----------------------------------------------------------------------------
-;; Route ids
-;; -----------------------------------------------------------------------------
+(def request-id-param
+  "request-id")
 
 (def page-id
-  :site/new-request-page)
+  :site/get-help-page)
+
+(def validate-request-id
+  :site/validate-request)
 
 (def create-request-id
   :site/create-request)
 
-;; -----------------------------------------------------------------------------
-;; Relative routes
-;; -----------------------------------------------------------------------------
+(def request-page-id
+  :site/request-page)
 
 (def page-route
   "")
 
+(def validate-request-route
+  "/request-validation")
+
 (def create-request-route
   "/requests")
 
-;; -----------------------------------------------------------------------------
-;; Route specs
-;; -----------------------------------------------------------------------------
+(def request-page-route
+  "/requests/:request-id")
 
 (def route-specs
   [{:id page-id
     :method :get
     :route page-route}
 
+   {:id validate-request-id
+    :method :post
+    :route validate-request-route}
+
    {:id create-request-id
     :method :post
-    :route create-request-route}])
+    :route create-request-route}
+
+   {:id request-page-id
+    :method :get
+    :route request-page-route}])
 
 (def route-spec-by-id
   (into
@@ -80,17 +71,11 @@
    (throw
     (ex-info
      "Unknown HumanHelp site route id."
-     {:route-id
-      route-id
-
+     {:route-id route-id
       :known-route-ids
       (set
        (keys
         route-spec-by-id))}))))
-
-;; -----------------------------------------------------------------------------
-;; Handler binding
-;; -----------------------------------------------------------------------------
 
 (defn- handler-for!
   [handlers {:keys [id method route] :as spec}]
@@ -101,18 +86,10 @@
    (throw
     (ex-info
      "Missing HumanHelp site route handler."
-     {:route-id
-      id
-
-      :method
-      method
-
-      :route
-      route
-
-      :spec
-      spec
-
+     {:route-id id
+      :method method
+      :route route
+      :spec spec
       :handler-ids
       (set
        (keys
@@ -127,10 +104,6 @@
      spec)}])
 
 (defn route-table
-  "Return the Reitit route table for the real HumanHelp site app.
-
-   handlers maps route id to handler function. Middleware belongs to site.app
-   and is attached to the /app route group here."
   ([handlers]
    (route-table
     handlers
@@ -147,10 +120,6 @@
       (partial route-entry handlers)
       route-specs))]))
 
-;; -----------------------------------------------------------------------------
-;; URL encoding
-;; -----------------------------------------------------------------------------
-
 (defn- encode
   [value]
   (URLEncoder/encode
@@ -163,19 +132,16 @@
   (and
    (some?
     value)
-
    (not
     (str/blank?
      (str value)))))
 
 (defn query-string
-  "Build a query string from non-nil, non-blank values."
   [params]
   (let [pairs
         (for
          [[key value]
           params
-
           :when
           (present?
            value)]
@@ -204,15 +170,7 @@
      params)
     "")))
 
-;; -----------------------------------------------------------------------------
-;; New-request flow URLs
-;; -----------------------------------------------------------------------------
-
 (defn page-url
-  "Return the ordinary HumanHelp app entrypoint.
-
-   Supplying location-id represents the same state produced by the interactive
-   Location-selection step. QR URLs can therefore call this same function."
   ([]
    base-path)
   ([{:keys [location-id]}]
@@ -227,9 +185,22 @@
    {:location-id
     location-id}))
 
+(defn create-request-validation-url
+  []
+  (str
+   base-path
+   validate-request-route))
 
 (defn create-request-url
   []
   (str
    base-path
    create-request-route))
+
+(defn request-url
+  [request-id]
+  (str
+   base-path
+   "/requests/"
+   (encode
+    request-id)))

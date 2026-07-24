@@ -1,8 +1,42 @@
-(ns net.humanhelp.site.views.new-request
+(ns net.humanhelp.site.views.get-help.new-request
   (:require
    [gesso.core :as g]
+   [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.routes :as routes]
    [net.humanhelp.ui :as ui]))
+
+(def request-form-schema
+  [:map
+   [:title
+    [:string
+     {:min 1
+      :max request/title-max
+      :gesso.error/required "Tell us what you need."
+      :gesso.error/maxlength
+      (str
+       "Your request must be "
+       request/title-max
+       " characters or fewer.")}]]
+
+   [:details
+    {:optional true}
+    [:string
+     {:max request/details-max
+      :gesso.error/maxlength
+      (str
+       "Details must be "
+       request/details-max
+       " characters or fewer.")}]]
+
+   [:location-detail
+    {:optional true}
+    [:string
+     {:max request/location-detail-max
+      :gesso.error/maxlength
+      (str
+       "Location details must be "
+       request/location-detail-max
+       " characters or fewer.")}]]])
 
 (defn- field-value
   [values field]
@@ -23,7 +57,8 @@
     [user
      location
      values
-     errors]
+     errors
+     form-error]
     :or
     {values {}
      errors {}}}]
@@ -45,13 +80,13 @@
 
      (g/muted-text
       {:text
-       "Tell us what you need and get help."
+       "Tell us what you need and someone nearby can help."
        :class
        "mx-auto max-w-md"})]
 
     [:div
      {:class
-      "flex flex-col gap-list"}
+      "flex flex-col gap-content"}
 
      (g/label-text
       {:text "Your location"})
@@ -74,8 +109,11 @@
 
     (g/form
      ctx
-     {:post
-      (routes/create-request-url)
+     {:validate-url
+      (routes/create-request-validation-url)
+
+      :csrf?
+      true
 
       :attrs
       {:action
@@ -92,6 +130,13 @@
         (:location/id location))}]
 
      (when
+      form-error
+       (g/alert
+        {:variant :destructive
+         :title "We couldn't create this request"
+         :content form-error}))
+
+     (when
       (seq errors)
        (g/alert
         {:variant :destructive
@@ -105,9 +150,10 @@
 
       (g/field
        {:for "title"
-        :class "gap-list"
+        :field-key :title
+        :schema request-form-schema
+        :class "gap-content"
         :label-text "What do you need?"
-        :required? true
         :error
         (field-error
          errors
@@ -122,13 +168,13 @@
            values
            :title)
           :placeholder
-          "For example: Help finding an item"
-          :maxlength 60
-          :required? true})})
+          "For example: Help finding an item"})})
 
       (g/field
        {:for "details"
-        :class "gap-list"
+        :field-key :details
+        :schema request-form-schema
+        :class "gap-content"
         :label-text
         "Anything else we should know?"
         :description "Optional"
@@ -145,7 +191,6 @@
           (field-value
            values
            :details)
-          :maxlength 500
           :rows 5
           :placeholder
           "Add any details that would help someone understand what you need."
@@ -153,7 +198,9 @@
 
       (g/field
        {:for "location-detail"
-        :class "gap-list"
+        :field-key :location-detail
+        :schema request-form-schema
+        :class "gap-content"
         :label-text
         "Where should we find you?"
         :error
@@ -170,8 +217,7 @@
            values
            :location-detail)
           :placeholder
-          "For example: Aisle 8 near the freezer case"
-          :maxlength 120})})]
+          "For example: Aisle 8 near the freezer case"})})]
 
      (g/group
       {:align :end}
