@@ -1,25 +1,13 @@
 (ns net.humanhelp.auth.phone
   (:require
-   [com.biffweb.experimental :as biffx]
    [net.humanhelp.components.phone-auth.sms :as phone-auth.sms]
-   [tick.core :as tick]))
-
-(defn- ctx-keys
-  [ctx]
-  (when (map? ctx)
-    (->> (keys ctx)
-         (map str)
-         sort
-         vec)))
-
-(defn- node
-  [ctx]
-  (or (:biff/node ctx)
-      (throw
-       (ex-info "Phone auth requires :biff/node."
-                {:ctx-keys (ctx-keys ctx)}))))
+   [net.humanhelp.site.model.user.core :as user]))
 
 (defn normalize-phone
+  "Normalize phone input for the phone-auth UI/provider boundary.
+
+   The phone-auth component intentionally uses exactly 10 US digits while the
+   User model stores canonical E.164."
   [phone]
   (phone-auth.sms/normalize-phone phone))
 
@@ -27,68 +15,78 @@
   [phone]
   (phone-auth.sms/phone-display phone))
 
-(defn get-user-id
-  [node phone]
-  (-> (biffx/q node
-               {:select :xt/id
-                :from :user
-                :where [:= :user/phone phone]})
-      first
-      :xt/id))
+(defn- user-phone
+  "Convert the verified 10-digit US phone-auth value to the canonical E.164
+   representation owned by the User model."
+  [phone]
+  (when-let [digits
+             (normalize-phone phone)]
+    (str "+1" digits)))
 
-(defn new-user-tx
-  [{:keys [user-id phone phone-display now]}]
-  [[:put-docs :user
-    {:xt/id user-id
-     :user/phone phone
-     :user/phone-display phone-display
-     :user/phone-verified-at now
-     :user/joined-at now}]
-   (biffx/assert-unique :user {:user/phone phone})])
+(defn- existing-user
+  [ctx canonical-phone]
+  (let [facts
+        (user/user-facts
+         ctx
+         {:phone canonical-phone})]
+    (when
+     (:user/found? facts)
+      (:user/doc facts))))
 
 (defn complete-phone-signin!
-  "Find or create a user for a verified phone number.
+  "Find or create a User for a phone number that has already been verified by
+   the phone-auth provider.
 
-  This function completes the identity part of phone auth, but deliberately does
-  not create a Ring response and does not mutate the session. The caller should
-  put the returned :user-id into the session as :uid.
+   Phone-auth keeps its reusable UI/provider representation as 10 US digits.
+   This boundary converts that value to canonical E.164 before entering the
+   User model.
 
-  Returns:
+   This function does not create a Ring response or mutate the session. The
+   caller should place the returned :user-id into the session as :uid.
 
-    {:ok? true
-     :user-id ...
-     :phone \"1234567890\"
-     :phone-display \"123-456-7890\"
-     :new-user? true|false}
+   Returns:
 
-  or:
+     {:ok? true
+      :user-id ...
+      :phone \"1234567890\"
+      :phone-display \"123-456-7890\"
+      :new-user? true|false}
 
-    {:ok? false
-     :error ...}"
+   or:
+
+     {:ok? false
+      :error ...}"
   [ctx {:keys [phone]}]
-  (if-let [phone' (normalize-phone phone)]
-    (let [node'            (node ctx)
-          phone-display'   (phone-display phone')
-          existing-user-id (get-user-id node' phone')]
-      (if existing-user-id
+  (if-let [phone'
+           (normalize-phone phone)]
+    (let [canonical-phone
+          (user-phone phone')
+
+          phone-display'
+          (phone-display phone')
+
+          existing
+          (existing-user
+           ctx
+           canonical-phone)]
+      (if
+       existing
         {:ok? true
-         :user-id existing-user-id
+         :user-id (:xt/id existing)
          :phone phone'
          :phone-display phone-display'
          :new-user? false}
 
-        (let [user-id (random-uuid)
-              now     (tick/zoned-date-time)]
-          (biffx/submit-tx
-           ctx
-           (new-user-tx
-            {:user-id user-id
-             :phone phone'
-             :phone-display phone-display'
-             :now now}))
+        (let [result
+              (user/create-user
+               ctx
+               {:phone canonical-phone
+                :phone-verified? true})
 
+              created-user
+              (:user result)]
           {:ok? true
-           :user-id user-id
+           :user-id (:xt/id created-user)
            :phone phone'
            :phone-display phone-display'
            :new-user? true})))

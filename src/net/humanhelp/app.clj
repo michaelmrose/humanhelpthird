@@ -1,13 +1,10 @@
 (ns net.humanhelp.app
   "Generic /app entrypoint.
 
-   The generated template points /app at the removable Human Help example app.
-
-   Template users can either:
-   - replace this namespace with their own app code, or
-   - keep this namespace as a thin adapter and point it at their own feature app."
+   HumanHelp now points /app at the real site application rather than the
+   removable example app."
   (:require
-   [net.humanhelp.example.app :as humanhelp]))
+   [net.humanhelp.site.app :as site]))
 
 (def module
-  humanhelp/module)
+  site/module)

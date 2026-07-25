@@ -136,7 +136,7 @@
    (=
     {:assert
      [:= 0
-      {:select [[[:count '*']]]
+      {:select [[[:count '*]]]
        :from 'example
        :where [:= :xt/id document-id]}]}
     (model.fx/assert-document-absent
@@ -147,7 +147,7 @@
    (=
     {:assert
      [:= 1
-      {:select [[[:count '*']]]
+      {:select [[[:count '*]]]
        :from 'location
        :where
        [:and

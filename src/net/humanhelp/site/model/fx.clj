@@ -182,7 +182,7 @@
 
 (defn- count-subquery
   [entity-type where]
-  {:select [[[:count '*']]]
+  {:select [[[:count '*]]]
    :from (table-symbol entity-type)
    :where where})
 

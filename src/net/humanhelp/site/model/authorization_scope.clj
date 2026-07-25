@@ -211,3 +211,122 @@
 
       (boolean?
        (:scope/operational? value))))))
+
+;; =============================================================================
+;; Malli schemas
+;; =============================================================================
+
+(def scope-type-schema
+  [:fn
+   {:error/message
+    "must be organization, organization-group, or location"}
+   scope-type?])
+
+(def parent-scope-type-schema
+  [:fn
+   {:error/message
+    "must be organization or organization-group"}
+   parent-scope-type?])
+
+(def scope-reference-schema
+  [:and
+   [:map {:closed true}
+    [:scope/type
+     scope-type-schema]
+
+    [:scope/id
+     :uuid]]
+
+   [:fn
+    {:error/message
+     "must be a valid HumanHelp authorization-scope reference"}
+    scope-reference?]])
+
+(def parent-scope-reference-schema
+  [:and
+   scope-reference-schema
+
+   [:fn
+    {:error/message
+     "must refer to an organization or organization group"}
+    parent-scope-reference?]])
+
+(def applicable-scopes-schema
+  [:and
+   [:vector
+    scope-reference-schema]
+
+   [:fn
+    {:error/message
+     "must be a nonempty, target-first, distinct vector of authorization scopes"}
+    applicable-scopes?]])
+
+(def scope-context-schema
+  [:and
+   [:map {:closed true}
+    [:organization/id
+     :uuid]
+
+    [:scope/target
+     scope-reference-schema]
+
+    [:scope/applicable
+     applicable-scopes-schema]
+
+    [:scope/operational?
+     :boolean]]
+
+   [:fn
+    {:error/message
+     "The authorization-scope context must be target-first, organization-last, unique, and structurally valid."}
+    scope-context?]])
+
+;; =============================================================================
+;; Biff/Malli registry contribution
+;; =============================================================================
+
+(def schema
+  "Malli schemas contributed by the shared authorization-scope vocabulary.
+
+   This namespace is the sole registry owner of :scope/* attributes."
+  {::scope-type
+   scope-type-schema
+
+   ::parent-scope-type
+   parent-scope-type-schema
+
+   ::scope-reference
+   scope-reference-schema
+
+   ::parent-scope-reference
+   parent-scope-reference-schema
+
+   ::applicable-scopes
+   applicable-scopes-schema
+
+   ::scope-context
+   scope-context-schema
+
+   :scope/type
+   scope-type-schema
+
+   :scope/id
+   :uuid
+
+   :scope/reference
+   scope-reference-schema
+
+   :scope/target
+   scope-reference-schema
+
+   :scope/applicable
+   applicable-scopes-schema
+
+   :scope/operational?
+   :boolean
+
+   :scope/context
+   scope-context-schema})
+
+(def module
+  {:schema schema})

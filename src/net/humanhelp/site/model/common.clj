@@ -3,7 +3,7 @@
 
    This namespace owns only model-independent behavior:
 
-   - timestamp predicates and ordering;
+   - timestamp predicates, normalization, and ordering;
    - standardized domain-validation failures;
    - version-metadata validation;
    - versioned-document consistency;
@@ -15,7 +15,7 @@
    Individual models continue to own their document fields, lifecycle rules,
    invariants, authorization policy, queries, assertions, and semantic changes."
   (:import
-   [java.time Instant]))
+   [java.time Instant ZonedDateTime]))
 
 ;; =============================================================================
 ;; Errors
@@ -65,6 +65,31 @@
 ;; =============================================================================
 ;; Timestamp values
 ;; =============================================================================
+
+(defn normalize-timestamp
+  "Returns the canonical HumanHelp representation of a timestamp value.
+
+   Domain and model code use java.time.Instant. Persistence layers may return a
+   semantically equivalent java.time.ZonedDateTime; normalize that value at the
+   read boundary before it enters model validation.
+
+   nil is preserved for optional timestamp fields. Other values are returned
+   unchanged so the ordinary timestamp predicates and schemas can reject them."
+  [value]
+  (cond
+    (instance?
+     Instant
+     value)
+    value
+
+    (instance?
+     ZonedDateTime
+     value)
+    (.toInstant
+     ^ZonedDateTime value)
+
+    :else
+    value))
 
 (defn timestamp-value?
   "Returns true when value is a java.time.Instant."
