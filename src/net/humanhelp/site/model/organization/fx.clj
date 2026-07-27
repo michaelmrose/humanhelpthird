@@ -1,100 +1,94 @@
 (ns net.humanhelp.site.model.organization.fx
-  "Organization hierarchy workflows.
+  "Authorized Organization hierarchy workflows.
 
-   Writes are authorized through User core, committed through model.fx, and
-   published as semantic Organization changes.
+   Domain functions create canonical gesso.model commands. This namespace adds
+   hierarchy/User authorization guards and semantic Live changes, then commits
+   through gesso.model.tx.
 
-   Organization FX decides which hierarchy and User documents establish
-   authorization. It passes those generic document guards to model.fx through
-   :authorization-versions; model.fx owns guard validation, deduplication,
-   conflict detection, ASSERT generation, and composable transaction-fragment
-   mechanics.
-
-   This slice covers nonterminal hierarchy management. Location closure remains
-   intentionally unexposed until User core supplies an atomic exact-scope
-   role-revocation planner."
+   Organization owns hierarchy authorization requirements; User owns User,
+   membership, and role authorization proof. gesso.model owns optimistic-
+   concurrency mechanics and transaction execution."
   (:require
    [gesso.fx :as fx]
-   [net.humanhelp.site.model.common :as model.common]
-   [net.humanhelp.site.model.fx :as model.fx]
+   [gesso.model.command :as command]
+   [gesso.model.tx :as model.tx]
    [net.humanhelp.site.model.organization.domain :as organization]
    [net.humanhelp.site.model.organization.graph :as organization.graph]
    [net.humanhelp.site.model.user.core :as user]))
+
+;; =============================================================================
+;; Common helpers
+;; =============================================================================
+
 (defn- fail!
-  ([error-type message]
-   (fail! error-type message nil))
-  ([error-type message details]
-   (throw
-    (ex-info
-     message
-     (cond-> {:error/type error-type}
-       (some? details)
-       (assoc :error/details details))))))
-(defn- require-authenticated-user-id!
-  [ctx]
-  (or
-   (:current-user/id ctx)
-   (fail!
-    :organization/not-authenticated
-    "A signed-in user is required.")))
-(defn- command-document [command]
-  (model.common/command-document command))
-(defn- change-entry [{:keys [topic id]}]
-  {:coalesce-key [topic id]})
-(defn- scope-context-organization-id [scope-context]
-  (:organization/id scope-context))
-(defn- scope-context-target [scope-context]
-  (:scope/target scope-context))
-(defn- scope-context-operational? [scope-context]
-  (true? (:scope/operational? scope-context)))
-(defn- commit-state
-  [{:organization.fx/keys [result transaction-plan]}]
+  ([type message] (fail! type message nil))
+  ([type message details]
+   (throw (ex-info message (cond-> {:error/type type}
+                             (some? details) (assoc :error/details details))))))
+
+(defn- user-id! [ctx]
+  (or (:current-user/id ctx)
+      (fail! :organization/not-authenticated "A signed-in user is required.")))
+
+(defn- change-entry [{:keys [topic id]}] {:coalesce-key [topic id]})
+(defn- scope-organization-id [context] (:organization/id context))
+(defn- scope-target [context] (:scope/target context))
+(defn- operational? [context] (true? (:scope/operational? context)))
+
+(defn- commit-state [{:organization.fx/keys [result transaction-plan]}]
   {:organization.fx/result result
-   :organization.fx/transaction [model.fx/transact-effect transaction-plan]
+   :organization.fx/transaction [model.tx/transact-effect transaction-plan]
    :biff.fx/next :finish})
-(defn- finish-state
-  [{:organization.fx/keys [result transaction]}]
+(defn- finish-state [{:organization.fx/keys [result transaction]}]
   {:biff.fx/return (assoc result :transaction transaction)})
-(defn- require-authorization-version-sequence!
-  [authorization-versions error-type message details]
-  (when-not
-   (sequential? authorization-versions)
-    (fail!
-     error-type
-     message
-     (assoc
-      details
-      :authorization-versions
-      authorization-versions)))
 
-  (vec authorization-versions))
+;; =============================================================================
+;; Legacy Organization proof -> canonical Gesso guard boundary
+;; =============================================================================
 
-(defn- collect-authorization-versions!
-  [& authorization-version-collections]
-  (into
-   []
-   (mapcat
-    (fn [authorization-versions]
-      (require-authorization-version-sequence!
-       authorization-versions
-       :organization.fx/invalid-authorization-versions
-       "Organization authorization versions must be sequential."
-       {})))
-   authorization-version-collections))
+(def legacy-expected-version-keys
+  #{:model/id :model/revision-key :model/revision :model/updated-at-key :model/updated-at})
 
-(defn- scope-context-effect
-  [organization-id scope]
-  (when-not
-   (and
-    (uuid? organization-id)
-    (organization/scope-reference? scope))
-    (fail!
-     :organization.fx/invalid-scope-query
-     "A valid organization and scope are required."
-     {:organization/id organization-id
-      :scope scope}))
-  (case
-   (:scope/type scope)
+(defn- legacy-proof->guard [proof]
+  (if (command/guard? proof)
+    proof
+    (let [{:model/keys [entity-type expected]} proof
+          {:model/keys [id revision-key revision updated-at-key updated-at]} expected]
+      (when-not (and (keyword? entity-type) (some? id)
+                     (keyword? revision-key) (some? revision)
+                     (keyword? updated-at-key) (some? updated-at))
+        (fail! :organization.fx/invalid-authorization-version
+               "An Organization authorization version is invalid."
+               {:authorization-version proof}))
+      (command/require-guard
+       {:model/entity-type entity-type
+        :model/expected {:model/id id
+                         :model/checks [[revision-key revision]
+                                        [updated-at-key updated-at]]}}))))
+
+(defn- proof-seq! [proofs]
+  (when-not (sequential? proofs)
+    (fail! :organization.fx/invalid-authorization-versions
+           "Organization authorization versions must be sequential."
+           {:authorization-versions proofs}))
+  proofs)
+
+(defn- guards [& collections]
+  (into [] (comp (mapcat proof-seq!) (map legacy-proof->guard)) collections))
+
+;; =============================================================================
+;; Scope reads and contracts
+;; =============================================================================
+
+(defn- scope-key [scope suffix]
+  (keyword (name (:scope/type scope)) suffix))
+
+(defn- scope-context-effect [organization-id scope]
+  (when-not (and (uuid? organization-id) (organization/scope-reference? scope))
+    (fail! :organization.fx/invalid-scope-query
+           "A valid organization and scope are required."
+           {:organization/id organization-id :scope scope}))
+  (case (:scope/type scope)
     :organization
     [:biff.graph.fx/query
      (organization.graph/organization-scope-context-query-input
@@ -103,928 +97,342 @@
     :organization-group
     [:biff.graph.fx/query
      (organization.graph/organization-group-scope-context-query-input
-      {:organization-id organization-id
-       :organization-group-id (:scope/id scope)})
+      {:organization-id organization-id :organization-group-id (:scope/id scope)})
      organization.graph/organization-group-scope-context-query]
     :location
     [:biff.graph.fx/query
      (organization.graph/location-context-query-input
-      {:organization-id organization-id
-       :location-id (:scope/id scope)})
+      {:organization-id organization-id :location-id (:scope/id scope)})
      organization.graph/location-context-query]))
-(defn- scope-facts-contract
-  [scope]
-  (case
-   (:scope/type scope)
-    :organization
-    {:found-key
-     :organization/found?
-     :document-key
-     :organization/doc
-     :scope-context-key
-     :organization/scope-context
-     :authorization-versions-key
-     :organization/authorization-versions
-     :not-found-type
-     :organization/not-found
-     :not-found-message
-     "The organization no longer exists."}
-    :organization-group
-    {:found-key
-     :organization-group/found?
-     :document-key
-     :organization-group/doc
-     :scope-context-key
-     :organization-group/scope-context
-     :authorization-versions-key
-     :organization-group/authorization-versions
-     :not-found-type
-     :organization-group/not-found
-     :not-found-message
-     "The organization group no longer exists."}
-    :location
-    {:found-key
-     :location/found?
-     :document-key
-     :location/doc
-     :scope-context-key
-     :location/scope-context
-     :authorization-versions-key
-     :location/authorization-versions
-     :not-found-type
-     :location/not-found
-     :not-found-message
-     "The location no longer exists."}))
-(defn- require-scope-facts!
-  [facts expected-organization-id expected-scope]
-  (let [{:keys
-         [found-key
-          document-key
-          scope-context-key
-          authorization-versions-key
-          not-found-type
-          not-found-message]}
-        (scope-facts-contract expected-scope)]
-    (when-not
-     (true?
-      (get facts found-key))
-      (fail!
-       not-found-type
-       not-found-message
-       {:organization/id expected-organization-id
-        :scope expected-scope}))
-    (let [document
-          (or
-           (get facts document-key)
-           (fail!
-            :organization.fx/incomplete-graph-result
-            "Organization Graph reported a found entity without its document."
-            {:document-key document-key
-             :scope expected-scope}))
-          scope-context
-          (or
-           (get facts scope-context-key)
-           (fail!
-            :organization.fx/incomplete-graph-result
-            "Organization Graph did not return the required scope context."
-            {:scope-context-key scope-context-key
-             :scope expected-scope}))
-          authorization-versions
-          (or
-           (get facts authorization-versions-key)
-           (fail!
-            :organization.fx/incomplete-graph-result
-            "Organization Graph did not return authorization versions."
-            {:authorization-versions-key
-             authorization-versions-key
-             :scope expected-scope}))]
-      (when-not
-       (organization/scope-context?
-        scope-context)
-        (fail!
-         :organization.fx/invalid-scope-context
-         "Organization Graph returned an invalid scope context."
-         {:scope-context scope-context}))
-      (when-not
-       (= expected-organization-id
-          (scope-context-organization-id
-           scope-context))
-        (fail!
-         :organization/ownership-mismatch
-         "The requested entity belongs to another organization."
-         {:expected-organization-id
-          expected-organization-id
-          :actual-organization-id
-          (scope-context-organization-id
-           scope-context)
-          :scope expected-scope}))
-      (when-not
-       (organization/same-scope?
-        expected-scope
-        (scope-context-target
-         scope-context))
-        (fail!
-         :organization.fx/scope-mismatch
-         "Organization Graph returned a context for the wrong scope."
-         {:expected-scope expected-scope
-          :actual-scope
-          (scope-context-target
-           scope-context)}))
-      {:document document
-       :scope-context scope-context
-       :authorization-versions
-       (require-authorization-version-sequence!
-        authorization-versions
-        :organization.fx/invalid-authorization-versions
-        "Organization Graph authorization versions must be sequential."
-        {:authorization-versions-key
-         authorization-versions-key
-         :scope
-         expected-scope})})))
-(defn- require-operational-scope!
-  [{:keys [scope-context] :as scope-facts}]
-  (when-not
-   (scope-context-operational?
-    scope-context)
-    (fail!
-     :organization/scope-not-operational
-     "The destination scope is not operational."
-     {:organization/id
-      (scope-context-organization-id
-       scope-context)
-      :scope
-      (scope-context-target
-       scope-context)}))
-  scope-facts)
-(def user-version
-  {:revision-key :user/revision
-   :created-at-key :user/created-at
-   :updated-at-key :user/updated-at})
 
-(def membership-version
-  {:revision-key :membership/revision
-   :created-at-key :membership/created-at
-   :updated-at-key :membership/updated-at})
+(def ^:private not-found
+  {:organization [:organization/not-found "The organization no longer exists."]
+   :organization-group [:organization-group/not-found "The organization group no longer exists."]
+   :location [:location/not-found "The location no longer exists."]})
 
-(def role-assignment-version
-  {:revision-key :role-assignment/revision
-   :created-at-key :role-assignment/created-at
-   :updated-at-key :role-assignment/updated-at})
-(defn- require-public-document!
-  [facts found-key document-key error-type message details]
-  (when-not (true? (get facts found-key))
-    (fail! error-type message details))
-  (or (get facts document-key)
-      (fail! :organization.fx/incomplete-user-result
-             "User core reported a found document without returning it."
-             {:document-key document-key})))
-(defn- role-assignment-documents-at-scopes
-  [ctx organization-id scopes]
-  (->> scopes
-       (mapcat
-        (fn [scope]
-          (map :role-assignment/doc
-               (:user/active-role-assignments-at-scope
-                (user/active-role-assignments-at-scope
-                 ctx organization-id scope)))))
-       (reduce (fn [documents document]
-                 (assoc documents (:xt/id document) document))
-               {})
-       vals
-       vec))
-(defn- require-administrator-authorization!
+(defn- require-scope-facts! [facts organization-id scope]
+  (let [found-key (scope-key scope "found?")
+        doc-key (scope-key scope "doc")
+        context-key (scope-key scope "scope-context")
+        versions-key (scope-key scope "authorization-versions")
+        [not-found-type not-found-message] (get not-found (:scope/type scope))]
+    (when-not (true? (get facts found-key))
+      (fail! not-found-type not-found-message {:organization/id organization-id :scope scope}))
+    (let [document (or (get facts doc-key)
+                       (fail! :organization.fx/incomplete-graph-result
+                              "Organization Graph reported a found entity without its document."
+                              {:document-key doc-key :scope scope}))
+          context (or (get facts context-key)
+                      (fail! :organization.fx/incomplete-graph-result
+                             "Organization Graph did not return the required scope context."
+                             {:scope-context-key context-key :scope scope}))
+          proofs (or (get facts versions-key)
+                     (fail! :organization.fx/incomplete-graph-result
+                            "Organization Graph did not return authorization versions."
+                            {:authorization-versions-key versions-key :scope scope}))]
+      (when-not (organization/scope-context? context)
+        (fail! :organization.fx/invalid-scope-context
+               "Organization Graph returned an invalid scope context."
+               {:scope-context context}))
+      (when-not (= organization-id (scope-organization-id context))
+        (fail! :organization/ownership-mismatch
+               "The requested entity belongs to another organization."
+               {:expected-organization-id organization-id
+                :actual-organization-id (scope-organization-id context)
+                :scope scope}))
+      (when-not (organization/same-scope? scope (scope-target context))
+        (fail! :organization.fx/scope-mismatch
+               "Organization Graph returned a context for the wrong scope."
+               {:expected-scope scope :actual-scope (scope-target context)}))
+      {:document document :scope-context context :authorization-versions (vec (proof-seq! proofs))})))
+
+(defn- require-operational! [{:keys [scope-context] :as facts}]
+  (when-not (operational? scope-context)
+    (fail! :organization/scope-not-operational
+           "The destination scope is not operational."
+           {:organization/id (scope-organization-id scope-context)
+            :scope (scope-target scope-context)}))
+  facts)
+
+;; =============================================================================
+;; User administrator authorization
+;; =============================================================================
+
+(defn- require-administrator!
   [ctx scope-context]
-  (let [user-id (require-authenticated-user-id! ctx)
-        organization-id (scope-context-organization-id scope-context)
-        scopes (vec (:scope/applicable scope-context))
-        access-context
-        (user/access-context
-         ctx {:user-id user-id :scope-context scope-context})]
-    (when-not (true? (:user/admin? access-context))
-      (fail! :user/not-authorized
-             "Administrator authority at this scope is required."
-             {:user/id user-id
-              :organization/id organization-id
-              :scope/target (scope-context-target scope-context)}))
-    (let [membership-id
-          (or (:membership/id access-context)
-              (fail! :organization.fx/incomplete-user-authorization
-                     "Administrator access did not identify a membership."
-                     {:user/id user-id
-                      :organization/id organization-id}))
-          user-document
-          (require-public-document!
-           (user/user-facts ctx {:user-id user-id})
-           :user/found? :user/doc :user/not-found
-           "The signed-in user no longer exists."
-           {:user/id user-id})
-          membership-document
-          (require-public-document!
-           (user/membership-facts ctx membership-id)
-           :membership/found? :membership/doc :membership/not-found
-           "The administrator membership no longer exists."
-           {:membership/id membership-id})
-          assignments
-          (role-assignment-documents-at-scopes
-           ctx organization-id scopes)
-          administrator-assignment
-          (user/administrator-assignment
-           user-document membership-document assignments scopes)]
-      (when-not administrator-assignment
-        (fail! :user/not-authorized
-               "Administrator authority changed while it was being loaded."
-               {:user/id user-id
-                :organization/id organization-id
-                :scope/target (scope-context-target scope-context)}))
-      {:user/id user-id
-       :organization/id organization-id
-       :scope/target (scope-context-target scope-context)
-       :user/authorization-versions
-       [(model.common/authorization-version
-         user/user-entity-type
-         user-document
-         user-version)
+  (user/require-role-authorization
+   ctx
+   {:user-id (user-id! ctx)
+    :scope-context scope-context
+    :role :admin}))
 
-        (model.common/authorization-version
-         user/membership-entity-type
-         membership-document
-         membership-version)
+;; =============================================================================
+;; Semantic changes and plans
+;; =============================================================================
 
-        (model.common/authorization-version
-         user/role-assignment-entity-type
-         administrator-assignment
-         role-assignment-version)]})))
-(defn- organization-change
-  [document operation change-kind]
-  {:topic
-   :organization
-   :id
-   (:xt/id document)
-   :change/kind
-   change-kind
-   :organization/operation
-   operation
-   :organization/id
-   (:xt/id document)
-   :organization/status
-   (:organization/status document)
-   :organization/revision
-   (:organization/revision document)})
-(defn- organization-group-change
-  [document operation change-kind]
-  {:topic
-   :organization-group
-   :id
-   (:xt/id document)
-   :change/kind
-   change-kind
-   :organization-group/operation
-   operation
-   :organization-group/id
-   (:xt/id document)
-   :organization/id
-   (:organization-group/organization document)
-   :organization-group/parent-type
-   (:organization-group/parent-type document)
-   :organization-group/parent-id
-   (:organization-group/parent-id document)
-   :organization-group/status
-   (:organization-group/status document)
-   :organization-group/revision
-   (:organization-group/revision document)})
-(defn- location-change
-  [document operation change-kind]
-  {:topic
-   :location
-   :id
-   (:xt/id document)
-   :change/kind
-   change-kind
-   :location/operation
-   operation
-   :location/id
-   (:xt/id document)
-   :organization/id
-   (:location/organization document)
-   :location/parent-type
-   (:location/parent-type document)
-   :location/parent-id
-   (:location/parent-id document)
-   :location/status
-   (:location/status document)
-   :location/revision
-   (:location/revision document)})
-(defn- command-change
-  [entity-kind operation command]
-  (let [document
-        (command-document command)
-        change-kind
-        (if
-         (= :create
-            (:model/operation command))
-          :created
-          :updated)]
-    (case
-     entity-kind
+(defn- command-change [entity operation model-command]
+  (let [document (command/after model-command)
+        created? (command/create? model-command)
+        base {:topic entity :id (:xt/id document) :change/kind (if created? :created :updated)}]
+    (case entity
       :organization
-      (organization-change
-       document
-       operation
-       change-kind)
+      (merge base {:organization/operation operation
+                   :organization/id (:xt/id document)
+                   :organization/status (:organization/status document)
+                   :organization/revision (:organization/revision document)})
       :organization-group
-      (organization-group-change
-       document
-       operation
-       change-kind)
+      (merge base {:organization-group/operation operation
+                   :organization-group/id (:xt/id document)
+                   :organization/id (:organization-group/organization document)
+                   :organization-group/parent-type (:organization-group/parent-type document)
+                   :organization-group/parent-id (:organization-group/parent-id document)
+                   :organization-group/status (:organization-group/status document)
+                   :organization-group/revision (:organization-group/revision document)})
       :location
-      (location-change
-       document
-       operation
-       change-kind))))
-(defn- transaction-plan
-  [fragment]
-  (assoc
-   (model.fx/transaction-fragment
-    fragment)
-   :entry-fn
-   change-entry))
+      (merge base {:location/operation operation
+                   :location/id (:xt/id document)
+                   :organization/id (:location/organization document)
+                   :location/parent-type (:location/parent-type document)
+                   :location/parent-id (:location/parent-id document)
+                   :location/status (:location/status document)
+                   :location/revision (:location/revision document)}))))
 
-(defn- organization-authorization-fragment
-  [scope-facts user-authorization]
-  {:authorization-versions
-   (collect-authorization-versions!
-    (:authorization-versions scope-facts)
-    (:user/authorization-versions
-     user-authorization))})
-(defn plan-create-child
-  "Builds an atomic plan for a validated group or location create command."
-  [{:keys
-    [entity-kind
-     operation
-     command
-     parent-scope-facts
-     user-authorization]}]
-  (let [document
-        (command-document command)
-        fragment
-        (model.fx/compose-transaction-fragments
-         {:commands [command]
-          :changes
-          [(command-change
-            entity-kind
-            operation
-            command)]}
-         (organization-authorization-fragment
-          parent-scope-facts
-          user-authorization))]
-    {:transaction-plan
-     (transaction-plan fragment)
-     :result
-     {entity-kind document}}))
-(defn plan-update-entity
-  "Builds an atomic plan for one validated Organization-model update command."
-  [{:keys
-    [entity-kind
-     operation
-     command
-     target-scope-facts
-     user-authorization]}]
-  (let [document
-        (command-document command)
-        fragment
-        (model.fx/compose-transaction-fragments
-         {:commands [command]
-          :changes
-          [(command-change
-            entity-kind
-            operation
-            command)]}
-         (organization-authorization-fragment
-          target-scope-facts
-          user-authorization))]
-    {:transaction-plan
-     (transaction-plan fragment)
-     :result
-     {entity-kind document}}))
+(defn- plan [entity operation model-command guard-collections]
+  (let [fragment
+        (model.tx/fragment
+         {:commands [model-command]
+          :guards (apply guards guard-collections)
+          :changes [(command-change entity operation model-command)]})]
+    {:transaction-plan (assoc fragment :entry-fn change-entry)
+     :result {entity (command/after model-command)}}))
+
+(defn plan-create-child [{:keys [entity-kind operation command parent-scope-facts user-authorization]}]
+  (plan entity-kind operation command
+        [(:authorization-versions parent-scope-facts)
+         (:guards user-authorization)]))
+
+(defn plan-update-entity [{:keys [entity-kind operation command target-scope-facts user-authorization]}]
+  (plan entity-kind operation command
+        [(:authorization-versions target-scope-facts)
+         (:guards user-authorization)]))
+
 (defn plan-move-entity
-  "Builds an atomic move plan guarded by both the current hierarchy and the
-   destination hierarchy."
-  [{:keys
-    [entity-kind
-     command
-     current-scope-facts
-     destination-scope-facts
-     current-user-authorization
-     destination-user-authorization]}]
-  (let [document
-        (command-document command)
-        fragment
-        (model.fx/compose-transaction-fragments
-         {:commands [command]
-          :changes
-          [(command-change
-            entity-kind
-            :move
-            command)]}
-         {:authorization-versions
-          (collect-authorization-versions!
-           (:authorization-versions
-            current-scope-facts)
-           (:authorization-versions
-            destination-scope-facts)
-           (:user/authorization-versions
-            current-user-authorization)
-           (:user/authorization-versions
-            destination-user-authorization))})]
-    {:transaction-plan
-     (transaction-plan fragment)
-     :result
-     {entity-kind document}}))
-(defn- update-command
-  [entity-kind operation document input]
-  (case
-   [entity-kind operation]
-    [:organization :rename]
-    (organization/rename-organization-command
-     document
-     input)
-    [:organization :suspend]
-    (organization/suspend-organization-command
-     document
-     input)
-    [:organization :reactivate]
-    (organization/reactivate-organization-command
-     document
-     input)
-    [:organization-group :rename]
-    (organization/rename-organization-group-command
-     document
-     input)
-    [:organization-group :suspend]
-    (organization/suspend-organization-group-command
-     document
-     input)
-    [:organization-group :reactivate]
-    (organization/reactivate-organization-group-command
-     document
-     input)
-    [:location :rename]
-    (organization/rename-location-command
-     document
-     input)
-    [:location :suspend]
-    (organization/suspend-location-command
-     document
-     input)
-    [:location :reactivate]
-    (organization/reactivate-location-command
-     document
-     input)
-    (fail!
-     :organization.fx/unsupported-update
-     "The requested Organization update is not supported."
-     {:entity-kind entity-kind
-      :operation operation})))
-(defn- entity-scope
-  [entity-kind entity-id]
-  (case
-   entity-kind
-    :organization
-    (organization/organization-scope
-     entity-id)
-    :organization-group
-    (organization/organization-group-scope
-     entity-id)
-    :location
-    (organization/location-scope
-     entity-id)))
+  [{:keys [entity-kind command current-scope-facts destination-scope-facts
+           current-user-authorization destination-user-authorization]}]
+  (plan entity-kind :move command
+        [(:authorization-versions current-scope-facts)
+         (:authorization-versions destination-scope-facts)
+         (:guards current-user-authorization)
+         (:guards destination-user-authorization)]))
+
+;; =============================================================================
+;; Domain operation dispatch
+;; =============================================================================
+
+;; Store Vars rather than function values so with-redefs and REPL reloads remain live.
+(def ^:private update-commands
+  {[:organization :rename] #'organization/rename-organization-command
+   [:organization :suspend] #'organization/suspend-organization-command
+   [:organization :reactivate] #'organization/reactivate-organization-command
+   [:organization-group :rename] #'organization/rename-organization-group-command
+   [:organization-group :suspend] #'organization/suspend-organization-group-command
+   [:organization-group :reactivate] #'organization/reactivate-organization-group-command
+   [:location :rename] #'organization/rename-location-command
+   [:location :suspend] #'organization/suspend-location-command
+   [:location :reactivate] #'organization/reactivate-location-command})
+
+(def ^:private scope-fns
+  {:organization #'organization/organization-scope
+   :organization-group #'organization/organization-group-scope
+   :location #'organization/location-scope})
+
+(defn- update-command! [entity operation document input]
+  (if-let [f (get update-commands [entity operation])]
+    (f document input)
+    (fail! :organization.fx/unsupported-update "The requested Organization update is not supported."
+           {:entity-kind entity :operation operation})))
+
+(defn- entity-scope [entity id] ((get scope-fns entity) id))
+
+;; =============================================================================
+;; Create child workflows
+;; =============================================================================
+
+(def ^:private create-commands
+  {:organization-group #'organization/create-organization-group-command
+   :location #'organization/create-location-command})
+
 (fx/defmachine create-child-machine
   :start
   (fn [ctx]
-    (let [now
-          (:biff.fx/now ctx)
-          seed
-          (:biff.fx/seed ctx)
-          [entity-id _]
-          (fx/uuid7 seed now)
-          input
-          (:organization.fx/input ctx)
-          organization-id
-          (:organization-id input)
-          parent-scope
-          (:parent-scope input)]
-      {:organization.fx/entity-id
-       entity-id
-       :organization.fx/parent-facts
-       (scope-context-effect
-        organization-id
-        parent-scope)
-       :biff.fx/next
-       :plan}))
+    (let [{:keys [organization-id parent-scope]} (:organization.fx/input ctx)]
+      {:organization.fx/parent-scope parent-scope
+       :organization.fx/parent-facts (scope-context-effect organization-id parent-scope)
+       :biff.fx/next :plan}))
+
   :plan
   (fn [ctx]
-    (let [input
-          (:organization.fx/input ctx)
-          entity-kind
-          (:organization.fx/entity-kind ctx)
-          organization-id
-          (:organization-id input)
-          parent-scope
-          (:parent-scope input)
-          parent-scope-facts
-          (-> (:organization.fx/parent-facts ctx)
-              (require-scope-facts!
-               organization-id
-               parent-scope)
-              require-operational-scope!)
-          user-authorization
-          (require-administrator-authorization!
-           ctx
-           (:scope-context
-            parent-scope-facts))
-          create-input
-          {:id
-           (:organization.fx/entity-id ctx)
-           :organization-id
-           organization-id
-           :parent-scope
-           parent-scope
-           :name
-           (:name input)
-           :now
-           (:biff.fx/now ctx)}
-          command
-          (case
-           entity-kind
-            :organization-group
-            (organization/create-organization-group-command
-             create-input)
-            :location
-            (organization/create-location-command
-             create-input))
-          plan
-          (plan-create-child
-           {:entity-kind entity-kind
-            :operation :create
-            :command command
-            :parent-scope-facts parent-scope-facts
-            :user-authorization user-authorization})]
-      {:organization.fx/result
-       (:result plan)
-       :organization.fx/transaction-plan
-       (:transaction-plan plan)
-       :biff.fx/next
-       :commit}))
+    (let [input (:organization.fx/input ctx)
+          entity (:organization.fx/entity-kind ctx)
+          organization-id (:organization-id input)
+          parent-scope (:organization.fx/parent-scope ctx)
+          parent-facts (-> (require-scope-facts! (:organization.fx/parent-facts ctx)
+                                                organization-id parent-scope)
+                           require-operational!)
+          authorization (require-administrator! ctx (:scope-context parent-facts))
+          model-command ((get create-commands entity)
+                         {:id (first (fx/uuid7 (:biff.fx/seed ctx) (:biff.fx/now ctx)))
+                          :organization-id organization-id
+                          :parent-scope parent-scope
+                          :name (:name input)
+                          :now (:biff.fx/now ctx)})
+          planned (plan-create-child {:entity-kind entity :operation :create
+                                      :command model-command
+                                      :parent-scope-facts parent-facts
+                                      :user-authorization authorization})]
+      {:organization.fx/result (:result planned)
+       :organization.fx/transaction-plan (:transaction-plan planned)
+       :biff.fx/next :commit}))
   :commit commit-state
   :finish finish-state)
-(defn create-organization-group
-  "Creates one active organization group beneath an operational organization
-   or group. The authenticated user must be an effective administrator at the
-   parent scope."
-  [ctx input]
-  (create-child-machine
-   (assoc
-    ctx
-    :organization.fx/entity-kind
-    :organization-group
-    :organization.fx/input
-    input)))
-(defn create-location
-  "Creates one active location beneath an operational organization or group.
-   The authenticated user must be an effective administrator at the parent
-   scope."
-  [ctx input]
-  (create-child-machine
-   (assoc
-    ctx
-    :organization.fx/entity-kind
-    :location
-    :organization.fx/input
-    input)))
+
+(defn- create-child [ctx entity input]
+  (create-child-machine (assoc ctx :organization.fx/entity-kind entity :organization.fx/input input)))
+(defn create-organization-group [ctx input] (create-child ctx :organization-group input))
+(defn create-location [ctx input] (create-child ctx :location input))
+
+;; =============================================================================
+;; Authorized updates
+;; =============================================================================
+
 (fx/defmachine update-entity-machine
   :start
   (fn [ctx]
-    (let [input
-          (:organization.fx/input ctx)
-          entity-kind
-          (:organization.fx/entity-kind ctx)
-          entity-id
-          (:entity-id input)
-          organization-id
-          (:organization-id input)
-          target-scope
-          (entity-scope
-           entity-kind
-           entity-id)]
-      {:organization.fx/target-scope
-       target-scope
-       :organization.fx/target-facts
-       (scope-context-effect
-        organization-id
-        target-scope)
-       :biff.fx/next
-       :plan}))
+    (let [input (:organization.fx/input ctx)
+          entity (:organization.fx/entity-kind ctx)
+          scope (entity-scope entity (:entity-id input))]
+      {:organization.fx/target-scope scope
+       :organization.fx/target-facts (scope-context-effect (:organization-id input) scope)
+       :biff.fx/next :plan}))
+
   :plan
   (fn [ctx]
-    (let [input
-          (:organization.fx/input ctx)
-          entity-kind
-          (:organization.fx/entity-kind ctx)
-          operation
-          (:organization.fx/operation ctx)
-          organization-id
-          (:organization-id input)
-          target-scope
-          (:organization.fx/target-scope ctx)
-          target-scope-facts
-          (require-scope-facts!
-           (:organization.fx/target-facts ctx)
-           organization-id
-           target-scope)
-          user-authorization
-          (require-administrator-authorization!
-           ctx
-           (:scope-context
-            target-scope-facts))
-          command-input
-          {:name
-           (:name input)
-           :now
-           (:biff.fx/now ctx)
-           :actor-id
-           (require-authenticated-user-id!
-            ctx)
-           :reason
-           (:reason input)}
-          command
-          (update-command
-           entity-kind
-           operation
-           (:document
-            target-scope-facts)
-           command-input)
-          plan
-          (plan-update-entity
-           {:entity-kind entity-kind
-            :operation operation
-            :command command
-            :target-scope-facts
-            target-scope-facts
-            :user-authorization
-            user-authorization})]
-      {:organization.fx/result
-       (:result plan)
-       :organization.fx/transaction-plan
-       (:transaction-plan plan)
-       :biff.fx/next
-       :commit}))
+    (let [input (:organization.fx/input ctx)
+          entity (:organization.fx/entity-kind ctx)
+          operation (:organization.fx/operation ctx)
+          scope (:organization.fx/target-scope ctx)
+          facts (require-scope-facts! (:organization.fx/target-facts ctx)
+                                      (:organization-id input) scope)
+          authorization (require-administrator! ctx (:scope-context facts))
+          model-command (update-command!
+                         entity operation (:document facts)
+                         {:name (:name input) :now (:biff.fx/now ctx)
+                          :actor-id (user-id! ctx) :reason (:reason input)})
+          planned (plan-update-entity {:entity-kind entity :operation operation
+                                       :command model-command :target-scope-facts facts
+                                       :user-authorization authorization})]
+      {:organization.fx/result (:result planned)
+       :organization.fx/transaction-plan (:transaction-plan planned)
+       :biff.fx/next :commit}))
   :commit commit-state
   :finish finish-state)
-(defn- run-update
-  [ctx entity-kind operation input]
+
+(defn- run-update [ctx entity operation id input]
   (update-entity-machine
-   (assoc
-    ctx
-    :organization.fx/entity-kind
-    entity-kind
-    :organization.fx/operation
-    operation
-    :organization.fx/input
-    input)))
-(defn rename-organization
-  [ctx {:keys [organization-id] :as input}]
-  (run-update
-   ctx
-   :organization
-   :rename
-   (assoc
-    input
-    :entity-id
-    organization-id)))
-(defn suspend-organization
-  [ctx {:keys [organization-id] :as input}]
-  (run-update
-   ctx
-   :organization
-   :suspend
-   (assoc
-    input
-    :entity-id
-    organization-id)))
-(defn reactivate-organization
-  [ctx {:keys [organization-id] :as input}]
-  (run-update
-   ctx
-   :organization
-   :reactivate
-   (assoc
-    input
-    :entity-id
-    organization-id)))
-(defn rename-organization-group
-  [ctx {:keys [organization-group-id] :as input}]
-  (run-update
-   ctx
-   :organization-group
-   :rename
-   (assoc
-    input
-    :entity-id
-    organization-group-id)))
-(defn suspend-organization-group
-  [ctx {:keys [organization-group-id] :as input}]
-  (run-update
-   ctx
-   :organization-group
-   :suspend
-   (assoc
-    input
-    :entity-id
-    organization-group-id)))
-(defn reactivate-organization-group
-  [ctx {:keys [organization-group-id] :as input}]
-  (run-update
-   ctx
-   :organization-group
-   :reactivate
-   (assoc
-    input
-    :entity-id
-    organization-group-id)))
-(defn rename-location
-  [ctx {:keys [location-id] :as input}]
-  (run-update
-   ctx
-   :location
-   :rename
-   (assoc
-    input
-    :entity-id
-    location-id)))
-(defn suspend-location
-  [ctx {:keys [location-id] :as input}]
-  (run-update
-   ctx
-   :location
-   :suspend
-   (assoc
-    input
-    :entity-id
-    location-id)))
-(defn reactivate-location
-  [ctx {:keys [location-id] :as input}]
-  (run-update
-   ctx
-   :location
-   :reactivate
-   (assoc
-    input
-    :entity-id
-    location-id)))
-(defn- ensure-valid-move-destination!
-  [entity-kind current-scope destination-scope destination-scope-facts]
-  (require-operational-scope!
-   destination-scope-facts)
-  (when
-   (and
-    (= :organization-group
-       entity-kind)
-    (some
-     #(organization/same-scope?
-       current-scope
-       %)
-     (get-in
-      destination-scope-facts
-      [:scope-context
-       :scope/applicable])))
-    (fail!
-     :organization-group/cycle
-     "The organization group cannot be moved beneath itself or a descendant."
-     {:organization-group/scope
-      current-scope
-      :destination-scope
-      destination-scope}))
-  destination-scope-facts)
+   (assoc ctx :organization.fx/entity-kind entity :organization.fx/operation operation
+          :organization.fx/input (assoc input :entity-id id))))
+
+(defn rename-organization [ctx {:keys [organization-id] :as input}]
+  (run-update ctx :organization :rename organization-id input))
+(defn suspend-organization [ctx {:keys [organization-id] :as input}]
+  (run-update ctx :organization :suspend organization-id input))
+(defn reactivate-organization [ctx {:keys [organization-id] :as input}]
+  (run-update ctx :organization :reactivate organization-id input))
+(defn rename-organization-group [ctx {:keys [organization-group-id] :as input}]
+  (run-update ctx :organization-group :rename organization-group-id input))
+(defn suspend-organization-group [ctx {:keys [organization-group-id] :as input}]
+  (run-update ctx :organization-group :suspend organization-group-id input))
+(defn reactivate-organization-group [ctx {:keys [organization-group-id] :as input}]
+  (run-update ctx :organization-group :reactivate organization-group-id input))
+(defn rename-location [ctx {:keys [location-id] :as input}]
+  (run-update ctx :location :rename location-id input))
+(defn suspend-location [ctx {:keys [location-id] :as input}]
+  (run-update ctx :location :suspend location-id input))
+(defn reactivate-location [ctx {:keys [location-id] :as input}]
+  (run-update ctx :location :reactivate location-id input))
+
+;; =============================================================================
+;; Move workflows
+;; =============================================================================
+
+(defn- require-move-destination! [entity current-scope destination-scope facts]
+  (require-operational! facts)
+  (when (and (= entity :organization-group)
+             (some #(organization/same-scope? current-scope %)
+                   (get-in facts [:scope-context :scope/applicable])))
+    (fail! :organization-group/cycle
+           "The organization group cannot be moved beneath itself or a descendant."
+           {:organization-group/scope current-scope :destination-scope destination-scope}))
+  facts)
+
 (fx/defmachine move-entity-machine
   :start
   (fn [ctx]
-    (let [input
-          (:organization.fx/input ctx)
-          entity-kind
-          (:organization.fx/entity-kind ctx)
-          entity-id
-          (:entity-id input)
-          organization-id
-          (:organization-id input)
-          current-scope
-          (entity-scope
-           entity-kind
-           entity-id)
-          destination-scope
-          (:parent-scope input)]
-      {:organization.fx/current-scope
-       current-scope
-       :organization.fx/destination-scope
-       destination-scope
-       :organization.fx/current-facts
-       (scope-context-effect
-        organization-id
-        current-scope)
-       :organization.fx/destination-facts
-       (scope-context-effect
-        organization-id
-        destination-scope)
-       :biff.fx/next
-       :plan}))
+    (let [input (:organization.fx/input ctx)
+          entity (:organization.fx/entity-kind ctx)
+          current (entity-scope entity (:entity-id input))
+          destination (:parent-scope input)
+          organization-id (:organization-id input)]
+      {:organization.fx/current-scope current
+       :organization.fx/destination-scope destination
+       :organization.fx/current-facts (scope-context-effect organization-id current)
+       :organization.fx/destination-facts (scope-context-effect organization-id destination)
+       :biff.fx/next :plan}))
+
   :plan
   (fn [ctx]
-    (let [input
-          (:organization.fx/input ctx)
-          entity-kind
-          (:organization.fx/entity-kind ctx)
-          organization-id
-          (:organization-id input)
-          current-scope
-          (:organization.fx/current-scope ctx)
-          destination-scope
-          (:organization.fx/destination-scope ctx)
-          current-scope-facts
-          (require-scope-facts!
-           (:organization.fx/current-facts ctx)
-           organization-id
-           current-scope)
-          destination-scope-facts
-          (->>
-           (require-scope-facts!
-            (:organization.fx/destination-facts ctx)
-            organization-id
-            destination-scope)
-           (ensure-valid-move-destination!
-            entity-kind
-            current-scope
-            destination-scope))
-          current-user-authorization
-          (require-administrator-authorization!
-           ctx
-           (:scope-context
-            current-scope-facts))
-          destination-user-authorization
-          (require-administrator-authorization!
-           ctx
-           (:scope-context
-            destination-scope-facts))
-          command-input
-          {:parent-scope
-           destination-scope
-           :now
-           (:biff.fx/now ctx)
-           :actor-id
-           (require-authenticated-user-id!
-            ctx)
-           :reason
-           (:reason input)}
-          command
-          (case
-           entity-kind
-            :organization-group
-            (organization/move-organization-group-command
-             (:document
-              current-scope-facts)
-             command-input)
-            :location
-            (organization/move-location-command
-             (:document
-              current-scope-facts)
-             command-input))
-          plan
-          (plan-move-entity
-           {:entity-kind entity-kind
-            :command command
-            :current-scope-facts
-            current-scope-facts
-            :destination-scope-facts
-            destination-scope-facts
-            :current-user-authorization
-            current-user-authorization
-            :destination-user-authorization
-            destination-user-authorization})]
-      {:organization.fx/result
-       (:result plan)
-       :organization.fx/transaction-plan
-       (:transaction-plan plan)
-       :biff.fx/next
-       :commit}))
+    (let [input (:organization.fx/input ctx)
+          entity (:organization.fx/entity-kind ctx)
+          organization-id (:organization-id input)
+          current (:organization.fx/current-scope ctx)
+          destination (:organization.fx/destination-scope ctx)
+          current-facts (require-scope-facts! (:organization.fx/current-facts ctx)
+                                              organization-id current)
+          destination-facts (->> (require-scope-facts! (:organization.fx/destination-facts ctx)
+                                                       organization-id destination)
+                                 (require-move-destination! entity current destination))
+          current-auth (require-administrator! ctx (:scope-context current-facts))
+          destination-auth (require-administrator! ctx (:scope-context destination-facts))
+          move-fn (case entity
+                    :organization-group #'organization/move-organization-group-command
+                    :location #'organization/move-location-command)
+          model-command (move-fn (:document current-facts)
+                                 {:parent-scope destination :now (:biff.fx/now ctx)
+                                  :actor-id (user-id! ctx) :reason (:reason input)})
+          planned (plan-move-entity
+                   {:entity-kind entity :command model-command
+                    :current-scope-facts current-facts :destination-scope-facts destination-facts
+                    :current-user-authorization current-auth
+                    :destination-user-authorization destination-auth})]
+      {:organization.fx/result (:result planned)
+       :organization.fx/transaction-plan (:transaction-plan planned)
+       :biff.fx/next :commit}))
   :commit commit-state
   :finish finish-state)
-(defn- run-move [ctx entity-kind input]
+
+(defn- run-move [ctx entity id input]
   (move-entity-machine
-   (assoc ctx :organization.fx/entity-kind entity-kind
-          :organization.fx/input input)))
+   (assoc ctx :organization.fx/entity-kind entity
+          :organization.fx/input (assoc input :entity-id id))))
 (defn move-organization-group [ctx {:keys [organization-group-id] :as input}]
-  (run-move ctx :organization-group
-            (assoc input :entity-id organization-group-id)))
+  (run-move ctx :organization-group organization-group-id input))
 (defn move-location [ctx {:keys [location-id] :as input}]
-  (run-move ctx :location (assoc input :entity-id location-id)))
+  (run-move ctx :location location-id input))
+
+;; =============================================================================
+;; Public operation registry
+;; =============================================================================
+
 (def operations
   {:organization/create-group #'create-organization-group
    :organization/create-location #'create-location

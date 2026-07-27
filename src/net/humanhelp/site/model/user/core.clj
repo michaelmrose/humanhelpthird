@@ -20,6 +20,7 @@
    access-proof Graph results, or resolver implementations."
   (:require
    [gesso.graph :as graph]
+   [gesso.model.command :as command]
    [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.user.domain.access :as access]
    [net.humanhelp.site.model.user.domain.common :as user.common]
@@ -463,20 +464,8 @@
    :operational?
    (:scope/operational? scope-context)})
 
-(defn access-context
-  "Returns a compact User access context at an Organization-owned scope.
-
-   input is:
-
-     {:user-id       uuid
-      :scope-context organization-scope-context}
-
-   Organization owns scope hierarchy and operational state. User owns identity,
-   Membership, roles, skills, and User capabilities.
-
-   The result contains no raw User-model documents. Membership skills are
-   organization-local strings and do not themselves grant authority."
-  [ctx {:keys [user-id scope-context]}]
+(defn- load-access-proof
+  [ctx user-id scope-context]
   (require-uuid!
    user-id
    :user/invalid-user-id
@@ -574,11 +563,124 @@
           :organization/id organization-id
           :facts facts}))
 
-      (assoc
-       public-context
-       :scope/target target
-       :scope/operational? operational?
-       :user/display-name (:user/display-name user)))))
+      {:access-context
+       (assoc
+        public-context
+        :scope/target target
+        :scope/operational? operational?
+        :user/display-name (:user/display-name user))
+
+       :user-document user
+       :membership-document membership-document
+       :role-assignments role-assignments
+       :applicable-scopes applicable-scopes
+       :organization-id organization-id
+       :target target})))
+
+(defn access-context
+  "Returns a compact User access context at an Organization-owned scope.
+
+   input is:
+
+     {:user-id       uuid
+      :scope-context organization-scope-context}
+
+   Organization owns scope hierarchy and operational state. User owns identity,
+   Membership, roles, skills, and User capabilities.
+
+   The result contains no raw User-model documents. Membership skills are
+   organization-local strings and do not themselves grant authority."
+  [ctx {:keys [user-id scope-context]}]
+  (:access-context
+   (load-access-proof
+    ctx
+    user-id
+    scope-context)))
+
+(def ^:private user-version
+  {:revision-key :user/revision
+   :created-at-key :user/created-at
+   :updated-at-key :user/updated-at})
+
+(def ^:private membership-version
+  {:revision-key :membership/revision
+   :created-at-key :membership/created-at
+   :updated-at-key :membership/updated-at})
+
+(def ^:private role-assignment-version
+  {:revision-key :role-assignment/revision
+   :created-at-key :role-assignment/created-at
+   :updated-at-key :role-assignment/updated-at})
+
+(defn require-role-authorization
+  "Loads one authoritative User access proof and returns optimistic guards for
+   an effective role at an Organization-owned scope.
+
+   input is:
+
+     {:user-id       uuid
+      :scope-context organization-scope-context
+      :role          :helper|:supervisor|:admin}
+
+   The access decision and all returned guards are derived from the same Graph
+   result. Raw User-model documents remain internal to User."
+  [ctx {:keys [user-id scope-context role]}]
+  (when-not
+   (user.common/role? role)
+    (fail!
+     :user/invalid-role
+     "Role authorization requires a valid User role."
+     {:role role}))
+
+  (let [{:keys
+         [access-context
+          user-document
+          membership-document
+          role-assignments
+          applicable-scopes
+          organization-id
+          target]}
+        (load-access-proof
+         ctx
+         user-id
+         scope-context)
+
+        assignment
+        (access/effective-assignment-for-role
+         user-document
+         membership-document
+         role-assignments
+         applicable-scopes
+         role)]
+
+    (when-not
+     assignment
+      (fail!
+       :user/not-authorized
+       "The User does not have the required role at this scope."
+       {:user/id user-id
+        :organization/id organization-id
+        :scope/target target
+        :required-role role}))
+
+    {:user/id user-id
+     :organization/id organization-id
+     :scope/target target
+     :role role
+     :access-context access-context
+     :guards
+     [(command/guard
+       identity/entity-type
+       user-document
+       user-version)
+      (command/guard
+       membership/entity-type
+       membership-document
+       membership-version)
+      (command/guard
+       role/entity-type
+       assignment
+       role-assignment-version)]}))
 
 ;; =============================================================================
 ;; Effectful operations

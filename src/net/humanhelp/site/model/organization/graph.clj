@@ -1,906 +1,404 @@
 (ns net.humanhelp.site.model.organization.graph
-  "Read-only Gesso Graph resolvers for the HumanHelp Organization model.
+  "Read-only Graph extensions for the HumanHelp Organization model.
 
-   This namespace loads organizations, organization groups, and locations from
-   XTDB. It also walks already-persisted parent relationships to construct the
-   authoritative scope contexts consumed by User and Request.
-
-   Hierarchy reads are target-first:
-
-     location
-       -> immediate organization group
-       -> broader organization groups
-       -> organization
-
-   A context read fails when the persisted hierarchy is broken, cyclic, or
-   crosses organizations. This namespace performs no mutations, User
-   authorization, role revocation, or Request behavior."
+   gesso.model owns ordinary persisted-document loading, normalization, and
+   projection. This namespace owns derived scopes, hierarchy traversal,
+   authoritative hierarchy contexts, and the temporary legacy authorization
+   proof values still consumed by User and Request."
   (:require
-   [com.biffweb.experimental :as biffx]
    [gesso.graph :as graph]
+   [gesso.model.core :as model]
    [net.humanhelp.site.model.common :as model.common]
-   [net.humanhelp.site.model.organization.domain :as organization]))
+   [net.humanhelp.site.model.organization.domain :as organization]
+   [net.humanhelp.site.model.organization.schema :as organization.schema]))
 
 ;; =============================================================================
-;; Stored documents
+;; Conventional model surfaces
 ;; =============================================================================
+
+(def organization-descriptor organization.schema/organization-descriptor)
+(def organization-group-descriptor organization.schema/organization-group-descriptor)
+(def location-descriptor organization.schema/location-descriptor)
 
 (def organization-document-columns
-  [:xt/id
-   :organization/name
-   :organization/status
-   :organization/revision
-   :organization/created-at
-   :organization/updated-at
-   :organization/suspended-at
-   :organization/suspended-by
-   :organization/suspension-reason
-   :organization/closed-at
-   :organization/closed-by
-   :organization/closure-reason])
-
+  (model/document-columns organization-descriptor))
 (def organization-group-document-columns
-  [:xt/id
-   :organization-group/organization
-   :organization-group/parent-type
-   :organization-group/parent-id
-   :organization-group/name
-   :organization-group/status
-   :organization-group/revision
-   :organization-group/created-at
-   :organization-group/updated-at
-   :organization-group/moved-at
-   :organization-group/moved-by
-   :organization-group/move-reason
-   :organization-group/suspended-at
-   :organization-group/suspended-by
-   :organization-group/suspension-reason
-   :organization-group/closed-at
-   :organization-group/closed-by
-   :organization-group/closure-reason])
-
+  (model/document-columns organization-group-descriptor))
 (def location-document-columns
-  [:xt/id
-   :location/organization
-   :location/parent-type
-   :location/parent-id
-   :location/name
-   :location/status
-   :location/revision
-   :location/created-at
-   :location/updated-at
-   :location/moved-at
-   :location/moved-by
-   :location/move-reason
-   :location/suspended-at
-   :location/suspended-by
-   :location/suspension-reason
-   :location/closed-at
-   :location/closed-by
-   :location/closure-reason])
+  (model/document-columns location-descriptor))
 
-(def organization-document-query
-  [:*])
+(def organization-document-query (model/document-query organization-descriptor))
+(def organization-group-document-query (model/document-query organization-group-descriptor))
+(def location-document-query (model/document-query location-descriptor))
 
-(def organization-group-document-query
-  [:*])
-
-(def location-document-query
-  [:*])
-
-
-(def scope-context-value-query
-  [:*])
-
-(def authorization-versions-value-query
-  [:*])
-
-;; =============================================================================
-;; Graph field projections
-;; =============================================================================
-
-(def organization-field-pairs
-  [[:xt/id :organization/id]
-   [:organization/name :organization/name]
-   [:organization/status :organization/status]
-   [:organization/revision :organization/revision]
-   [:organization/created-at :organization/created-at]
-   [:organization/updated-at :organization/updated-at]
-   [:organization/suspended-at :organization/suspended-at]
-   [:organization/suspended-by :organization/suspended-by]
-   [:organization/suspension-reason :organization/suspension-reason]
-   [:organization/closed-at :organization/closed-at]
-   [:organization/closed-by :organization/closed-by]
-   [:organization/closure-reason :organization/closure-reason]])
-
-(def organization-group-field-pairs
-  [[:xt/id :organization-group/id]
-   [:organization-group/organization
-    :organization-group/organization-id]
-   [:organization-group/parent-type
-    :organization-group/parent-type]
-   [:organization-group/parent-id
-    :organization-group/parent-id]
-   [:organization-group/name
-    :organization-group/name]
-   [:organization-group/status
-    :organization-group/status]
-   [:organization-group/revision
-    :organization-group/revision]
-   [:organization-group/created-at
-    :organization-group/created-at]
-   [:organization-group/updated-at
-    :organization-group/updated-at]
-   [:organization-group/moved-at
-    :organization-group/moved-at]
-   [:organization-group/moved-by
-    :organization-group/moved-by]
-   [:organization-group/move-reason
-    :organization-group/move-reason]
-   [:organization-group/suspended-at
-    :organization-group/suspended-at]
-   [:organization-group/suspended-by
-    :organization-group/suspended-by]
-   [:organization-group/suspension-reason
-    :organization-group/suspension-reason]
-   [:organization-group/closed-at
-    :organization-group/closed-at]
-   [:organization-group/closed-by
-    :organization-group/closed-by]
-   [:organization-group/closure-reason
-    :organization-group/closure-reason]])
-
-(def location-field-pairs
-  [[:xt/id :location/id]
-   [:location/organization :location/organization-id]
-   [:location/parent-type :location/parent-type]
-   [:location/parent-id :location/parent-id]
-   [:location/name :location/name]
-   [:location/status :location/status]
-   [:location/revision :location/revision]
-   [:location/created-at :location/created-at]
-   [:location/updated-at :location/updated-at]
-   [:location/moved-at :location/moved-at]
-   [:location/moved-by :location/moved-by]
-   [:location/move-reason :location/move-reason]
-   [:location/suspended-at :location/suspended-at]
-   [:location/suspended-by :location/suspended-by]
-   [:location/suspension-reason :location/suspension-reason]
-   [:location/closed-at :location/closed-at]
-   [:location/closed-by :location/closed-by]
-   [:location/closure-reason :location/closure-reason]])
+(def scope-query [:scope/type :scope/id])
+(def scope-context-value-query [:*])
+(def authorization-versions-value-query [:*])
 
 (def organization-field-query
-  (conj
-   (mapv second organization-field-pairs)
-   {:organization/scope
-    [:scope/type :scope/id]}))
-
+  (conj (model/field-query organization-descriptor)
+        {:organization/scope scope-query}))
 (def organization-group-field-query
-  (into
-   (mapv second organization-group-field-pairs)
-   [{:organization-group/parent-scope
-     [:scope/type :scope/id]}
-    {:organization-group/scope
-     [:scope/type :scope/id]}]))
-
+  (into (model/field-query organization-group-descriptor)
+        [{:organization-group/parent-scope scope-query}
+         {:organization-group/scope scope-query}]))
 (def location-field-query
-  (into
-   (mapv second location-field-pairs)
-   [{:location/parent-scope
-     [:scope/type :scope/id]}
-    {:location/scope
-     [:scope/type :scope/id]}]))
-
-(defn- project-document
-  [document field-pairs]
-  (reduce
-   (fn [result [document-key graph-key]]
-     (if-some [value
-               (get document document-key)]
-       (assoc result graph-key value)
-       result))
-   {}
-   field-pairs))
+  (into (model/field-query location-descriptor)
+        [{:location/parent-scope scope-query}
+         {:location/scope scope-query}]))
 
 ;; =============================================================================
 ;; Query inputs
 ;; =============================================================================
 
-(defn- without-nils
-  [m]
-  (into
-   {}
-   (remove
-    (comp nil? val))
-   m))
+(defn- without-nils [value]
+  (into {} (remove (comp nil? val)) value))
 
-(defn organization-query-input
-  [{:keys [organization-id]}]
-  (without-nils
-   {:organization/id organization-id}))
-
-(defn organization-group-query-input
-  [{:keys [organization-group-id]}]
-  (without-nils
-   {:organization-group/id organization-group-id}))
-
-(defn location-query-input
-  [{:keys [location-id]}]
-  (without-nils
-   {:location/id location-id}))
-
-(defn organization-scope-context-query-input
-  [{:keys [organization-id]}]
-  (without-nils
-   {:organization/id organization-id}))
-
+(defn organization-query-input [{:keys [organization-id]}]
+  (without-nils {:organization/id organization-id}))
+(defn organization-group-query-input [{:keys [organization-group-id]}]
+  (without-nils {:organization-group/id organization-group-id}))
+(defn location-query-input [{:keys [location-id]}]
+  (without-nils {:location/id location-id}))
+(defn organization-scope-context-query-input [{:keys [organization-id]}]
+  (without-nils {:organization/id organization-id}))
 (defn organization-group-scope-context-query-input
   [{:keys [organization-id organization-group-id]}]
-  (without-nils
-   {:organization/id organization-id
-    :organization-group/id organization-group-id}))
-
-(defn location-context-query-input
-  [{:keys [organization-id location-id]}]
-  (without-nils
-   {:organization/id organization-id
-    :location/id location-id}))
-
-;; =============================================================================
-;; XTDB reads
-;; =============================================================================
-
-(def ^:private timestamp-keys-by-entity-type
-  {organization/organization-entity-type
-   [:organization/created-at
-    :organization/updated-at
-    :organization/suspended-at
-    :organization/closed-at]
-
-   organization/organization-group-entity-type
-   [:organization-group/created-at
-    :organization-group/updated-at
-    :organization-group/moved-at
-    :organization-group/suspended-at
-    :organization-group/closed-at]
-
-   organization/location-entity-type
-   [:location/created-at
-    :location/updated-at
-    :location/moved-at
-    :location/suspended-at
-    :location/closed-at]})
-
-(defn- normalize-loaded-document
-  [entity-type document]
-  (when document
-    (reduce
-     (fn [document timestamp-key]
-       (if
-        (contains?
-         document
-         timestamp-key)
-         (update
-          document
-          timestamp-key
-          model.common/normalize-timestamp)
-         document))
-     document
-     (get
-      timestamp-keys-by-entity-type
-      entity-type
-      []))))
-
-(defn- q
-  [ctx query]
-  (biffx/q
-   (:biff/conn ctx)
-   query))
-
-(defn- load-by-id
-  [ctx table columns id]
-  (when
-   (uuid? id)
-    (when-let [document
-               (first
-                (q
-                 ctx
-                 {:select columns
-                  :from table
-                  :where [:= :xt/id id]}))]
-      (normalize-loaded-document
-       table
-       document))))
-
-(defn- load-organization
-  [ctx organization-id]
-  (load-by-id
-   ctx
-   organization/organization-entity-type
-   organization-document-columns
-   organization-id))
-
-(defn- load-organization-group
-  [ctx organization-group-id]
-  (load-by-id
-   ctx
-   organization/organization-group-entity-type
-   organization-group-document-columns
-   organization-group-id))
-
-(defn- load-location
-  [ctx location-id]
-  (load-by-id
-   ctx
-   organization/location-entity-type
-   location-document-columns
-   location-id))
-
-(defn- lookup-result
-  [found-key document-key document]
-  (if document
-    {found-key true
-     document-key document}
-    {found-key false}))
+  (without-nils {:organization/id organization-id
+                 :organization-group/id organization-group-id}))
+(defn location-context-query-input [{:keys [organization-id location-id]}]
+  (without-nils {:organization/id organization-id
+                 :location/id location-id}))
 
 ;; =============================================================================
 ;; Hierarchy loading
 ;; =============================================================================
 
-(def hierarchy-depth-limit
-  "Defensive limit for corrupted parent chains.
+(defn- load-organization [ctx id]
+  (model/load-by-id organization-descriptor ctx id))
+(defn- load-organization-group [ctx id]
+  (model/load-by-id organization-group-descriptor ctx id))
 
-   Cycle detection normally terminates traversal first. The limit prevents an
-   unexpectedly enormous corrupt hierarchy from monopolizing one Graph read."
-  256)
+(def hierarchy-depth-limit 256)
 
-(defn- hierarchy-error!
-  [error-type message details]
-  (throw
-   (ex-info
-    message
-    {:error/type error-type
-     :error/details details})))
+(defn- hierarchy-error! [type message details]
+  (throw (ex-info message {:error/type type :error/details details})))
 
-(defn- require-valid-organization!
-  [organization-document organization-id]
-  (when-not organization-document
-    (hierarchy-error!
-     :organization/not-found
-     "The hierarchy refers to an organization that no longer exists."
-     {:organization/id organization-id}))
+(defn- require-valid-organization! [document organization-id]
+  (when-not document
+    (hierarchy-error! :organization/not-found
+                      "The hierarchy refers to an organization that no longer exists."
+                      {:organization/id organization-id}))
+  ;; gesso.model already validates persisted reads. Keep this assertion so the
+  ;; helper also behaves correctly with values supplied directly in tests/REPL.
+  (when-not (organization/organization-document-consistent? document)
+    (hierarchy-error! :organization.graph/invalid-organization
+                      "The persisted organization document is internally inconsistent."
+                      {:organization/id organization-id}))
+  document)
 
-  (when-not
-   (organization/organization-document-consistent?
-    organization-document)
-    (hierarchy-error!
-     :organization.graph/invalid-organization
-     "The persisted organization document is internally inconsistent."
-     {:organization/id organization-id}))
-
-  organization-document)
-
-(defn- require-valid-group!
-  [group group-id organization-id]
+(defn- require-valid-group! [group group-id organization-id]
   (when-not group
-    (hierarchy-error!
-     :organization-group/not-found
-     "The hierarchy refers to an organization group that no longer exists."
-     {:organization-group/id group-id
-      :organization/id organization-id}))
-
-  (when-not
-   (organization/organization-group-document-consistent?
-    group)
-    (hierarchy-error!
-     :organization.graph/invalid-group
-     "A persisted organization-group document is internally inconsistent."
-     {:organization-group/id group-id
-      :organization/id organization-id}))
-
-  (when-not
-   (organization/organization-group-for-organization?
-    group
-    organization-id)
-    (hierarchy-error!
-     :organization.graph/cross-organization-parent
-     "An organization-group parent belongs to another organization."
-     {:organization-group/id group-id
-      :organization/id organization-id
-      :actual-organization-id
-      (organization/organization-group-organization-id
-       group)}))
-
+    (hierarchy-error! :organization-group/not-found
+                      "The hierarchy refers to an organization group that no longer exists."
+                      {:organization-group/id group-id
+                       :organization/id organization-id}))
+  (when-not (organization/organization-group-document-consistent? group)
+    (hierarchy-error! :organization.graph/invalid-group
+                      "A persisted organization-group document is internally inconsistent."
+                      {:organization-group/id group-id
+                       :organization/id organization-id}))
+  (when-not (organization/organization-group-for-organization? group organization-id)
+    (hierarchy-error! :organization.graph/cross-organization-parent
+                      "An organization-group parent belongs to another organization."
+                      {:organization-group/id group-id
+                       :organization/id organization-id
+                       :actual-organization-id
+                       (organization/organization-group-organization-id group)}))
   group)
 
 (defn- load-group-ancestors
-  "Loads groups beginning at initial-parent-scope.
-
-   Returns immediate parent first and the broadest group last. The organization
-   scope itself is not returned."
+  "Loads ancestor groups immediate-parent first, excluding the Organization."
   [ctx organization-id initial-parent-scope]
   (loop [parent-scope initial-parent-scope
          ancestors []
          visited #{}
          depth 0]
-    (when
-     (>= depth hierarchy-depth-limit)
-      (hierarchy-error!
-       :organization.graph/hierarchy-too-deep
-       "The organization hierarchy exceeds the supported defensive depth."
-       {:organization/id organization-id
-        :parent-scope parent-scope
-        :depth depth}))
-
-    (case
-     (:scope/type parent-scope)
-
+    (when (>= depth hierarchy-depth-limit)
+      (hierarchy-error! :organization.graph/hierarchy-too-deep
+                        "The organization hierarchy exceeds the supported defensive depth."
+                        {:organization/id organization-id
+                         :parent-scope parent-scope
+                         :depth depth}))
+    (case (:scope/type parent-scope)
       :organization
-      (if
-       (= organization-id
-          (:scope/id parent-scope))
+      (if (= organization-id (:scope/id parent-scope))
         ancestors
-        (hierarchy-error!
-         :organization.graph/cross-organization-root
-         "The hierarchy terminates at a different organization."
-         {:organization/id organization-id
-          :actual-root-id (:scope/id parent-scope)}))
+        (hierarchy-error! :organization.graph/cross-organization-root
+                          "The hierarchy terminates at a different organization."
+                          {:organization/id organization-id
+                           :actual-root-id (:scope/id parent-scope)}))
 
       :organization-group
-      (let [group-id
-            (:scope/id parent-scope)]
-        (when
-         (contains? visited group-id)
-          (hierarchy-error!
-           :organization.graph/hierarchy-cycle
-           "The organization hierarchy contains a cycle."
-           {:organization/id organization-id
-            :organization-group/id group-id
-            :visited-group-ids visited}))
+      (let [group-id (:scope/id parent-scope)]
+        (when (contains? visited group-id)
+          (hierarchy-error! :organization.graph/hierarchy-cycle
+                            "The organization hierarchy contains a cycle."
+                            {:organization/id organization-id
+                             :organization-group/id group-id
+                             :visited-group-ids visited}))
+        (let [group (-> (load-organization-group ctx group-id)
+                        (require-valid-group! group-id organization-id))]
+          (recur (organization/organization-group-parent-scope group)
+                 (conj ancestors group)
+                 (conj visited group-id)
+                 (inc depth))))
 
-        (let [group
-              (-> (load-organization-group
-                   ctx
-                   group-id)
-                  (require-valid-group!
-                   group-id
-                   organization-id))]
-          (recur
-           (organization/organization-group-parent-scope
-            group)
-           (conj ancestors group)
-           (conj visited group-id)
-           (inc depth))))
+      (hierarchy-error! :organization.graph/invalid-parent-scope
+                        "The hierarchy contains an invalid parent scope."
+                        {:organization/id organization-id
+                         :parent-scope parent-scope}))))
 
-      (hierarchy-error!
-       :organization.graph/invalid-parent-scope
-       "The hierarchy contains an invalid parent scope."
-       {:organization/id organization-id
-        :parent-scope parent-scope}))))
+;; =============================================================================
+;; Temporary legacy authorization proofs
+;; =============================================================================
 
-(defn- authorization-version
-  [document]
+;; Remove this adapter when User and Request migrate to gesso.model guards.
+(defn- authorization-version [document]
   (cond
-    (contains?
-     document
-     :location/organization)
-    (model.common/authorization-version
-     organization/location-entity-type
-     document
-     organization/location-version)
-
-    (contains?
-     document
-     :organization-group/organization)
-    (model.common/authorization-version
-     organization/organization-group-entity-type
-     document
-     organization/organization-group-version)
-
-    (contains?
-     document
-     :organization/name)
-    (model.common/authorization-version
-     organization/organization-entity-type
-     document
-     organization/organization-version)
-
+    (contains? document :location/organization)
+    (model.common/authorization-version organization/location-entity-type
+                                        document organization/location-version)
+    (contains? document :organization-group/organization)
+    (model.common/authorization-version organization/organization-group-entity-type
+                                        document organization/organization-group-version)
+    (contains? document :organization/name)
+    (model.common/authorization-version organization/organization-entity-type
+                                        document organization/organization-version)
     :else
-    (hierarchy-error!
-     :organization.graph/unknown-authorization-document
-     "A hierarchy authorization document has no known entity type."
-     {:document-id
-      (:xt/id document)})))
+    (hierarchy-error! :organization.graph/unknown-authorization-document
+                      "A hierarchy authorization document has no known entity type."
+                      {:document-id (:xt/id document)})))
 
-(defn- authorization-versions
-  [documents]
-  (mapv
-   authorization-version
-   documents))
+(defn- authorization-versions [documents]
+  (mapv authorization-version documents))
 
-(defn- organization-context-facts
-  [organization-document]
-  (let [scope-context
-        (organization/organization-scope-context
-         organization-document)]
+;; =============================================================================
+;; Hierarchy context composition
+;; =============================================================================
+
+(defn- organization-context-facts [document]
+  (let [context (organization/organization-scope-context document)
+        operational? (:scope/operational? context)]
     {:organization/found? true
-     :organization/doc organization-document
-     :organization/active?
-     (:scope/operational? scope-context)
-     :organization/operational?
-     (:scope/operational? scope-context)
-     :organization/scope
-     (:scope/target scope-context)
-     :organization/scope-context
-     scope-context
-     :organization/authorization-versions
-     [(authorization-version
-       organization-document)]}))
+     :organization/doc document
+     :organization/active? operational?
+     :organization/operational? operational?
+     :organization/scope (:scope/target context)
+     :organization/scope-context context
+     :organization/authorization-versions [(authorization-version document)]}))
 
-(defn- organization-group-context-facts
-  [ctx group]
-  (let [organization-id
-        (organization/organization-group-organization-id
-         group)
+(def ^:private child-context-specs
+  {:organization-group
+   {:organization-id-fn organization/organization-group-organization-id
+    :parent-fn organization/organization-group-parent-scope
+    :context-fn organization/organization-group-scope-context
+    :documents-fn organization/organization-group-authorization-documents
+    :keys [:organization-group/found? :organization-group/doc
+           :organization-group/organization-id :organization-group/parent-scope
+           :organization-group/active? :organization-group/operational?
+           :organization-group/ancestor-docs :organization-group/applicable-scopes
+           :organization-group/scope-context :organization-group/authorization-versions]}
+   :location
+   {:organization-id-fn organization/location-organization-id
+    :parent-fn organization/location-parent-scope
+    :context-fn organization/location-scope-context
+    :documents-fn organization/location-authorization-documents
+    :keys [:location/found? :location/doc :location/organization-id
+           :location/parent-scope :location/active? :location/operational?
+           :location/ancestor-group-docs :location/applicable-scopes
+           :location/scope-context :location/authorization-versions]}})
 
-        organization-document
-        (-> (load-organization
-             ctx
-             organization-id)
-            (require-valid-organization!
-             organization-id))
+(defn- child-context-facts [entity ctx document]
+  (let [{:keys [organization-id-fn parent-fn context-fn documents-fn keys]}
+        (get child-context-specs entity)
+        [found-key doc-key organization-id-key parent-key active-key operational-key
+         ancestors-key applicable-key context-key versions-key] keys
+        organization-id (organization-id-fn document)
+        organization-document (-> (load-organization ctx organization-id)
+                                  (require-valid-organization! organization-id))
+        parent-scope (parent-fn document)
+        ancestors (load-group-ancestors ctx organization-id parent-scope)
+        context (context-fn organization-document document ancestors)
+        documents (documents-fn organization-document document ancestors)
+        operational? (:scope/operational? context)]
+    {found-key true
+     doc-key document
+     organization-id-key organization-id
+     parent-key parent-scope
+     active-key operational?
+     operational-key operational?
+     ancestors-key ancestors
+     applicable-key (:scope/applicable context)
+     context-key context
+     versions-key (authorization-versions documents)}))
 
-        ancestors
-        (load-group-ancestors
-         ctx
-         organization-id
-         (organization/organization-group-parent-scope
-          group))
-
-        scope-context
-        (organization/organization-group-scope-context
-         organization-document
-         group
-         ancestors)
-
-        authorization-documents
-        (organization/organization-group-authorization-documents
-         organization-document
-         group
-         ancestors)]
-    {:organization-group/found? true
-     :organization-group/doc group
-     :organization-group/organization-id organization-id
-     :organization-group/parent-scope
-     (organization/organization-group-parent-scope group)
-     :organization-group/active?
-     (:scope/operational? scope-context)
-     :organization-group/operational?
-     (:scope/operational? scope-context)
-     :organization-group/ancestor-docs
-     ancestors
-     :organization-group/applicable-scopes
-     (:scope/applicable scope-context)
-     :organization-group/scope-context
-     scope-context
-     :organization-group/authorization-versions
-     (authorization-versions
-      authorization-documents)}))
-
-(defn- location-context-facts
-  [ctx location]
-  (let [organization-id
-        (organization/location-organization-id
-         location)
-
-        organization-document
-        (-> (load-organization
-             ctx
-             organization-id)
-            (require-valid-organization!
-             organization-id))
-
-        groups
-        (load-group-ancestors
-         ctx
-         organization-id
-         (organization/location-parent-scope
-          location))
-
-        scope-context
-        (organization/location-scope-context
-         organization-document
-         location
-         groups)
-
-        authorization-documents
-        (organization/location-authorization-documents
-         organization-document
-         location
-         groups)]
-    {:location/found? true
-     :location/doc location
-     :location/organization-id organization-id
-     :location/parent-scope
-     (organization/location-parent-scope location)
-     :location/active?
-     (:scope/operational? scope-context)
-     :location/operational?
-     (:scope/operational? scope-context)
-     :location/ancestor-group-docs
-     groups
-     :location/applicable-scopes
-     (:scope/applicable scope-context)
-     :location/scope-context
-     scope-context
-     :location/authorization-versions
-     (authorization-versions
-      authorization-documents)}))
+(defn- organization-group-context-facts [ctx group]
+  (child-context-facts :organization-group ctx group))
+(defn- location-context-facts [ctx location]
+  (child-context-facts :location ctx location))
 
 ;; =============================================================================
-;; Organizations
+;; Resolvers
 ;; =============================================================================
 
-(graph/defresolver organization-by-id
-  {:input
-   [:organization/id]
+;; Conventional resolver values are generated exactly once and reused in the
+;; complete resolver collection below.
+(def organization-by-id (model/build-by-id-resolver organization-descriptor))
+(def organization-fields (model/build-field-resolver organization-descriptor))
+(def organization-group-by-id (model/build-by-id-resolver organization-group-descriptor))
+(def organization-group-fields (model/build-field-resolver organization-group-descriptor))
+(def location-by-id (model/build-by-id-resolver location-descriptor))
+(def location-fields (model/build-field-resolver location-descriptor))
 
-   :output
-   [:organization/found?
-    {[:? :organization/doc]
-     organization-document-query}]}
-  [ctx {:organization/keys [id]}]
-  (lookup-result
-   :organization/found?
-   :organization/doc
-   (load-organization ctx id)))
+(defn- derived-resolver [id doc-key document-query output derive-fn]
+  (graph/resolver
+   {:id id
+    :input [{doc-key document-query}]
+    :output output
+    :resolve-fn (fn [_ctx input] (derive-fn (get input doc-key)))}))
 
-(graph/defresolver organization-fields
-  {:input
-   [{:organization/doc
-     organization-document-query}]
+(def organization-derived-fields
+  (derived-resolver
+   ::organization-derived-fields :organization/doc organization-document-query
+   [{:organization/scope scope-query}]
+   #(hash-map :organization/scope (organization/organization-scope-of %))))
 
-   :output
-   organization-field-query}
-  [_ctx {:organization/keys [doc]}]
-  (assoc
-   (project-document
-    doc
-    organization-field-pairs)
-   :organization/scope
-   (organization/organization-scope-of
-    doc)))
+(def organization-group-derived-fields
+  (derived-resolver
+   ::organization-group-derived-fields :organization-group/doc organization-group-document-query
+   [{:organization-group/parent-scope scope-query}
+    {:organization-group/scope scope-query}]
+   #(hash-map :organization-group/parent-scope
+              (organization/organization-group-parent-scope %)
+              :organization-group/scope
+              (organization/organization-group-scope-of %))))
 
-(graph/defresolver organization-scope-context-resolver
-  {:input
-   [{:organization/doc
-     organization-document-query}]
+(def location-derived-fields
+  (derived-resolver
+   ::location-derived-fields :location/doc location-document-query
+   [{:location/parent-scope scope-query}
+    {:location/scope scope-query}]
+   #(hash-map :location/parent-scope (organization/location-parent-scope %)
+              :location/scope (organization/location-scope-of %))))
 
-   :output
-   [[:? :organization/active?]
-    [:? :organization/operational?]
-    {[:? :organization/scope-context]
-     scope-context-value-query}
-    {[:? :organization/authorization-versions]
-     authorization-versions-value-query}]}
-  [_ctx {:organization/keys [doc]}]
-  (dissoc
-   (organization-context-facts doc)
-   :organization/found?
-   :organization/doc
-   :organization/scope))
+(defn- context-resolver [id doc-key document-query output context-fn envelope-keys]
+  (graph/resolver
+   {:id id
+    :input [{doc-key document-query}]
+    :output output
+    :resolve-fn
+    (fn [ctx input]
+      (apply dissoc (context-fn ctx (get input doc-key)) envelope-keys))}))
 
-;; =============================================================================
-;; Organization groups
-;; =============================================================================
+(def organization-scope-context-resolver
+  (graph/resolver
+   {:id ::organization-scope-context
+    :input [{:organization/doc organization-document-query}]
+    :output [[:? :organization/active?]
+             [:? :organization/operational?]
+             {[:? :organization/scope-context] scope-context-value-query}
+             {[:? :organization/authorization-versions]
+              authorization-versions-value-query}]
+    :resolve-fn
+    (fn [_ctx {:organization/keys [doc]}]
+      (dissoc (organization-context-facts doc)
+              :organization/found? :organization/doc :organization/scope))}))
 
-(graph/defresolver organization-group-by-id
-  {:input
-   [:organization-group/id]
-
-   :output
-   [:organization-group/found?
-    {[:? :organization-group/doc]
-     organization-group-document-query}]}
-  [ctx {:organization-group/keys [id]}]
-  (lookup-result
-   :organization-group/found?
-   :organization-group/doc
-   (load-organization-group ctx id)))
-
-(graph/defresolver organization-group-fields
-  {:input
-   [{:organization-group/doc
-     organization-group-document-query}]
-
-   :output
-   organization-group-field-query}
-  [_ctx {:organization-group/keys [doc]}]
-  (merge
-   (project-document
-    doc
-    organization-group-field-pairs)
-   {:organization-group/parent-scope
-    (organization/organization-group-parent-scope
-     doc)
-
-    :organization-group/scope
-    (organization/organization-group-scope-of
-     doc)}))
-
-(graph/defresolver organization-group-scope-context-resolver
-  {:input
-   [{:organization-group/doc
-     organization-group-document-query}]
-
-   :output
+(def organization-group-scope-context-resolver
+  (context-resolver
+   ::organization-group-scope-context :organization-group/doc
+   organization-group-document-query
    [[:? :organization-group/active?]
     [:? :organization-group/operational?]
-    {[:? :organization-group/ancestor-docs]
-     organization-group-document-query}
-    {[:? :organization-group/applicable-scopes]
-     [:scope/type :scope/id]}
-    {[:? :organization-group/scope-context]
-     scope-context-value-query}
+    {[:? :organization-group/ancestor-docs] organization-group-document-query}
+    {[:? :organization-group/applicable-scopes] scope-query}
+    {[:? :organization-group/scope-context] scope-context-value-query}
     {[:? :organization-group/authorization-versions]
-     authorization-versions-value-query}]}
-  [ctx {:organization-group/keys [doc]}]
-  (dissoc
-   (organization-group-context-facts ctx doc)
-   :organization-group/found?
-   :organization-group/doc
-   :organization-group/organization-id
-   :organization-group/parent-scope))
+     authorization-versions-value-query}]
+   organization-group-context-facts
+   [:organization-group/found? :organization-group/doc
+    :organization-group/organization-id :organization-group/parent-scope]))
 
-;; =============================================================================
-;; Locations
-;; =============================================================================
-
-(graph/defresolver location-by-id
-  {:input
-   [:location/id]
-
-   :output
-   [:location/found?
-    {[:? :location/doc]
-     location-document-query}]}
-  [ctx {:location/keys [id]}]
-  (lookup-result
-   :location/found?
-   :location/doc
-   (load-location ctx id)))
-
-(graph/defresolver location-fields
-  {:input
-   [{:location/doc
-     location-document-query}]
-
-   :output
-   location-field-query}
-  [_ctx {:location/keys [doc]}]
-  (merge
-   (project-document
-    doc
-    location-field-pairs)
-   {:location/parent-scope
-    (organization/location-parent-scope
-     doc)
-
-    :location/scope
-    (organization/location-scope-of
-     doc)}))
-
-(graph/defresolver location-context-resolver
-  {:input
-   [{:location/doc
-     location-document-query}]
-
-   :output
+(def location-context-resolver
+  (context-resolver
+   ::location-context :location/doc location-document-query
    [[:? :location/active?]
     [:? :location/operational?]
-    {[:? :location/ancestor-group-docs]
-     organization-group-document-query}
-    {[:? :location/applicable-scopes]
-     [:scope/type :scope/id]}
-    {[:? :location/scope-context]
-     scope-context-value-query}
-    {[:? :location/authorization-versions]
-     authorization-versions-value-query}]}
-  [ctx {:location/keys [doc]}]
-  (dissoc
-   (location-context-facts ctx doc)
-   :location/found?
-   :location/doc
-   :location/organization-id
-   :location/parent-scope))
+    {[:? :location/ancestor-group-docs] organization-group-document-query}
+    {[:? :location/applicable-scopes] scope-query}
+    {[:? :location/scope-context] scope-context-value-query}
+    {[:? :location/authorization-versions] authorization-versions-value-query}]
+   location-context-facts
+   [:location/found? :location/doc :location/organization-id :location/parent-scope]))
 
 ;; =============================================================================
 ;; Public query contracts
 ;; =============================================================================
 
-(def organization-command-query
-  [:organization/found?
-   {[:? :organization/doc]
-    organization-document-query}])
-
-(def organization-group-command-query
-  [:organization-group/found?
-   {[:? :organization-group/doc]
-    organization-group-document-query}])
-
-(def location-command-query
-  [:location/found?
-   {[:? :location/doc]
-    location-document-query}])
+(def organization-command-query (model/lookup-query organization-descriptor))
+(def organization-group-command-query (model/lookup-query organization-group-descriptor))
+(def location-command-query (model/lookup-query location-descriptor))
 
 (def organization-scope-context-query
   [:organization/found?
-   {[:? :organization/doc]
-    organization-document-query}
+   {[:? :organization/doc] organization-document-query}
    [:? :organization/active?]
    [:? :organization/operational?]
-   {[:? :organization/scope]
-    [:scope/type :scope/id]}
-   {[:? :organization/scope-context]
-    scope-context-value-query}
-   {[:? :organization/authorization-versions]
-    authorization-versions-value-query}])
+   {[:? :organization/scope] scope-query}
+   {[:? :organization/scope-context] scope-context-value-query}
+   {[:? :organization/authorization-versions] authorization-versions-value-query}])
 
 (def organization-group-scope-context-query
   [:organization-group/found?
-   {[:? :organization-group/doc]
-    organization-group-document-query}
+   {[:? :organization-group/doc] organization-group-document-query}
    [:? :organization-group/organization-id]
-   {[:? :organization-group/parent-scope]
-    [:scope/type :scope/id]}
+   {[:? :organization-group/parent-scope] scope-query}
    [:? :organization-group/active?]
    [:? :organization-group/operational?]
-   {[:? :organization-group/ancestor-docs]
-    organization-group-document-query}
-   {[:? :organization-group/applicable-scopes]
-    [:scope/type :scope/id]}
-   {[:? :organization-group/scope-context]
-    scope-context-value-query}
-   {[:? :organization-group/authorization-versions]
-    authorization-versions-value-query}])
+   {[:? :organization-group/ancestor-docs] organization-group-document-query}
+   {[:? :organization-group/applicable-scopes] scope-query}
+   {[:? :organization-group/scope-context] scope-context-value-query}
+   {[:? :organization-group/authorization-versions] authorization-versions-value-query}])
 
 (def location-context-query
   "Stable Organization Graph contract consumed by User and Request.
-
-   :location/active? is effective operational activity across the entire
-   Organization hierarchy, not merely the local Location status. The local
-   lifecycle remains available in :location/doc and :location/status."
+   :location/active? means effective activity across the complete hierarchy."
   [:location/found?
-   {[:? :location/doc]
-    location-document-query}
+   {[:? :location/doc] location-document-query}
    [:? :location/organization-id]
-   {[:? :location/parent-scope]
-    [:scope/type :scope/id]}
+   {[:? :location/parent-scope] scope-query}
    [:? :location/active?]
    [:? :location/operational?]
-   {[:? :location/ancestor-group-docs]
-    organization-group-document-query}
-   {[:? :location/applicable-scopes]
-    [:scope/type :scope/id]}
-   {[:? :location/scope-context]
-    scope-context-value-query}
-   {[:? :location/authorization-versions]
-    authorization-versions-value-query}])
+   {[:? :location/ancestor-group-docs] organization-group-document-query}
+   {[:? :location/applicable-scopes] scope-query}
+   {[:? :location/scope-context] scope-context-value-query}
+   {[:? :location/authorization-versions] authorization-versions-value-query}])
 
 ;; =============================================================================
 ;; Resolver collection
 ;; =============================================================================
 
+(def custom-resolvers
+  [organization-derived-fields organization-scope-context-resolver
+   organization-group-derived-fields organization-group-scope-context-resolver
+   location-derived-fields location-context-resolver])
+
 (def resolvers
-  [organization-by-id
-   organization-fields
-   organization-scope-context-resolver
-
-   organization-group-by-id
-   organization-group-fields
-   organization-group-scope-context-resolver
-
-   location-by-id
-   location-fields
-   location-context-resolver])
+  "Complete Organization resolver collection. Generated resolvers are compiled
+   once; only derived scope and hierarchy resolvers are hand-written."
+  [organization-by-id organization-fields
+   organization-derived-fields organization-scope-context-resolver
+   organization-group-by-id organization-group-fields
+   organization-group-derived-fields organization-group-scope-context-resolver
+   location-by-id location-fields location-derived-fields location-context-resolver])

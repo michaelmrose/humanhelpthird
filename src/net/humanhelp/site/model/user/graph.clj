@@ -420,7 +420,7 @@
            [:= :membership/user user-id]))
     []))
 
-(defn- current-membership
+#_(defn- current-membership
   [ctx user-id organization-id]
   (if
    (and (uuid? user-id) (uuid? organization-id))
@@ -438,6 +438,28 @@
        :lookup :current-user-and-organization
        :user/id user-id
        :membership/organization-id organization-id}))
+    nil))
+
+(defn- current-membership
+  [ctx user-id organization-id]
+  (if
+   (and
+    (uuid? user-id)
+    (uuid? organization-id))
+    (exactly-one-or-nil!
+     (filterv
+      access/current-membership?
+      (rows
+       ctx
+       membership/entity-type
+       membership-document-columns
+       [:and
+        [:= :membership/user user-id]
+        [:= :membership/organization organization-id]]))
+     {:entity-type membership/entity-type
+      :lookup :current-user-and-organization
+      :user/id user-id
+      :membership/organization-id organization-id})
     nil))
 
 (defn- load-role-assignment
