@@ -1,1174 +1,691 @@
 (ns net.humanhelp.site.model.organization.domain
-  "Pure rules for HumanHelp organizations, organization groups, locations, and
-   authoritative scope contexts.
+  "Pure rules for HumanHelp organizations, organization groups, and locations.
 
-   Organization owns the tenant hierarchy:
-
-     organization
-       -> zero or more nested organization groups
-       -> locations
-
-   Persisted parent relationships use explicit parent-type and parent-id fields
-   so they remain straightforward to query. Structural authorization-scope
-   values are shared with User through model.authorization-scope.
-
-   This namespace owns document invariants, lifecycle transitions, hierarchy
-   composition from already-loaded documents, and model command construction.
-   It does not query XTDB, prove that referenced documents exist, authorize
-   users, inspect User memberships or roles, revoke User assignments, or alter
-   Requests.
-
-   Graph and FX are responsible for loading complete ancestry, preventing
-   duplicate entities, proving parent ownership, checking cycle freedom before
-   moves, and composing cross-model consequences atomically."
+   The public API is intentionally explicit, while shared mechanics for the
+   three closely related entity types are data-driven internally. Organization
+   owns lifecycle, hierarchy composition, scope contexts, and command creation;
+   Graph/FX own persisted hierarchy loading, authorization, and atomic
+   cross-model workflows."
   (:require
    [clojure.string :as str]
+   [gesso.model.command :as command]
    [net.humanhelp.site.model.authorization-scope :as authorization-scope]
    [net.humanhelp.site.model.common :as model.common]))
 
 ;; =============================================================================
-;; Entity identity and versioning
+;; Identity, versions, and shared values
 ;; =============================================================================
 
 (def organization-entity-type :organization)
-
 (def organization-group-entity-type :organization-group)
-
 (def location-entity-type :location)
 
-(def organization-version {:revision-key :organization/revision
-   :created-at-key :organization/created-at :updated-at-key :organization/updated-at})
+(def organization-version
+  {:revision-key :organization/revision
+   :created-at-key :organization/created-at
+   :updated-at-key :organization/updated-at})
 
-(def organization-group-version {:revision-key :organization-group/revision
-   :created-at-key :organization-group/created-at :updated-at-key :organization-group/updated-at})
+(def organization-group-version
+  {:revision-key :organization-group/revision
+   :created-at-key :organization-group/created-at
+   :updated-at-key :organization-group/updated-at})
 
-(def location-version {:revision-key :location/revision :created-at-key :location/created-at
+(def location-version
+  {:revision-key :location/revision
+   :created-at-key :location/created-at
    :updated-at-key :location/updated-at})
 
-;; =============================================================================
-;; Shared values
-;; =============================================================================
-
 (def name-max 160)
-
 (def statuses #{:active :suspended :closed})
+(def allowed-transitions
+  {[:active :suspend] :suspended
+   [:suspended :reactivate] :active
+   [:active :close] :closed
+   [:suspended :close] :closed})
 
-;; Structural authorization-scope values are shared with User through
-;; model.authorization-scope. These aliases preserve Organization's existing
-;; public domain vocabulary while keeping one implementation.
-(def scope-types
-  authorization-scope/scope-types)
+(def scope-types authorization-scope/scope-types)
+(def parent-scope-types authorization-scope/parent-scope-types)
+(def scope-type? authorization-scope/scope-type?)
+(def parent-scope-type? authorization-scope/parent-scope-type?)
+(def scope-reference? authorization-scope/scope-reference?)
+(def parent-scope-reference? authorization-scope/parent-scope-reference?)
+(def organization-scope authorization-scope/organization-scope)
+(def organization-group-scope authorization-scope/organization-group-scope)
+(def location-scope authorization-scope/location-scope)
+(def organization-scope? authorization-scope/organization-scope?)
+(def organization-group-scope? authorization-scope/organization-group-scope?)
+(def location-scope? authorization-scope/location-scope?)
+(def same-scope? authorization-scope/same-scope?)
+(defn scope-context? [value]
+  (authorization-scope/scope-context? value))
 
-(def parent-scope-types
-  authorization-scope/parent-scope-types)
+(defn normalize-name [value]
+  (when (string? value) (str/trim value)))
 
-(def allowed-transitions {[:active :suspend] :suspended [:suspended :reactivate] :active
-   [:active :close] :closed [:suspended :close] :closed})
-
-(defn normalize-name [value] (when (string? value) (str/trim value)))
-
-(defn name? [value] (and (string? value) (= value (normalize-name value)) (not (str/blank? value))
-   (<= (count value) name-max)))
+(defn name? [value]
+  (and (string? value)
+       (= value (normalize-name value))
+       (not (str/blank? value))
+       (<= (count value) name-max)))
 
 (defn status? [value] (contains? statuses value))
-
 (defn active-status? [value] (= :active value))
-
 (defn suspended-status? [value] (= :suspended value))
-
 (defn closed-status? [value] (= :closed value))
-
 (defn next-status [status operation] (get allowed-transitions [status operation]))
-
 (defn can-transition-status? [status operation] (some? (next-status status operation)))
 
 ;; =============================================================================
-;; Authorization-scope values
+;; Shared entity metadata
 ;; =============================================================================
 
-(def scope-type?
-  authorization-scope/scope-type?)
+(defn- k [entity field]
+  (keyword (clojure.core/name entity) (clojure.core/name field)))
 
-(def parent-scope-type?
-  authorization-scope/parent-scope-type?)
+(def ^:private entity-specs
+  {:organization
+   {:entity-type organization-entity-type
+    :version organization-version
+    :label "organization"
+    :document-key :organization
+    :movable? false}
 
-(def scope-reference?
-  authorization-scope/scope-reference?)
+   :organization-group
+   {:entity-type organization-group-entity-type
+    :version organization-group-version
+    :label "organization group"
+    :document-key :organization-group
+    :organization-key :organization-group/organization
+    :movable? true}
 
-(def parent-scope-reference?
-  authorization-scope/parent-scope-reference?)
+   :location
+   {:entity-type location-entity-type
+    :version location-version
+    :label "location"
+    :document-key :location
+    :organization-key :location/organization
+    :movable? true}})
 
-(def organization-scope
-  authorization-scope/organization-scope)
-
-(def organization-group-scope
-  authorization-scope/organization-group-scope)
-
-(def location-scope
-  authorization-scope/location-scope)
-
-(def organization-scope?
-  authorization-scope/organization-scope?)
-
-(def organization-group-scope?
-  authorization-scope/organization-group-scope?)
-
-(def location-scope?
-  authorization-scope/location-scope?)
-
-(def same-scope?
-  authorization-scope/same-scope?)
-
-;; =============================================================================
-;; Organization facts
-;; =============================================================================
-
-(defn organization-id [organization] (:xt/id organization))
-
-(defn organization-name [organization] (:organization/name organization))
-
-(defn organization-status [organization] (:organization/status organization))
-
-(defn organization-active? [organization] (active-status? (organization-status organization)))
-
-(defn organization-suspended? [organization] (suspended-status? (organization-status organization)))
-
-(defn organization-closed? [organization] (closed-status? (organization-status organization)))
-
-(defn organization-can-transition? [organization operation] (can-transition-status?
-   (organization-status organization) operation))
-
-(defn organization-scope-of [organization] (organization-scope (organization-id organization)))
+(defn- spec [entity] (get entity-specs entity))
+(defn- version [entity] (:version (spec entity)))
+(defn- entity-status [entity document] (get document (k entity :status)))
+(defn- entity-name [entity document] (get document (k entity :name)))
+(defn- entity-active? [entity document] (active-status? (entity-status entity document)))
+(defn- entity-suspended? [entity document] (suspended-status? (entity-status entity document)))
+(defn- entity-closed? [entity document] (closed-status? (entity-status entity document)))
+(defn- entity-can-transition? [entity document operation]
+  (can-transition-status? (entity-status entity document) operation))
 
 ;; =============================================================================
-;; Organization-group facts
+;; Public document facts
 ;; =============================================================================
 
-(defn organization-group-id [group] (:xt/id group))
+(defn organization-id [document] (:xt/id document))
+(defn organization-name [document] (entity-name :organization document))
+(defn organization-status [document] (entity-status :organization document))
+(defn organization-active? [document] (entity-active? :organization document))
+(defn organization-suspended? [document] (entity-suspended? :organization document))
+(defn organization-closed? [document] (entity-closed? :organization document))
+(defn organization-can-transition? [document operation]
+  (entity-can-transition? :organization document operation))
+(defn organization-scope-of [document] (organization-scope (:xt/id document)))
 
-(defn organization-group-organization-id [group] (:organization-group/organization group))
+(defn organization-group-id [document] (:xt/id document))
+(defn organization-group-organization-id [document] (:organization-group/organization document))
+(defn organization-group-name [document] (entity-name :organization-group document))
+(defn organization-group-status [document] (entity-status :organization-group document))
+(defn organization-group-active? [document] (entity-active? :organization-group document))
+(defn organization-group-suspended? [document] (entity-suspended? :organization-group document))
+(defn organization-group-closed? [document] (entity-closed? :organization-group document))
+(defn organization-group-can-transition? [document operation]
+  (entity-can-transition? :organization-group document operation))
+(defn organization-group-scope-of [document] (organization-group-scope (:xt/id document)))
+(defn organization-group-parent-scope [document]
+  {:scope/type (:organization-group/parent-type document)
+   :scope/id (:organization-group/parent-id document)})
+(defn organization-group-for-organization? [document organization-id]
+  (= organization-id (:organization-group/organization document)))
+(defn organization-group-direct-child-of? [document parent-scope]
+  (same-scope? (organization-group-parent-scope document) parent-scope))
 
-(defn organization-group-name [group] (:organization-group/name group))
-
-(defn organization-group-status [group] (:organization-group/status group))
-
-(defn organization-group-active? [group] (active-status? (organization-group-status group)))
-
-(defn organization-group-suspended? [group] (suspended-status? (organization-group-status group)))
-
-(defn organization-group-closed? [group] (closed-status? (organization-group-status group)))
-
-(defn organization-group-can-transition? [group operation] (can-transition-status?
-   (organization-group-status group) operation))
-
-(defn organization-group-scope-of [group] (organization-group-scope (organization-group-id group)))
-
-(defn organization-group-parent-scope [group] {:scope/type (:organization-group/parent-type group)
-
-   :scope/id (:organization-group/parent-id group)})
-
-(defn organization-group-for-organization? [group expected-organization-id]
-  (= expected-organization-id (organization-group-organization-id group)))
-
-(defn organization-group-direct-child-of? [group expected-parent-scope] (same-scope?
-   (organization-group-parent-scope group) expected-parent-scope))
-
-;; =============================================================================
-;; Location facts
-;; =============================================================================
-
-(defn location-id [location] (:xt/id location))
-
-(defn location-organization-id [location] (:location/organization location))
-
-(defn location-name [location] (:location/name location))
-
-(defn location-status [location] (:location/status location))
-
-(defn location-active? [location] (active-status? (location-status location)))
-
-(defn location-suspended? [location] (suspended-status? (location-status location)))
-
-(defn location-closed? [location] (closed-status? (location-status location)))
-
-(defn location-can-transition? [location operation] (can-transition-status?
-   (location-status location) operation))
-
-(defn location-scope-of [location] (location-scope (location-id location)))
-
-(defn location-parent-scope [location] {:scope/type (:location/parent-type location)
-
-   :scope/id (:location/parent-id location)})
-
-(defn location-for-organization? [location expected-organization-id] (= expected-organization-id
-     (location-organization-id location)))
-
-(defn location-direct-child-of? [location expected-parent-scope] (same-scope?
-   (location-parent-scope location) expected-parent-scope))
+(defn location-id [document] (:xt/id document))
+(defn location-organization-id [document] (:location/organization document))
+(defn location-name [document] (entity-name :location document))
+(defn location-status [document] (entity-status :location document))
+(defn location-active? [document] (entity-active? :location document))
+(defn location-suspended? [document] (entity-suspended? :location document))
+(defn location-closed? [document] (entity-closed? :location document))
+(defn location-can-transition? [document operation]
+  (entity-can-transition? :location document operation))
+(defn location-scope-of [document] (location-scope (:xt/id document)))
+(defn location-parent-scope [document]
+  {:scope/type (:location/parent-type document)
+   :scope/id (:location/parent-id document)})
+(defn location-for-organization? [document organization-id]
+  (= organization-id (:location/organization document)))
+(defn location-direct-child-of? [document parent-scope]
+  (same-scope? (location-parent-scope document) parent-scope))
 
 ;; =============================================================================
-;; Shared validation helpers
+;; Generic invariant mechanics
 ;; =============================================================================
 
 (defn- optional-uuid? [value] (or (nil? value) (uuid? value)))
-
 (defn- optional-reason? [value] (or (nil? value) (qualified-keyword? value)))
+(defn- none-present? [document keys] (every? #(nil? (get document %)) keys))
 
-(defn- none-present? [document keys] (every? nil? (map document keys)))
+(defn- audit-consistent? [document entity audit]
+  (let [at (get document (k entity (keyword (str (clojure.core/name audit) "-at"))))
+        by (get document (k entity (keyword (str (clojure.core/name audit) "-by"))))
+        reason-field (case audit
+                       :suspended :suspension-reason
+                       :closed :closure-reason
+                       :moved :move-reason)
+        reason (get document (k entity reason-field))]
+    (and (optional-uuid? by)
+         (optional-reason? reason)
+         (or (some? at) (and (nil? by) (nil? reason))))))
 
-(defn- audit-pair-consistent? [document at-key by-key reason-key] (let [at (get document at-key)
+(defn- lifecycle-consistent? [entity document]
+  (let [status (entity-status entity document)
+        suspended [(k entity :suspended-at)
+                   (k entity :suspended-by)
+                   (k entity :suspension-reason)]
+        closed [(k entity :closed-at)
+                (k entity :closed-by)
+                (k entity :closure-reason)]]
+    (case status
+      :active (none-present? document (concat suspended closed))
+      :suspended (and (some? (get document (first suspended)))
+                      (none-present? document closed))
+      :closed (and (some? (get document (first closed)))
+                   (none-present? document suspended))
+      false)))
 
-        by (get document by-key)
+(defn- timestamps-within-document? [entity document]
+  (let [v (version entity)
+        fields (cond-> [(k entity :suspended-at) (k entity :closed-at)]
+                 (:movable? (spec entity)) (conj (k entity :moved-at)))]
+    (every?
+     #(model.common/optional-between?
+       (get document (:created-at-key v))
+       (get document %)
+       (get document (:updated-at-key v)))
+     fields)))
 
-        reason (get document reason-key)] (and (optional-uuid? by) (optional-reason? reason) (or
-      (some? at) (and (nil? by) (nil? reason))))))
+(defn- parent-consistent-with-organization? [organization-id parent-scope]
+  (and (parent-scope-reference? parent-scope)
+       (or (organization-group-scope? parent-scope)
+           (= parent-scope (organization-scope organization-id)))))
 
-(defn- lifecycle-consistent? [document status suspended-at-key suspended-by-key
-   suspension-reason-key closed-at-key closed-by-key closure-reason-key] (case status :active
-    (none-present? document [suspended-at-key suspended-by-key suspension-reason-key closed-at-key
-      closed-by-key closure-reason-key])
+(defn- child-invariants? [entity document]
+  (let [organization-id (get document (:organization-key (spec entity)))
+        parent {:scope/type (get document (k entity :parent-type))
+                :scope/id (get document (k entity :parent-id))}]
+    (and (uuid? organization-id)
+         (not= (:xt/id document) organization-id)
+         (parent-consistent-with-organization? organization-id parent)
+         (not= (:xt/id document) (:scope/id parent))
+         (audit-consistent? document entity :moved))))
 
-    :suspended (and (some? (get document suspended-at-key)) (none-present? document [closed-at-key
-       closed-by-key closure-reason-key]))
+(defn- document-consistent? [entity document]
+  (and (map? document)
+       (model.common/versioned-document-consistent? document (version entity))
+       (name? (get document (k entity :name)))
+       (status? (get document (k entity :status)))
+       (timestamps-within-document? entity document)
+       (audit-consistent? document entity :suspended)
+       (audit-consistent? document entity :closed)
+       (lifecycle-consistent? entity document)
+       (or (= entity :organization)
+           (child-invariants? entity document))))
 
-    :closed (and (some? (get document closed-at-key)) (none-present? document [suspended-at-key
-       suspended-by-key suspension-reason-key]))
-
-    false))
-
-(defn- timestamp-within-document? [document version value] (model.common/optional-between?
-   (get document (:created-at-key version)) value (get document (:updated-at-key version))))
-
-(defn- timestamps-within-document? [document version values] (every? #(timestamp-within-document?
-     document version %) values))
-
-(defn- parent-consistent-with-organization? [organization-id parent-scope] (and
-   (parent-scope-reference? parent-scope) (or (organization-group-scope? parent-scope)
-    (= parent-scope (organization-scope organization-id)))))
-
-;; =============================================================================
-;; Complete document validation
-;; =============================================================================
-
-(defn organization-document-consistent? [organization] (and (map? organization)
-
-   (model.common/versioned-document-consistent? organization organization-version)
-
-   (name? (:organization/name organization))
-
-   (status? (:organization/status organization))
-
-   (timestamps-within-document? organization organization-version
-    [(:organization/suspended-at organization) (:organization/closed-at organization)])
-
-   (audit-pair-consistent? organization :organization/suspended-at :organization/suspended-by
-    :organization/suspension-reason)
-
-   (audit-pair-consistent? organization :organization/closed-at :organization/closed-by
-    :organization/closure-reason)
-
-   (lifecycle-consistent? organization (:organization/status organization)
-    :organization/suspended-at :organization/suspended-by :organization/suspension-reason
-    :organization/closed-at :organization/closed-by :organization/closure-reason)))
-
-(defn organization-group-document-consistent? [group] (let [parent
-        (organization-group-parent-scope group)
-
-        organization-id (organization-group-organization-id group)] (and (map? group)
-
-     (model.common/versioned-document-consistent? group organization-group-version)
-
-     (uuid? organization-id)
-
-     (not= (:xt/id group) organization-id)
-
-     (name? (:organization-group/name group))
-
-     (status? (:organization-group/status group))
-
-     (parent-consistent-with-organization? organization-id parent)
-
-     (not= (:xt/id group) (:scope/id parent))
-
-     (timestamps-within-document? group organization-group-version
-      [(:organization-group/moved-at group) (:organization-group/suspended-at group)
-       (:organization-group/closed-at group)])
-
-     (audit-pair-consistent? group :organization-group/moved-at :organization-group/moved-by
-      :organization-group/move-reason)
-
-     (audit-pair-consistent? group :organization-group/suspended-at :organization-group/suspended-by
-      :organization-group/suspension-reason)
-
-     (audit-pair-consistent? group :organization-group/closed-at :organization-group/closed-by
-      :organization-group/closure-reason)
-
-     (lifecycle-consistent? group (:organization-group/status group)
-      :organization-group/suspended-at :organization-group/suspended-by
-      :organization-group/suspension-reason :organization-group/closed-at
-      :organization-group/closed-by :organization-group/closure-reason))))
-
-(defn location-document-consistent? [location] (let [parent (location-parent-scope location)
-
-        organization-id (location-organization-id location)] (and (map? location)
-
-     (model.common/versioned-document-consistent? location location-version)
-
-     (uuid? organization-id)
-
-     (not= (:xt/id location) organization-id)
-
-     (name? (:location/name location))
-
-     (status? (:location/status location))
-
-     (parent-consistent-with-organization? organization-id parent)
-
-     (not= (:xt/id location) (:scope/id parent))
-
-     (timestamps-within-document? location location-version [(:location/moved-at location)
-       (:location/suspended-at location) (:location/closed-at location)])
-
-     (audit-pair-consistent? location :location/moved-at :location/moved-by :location/move-reason)
-
-     (audit-pair-consistent? location :location/suspended-at :location/suspended-by
-      :location/suspension-reason)
-
-     (audit-pair-consistent? location :location/closed-at :location/closed-by
-      :location/closure-reason)
-
-     (lifecycle-consistent? location (:location/status location) :location/suspended-at
-      :location/suspended-by :location/suspension-reason :location/closed-at :location/closed-by
-      :location/closure-reason))))
+(defn organization-document-consistent? [document]
+  (document-consistent? :organization document))
+(defn organization-group-document-consistent? [document]
+  (document-consistent? :organization-group document))
+(defn location-document-consistent? [document]
+  (document-consistent? :location document))
 
 ;; =============================================================================
-;; Input normalization and validation
+;; Create input and construction
 ;; =============================================================================
 
-(defn normalize-organization-create-input [input] (let [input (or input {})] {:id (:id input)
+(defn- normalize-create-input [entity input]
+  (let [input (or input {})]
+    (cond-> {:id (:id input)
+             :name (normalize-name (:name input))
+             :now (:now input)}
+      (not= entity :organization)
+      (assoc :organization-id (:organization-id input)
+             :parent-scope (:parent-scope input)))))
 
-     :name (normalize-name (:name input))
+(defn normalize-organization-create-input [input]
+  (normalize-create-input :organization input))
+(defn normalize-organization-group-create-input [input]
+  (normalize-create-input :organization-group input))
+(defn normalize-location-create-input [input]
+  (normalize-create-input :location input))
 
-     :now (:now input)}))
+(defn- create-input-errors [entity {:keys [id organization-id parent-scope name now]}]
+  (let [label (:label (spec entity))]
+    (cond-> {}
+      (not (uuid? id))
+      (assoc :id (str "A " label " UUID is required."))
 
-(defn organization-create-input-errors [{:keys [id name now]}] (cond-> {} (not (uuid? id)) (assoc
-     :id
-     "An organization UUID is required.")
+      (and (not= entity :organization) (not (uuid? organization-id)))
+      (assoc :organization-id "An organization UUID is required.")
 
-    (not (name? name)) (assoc :name
-     "A non-blank organization name of at most 160 characters is required.")
+      (and (not= entity :organization) (uuid? id) (uuid? organization-id)
+           (= id organization-id))
+      (assoc :id (str "The " label " UUID must differ from the organization UUID."))
 
-    (not (model.common/timestamp-value? now)) (assoc :now
-     "A valid organization creation time is required.")))
+      (and (not= entity :organization)
+           (not (parent-consistent-with-organization? organization-id parent-scope)))
+      (assoc :parent-scope "The parent must be this organization or an organization group.")
 
-(defn normalize-organization-group-create-input [input] (let [input (or input {})] {:id (:id input)
+      (and (not= entity :organization) (uuid? id) (scope-reference? parent-scope)
+           (= id (:scope/id parent-scope)))
+      (assoc :parent-scope
+             (if (= entity :organization-group)
+               "An organization group cannot be its own parent."
+               "A location cannot use its own UUID as its parent."))
 
-     :organization-id (:organization-id input)
+      (not (name? name))
+      (assoc :name (str "A non-blank " label " name of at most 160 characters is required."))
 
-     :parent-scope (:parent-scope input)
+      (not (model.common/timestamp-value? now))
+      (assoc :now (str "A valid " label " creation time is required.")))))
 
-     :name (normalize-name (:name input))
+(defn organization-create-input-errors [input]
+  (create-input-errors :organization input))
+(defn organization-group-create-input-errors [input]
+  (create-input-errors :organization-group input))
+(defn location-create-input-errors [input]
+  (create-input-errors :location input))
 
-     :now (:now input)}))
+(defn- context [entity document]
+  (cond-> {(k entity :id) (:xt/id document)
+           (k entity :status) (entity-status entity document)}
+    (contains? document (k entity :name))
+    (assoc (k entity :name) (entity-name entity document))
 
-(defn organization-group-create-input-errors [{:keys [id organization-id parent-scope name now]}]
-  (cond-> {} (not (uuid? id)) (assoc :id
-     "An organization-group UUID is required.")
+    (not= entity :organization)
+    (assoc (k entity :organization) (get document (:organization-key (spec entity)))
+           (k entity :parent)
+           {:scope/type (get document (k entity :parent-type))
+            :scope/id (get document (k entity :parent-id))})))
 
-    (not (uuid? organization-id)) (assoc :organization-id
-     "An organization UUID is required.")
+(defn- fail! [error-type message errors context]
+  (model.common/throw-invalid! error-type message errors context))
 
-    (and (uuid? id) (uuid? organization-id) (= id organization-id)) (assoc :id
-     "The group UUID must differ from the organization UUID.")
+(defn- ensure! [test error-type message errors context]
+  (when-not test (fail! error-type message errors context)))
 
-    (not (parent-consistent-with-organization? organization-id parent-scope)) (assoc :parent-scope
-     "The parent must be this organization or an organization group.")
+(defn- ensure-document! [entity document]
+  (ensure! (document-consistent? entity document)
+           (keyword (clojure.core/name entity) "invalid-document")
+           (str "The " (:label (spec entity)) " operation is invalid.")
+           {(:document-key (spec entity))
+            (str "The " (:label (spec entity)) " document is internally inconsistent.")}
+           (context entity document))
+  document)
 
-    (and (uuid? id) (scope-reference? parent-scope) (= id (:scope/id parent-scope))) (assoc
-     :parent-scope
-     "An organization group cannot be its own parent.")
+(defn- new-entity [entity input]
+  (let [{:keys [id organization-id parent-scope name now] :as normalized}
+        (normalize-create-input entity input)
+        errors (create-input-errors entity normalized)]
+    (when (seq errors)
+      (fail! (keyword (clojure.core/name entity) "invalid-create-input")
+             (str "A valid " (:label (spec entity)) " could not be created.")
+             errors
+             (cond-> {(k entity :id) id}
+               (not= entity :organization)
+               (assoc (k entity :organization) organization-id
+                      (k entity :parent) parent-scope))))
+    (ensure-document!
+     entity
+     (cond-> {:xt/id id
+              (k entity :name) name
+              (k entity :status) :active
+              (:revision-key (version entity)) 0
+              (:created-at-key (version entity)) now
+              (:updated-at-key (version entity)) now}
+       (not= entity :organization)
+       (assoc (:organization-key (spec entity)) organization-id
+              (k entity :parent-type) (:scope/type parent-scope)
+              (k entity :parent-id) (:scope/id parent-scope))))))
 
-    (not (name? name)) (assoc :name
-     "A non-blank group name of at most 160 characters is required.")
-
-    (not (model.common/timestamp-value? now)) (assoc :now
-     "A valid group creation time is required.")))
-
-(defn normalize-location-create-input [input] (let [input (or input {})] {:id (:id input)
-
-     :organization-id (:organization-id input)
-
-     :parent-scope (:parent-scope input)
-
-     :name (normalize-name (:name input))
-
-     :now (:now input)}))
-
-(defn location-create-input-errors [{:keys [id organization-id parent-scope name now]}] (cond-> {}
-    (not (uuid? id)) (assoc :id
-     "A location UUID is required.")
-
-    (not (uuid? organization-id)) (assoc :organization-id
-     "An organization UUID is required.")
-
-    (and (uuid? id) (uuid? organization-id) (= id organization-id)) (assoc :id
-     "The location UUID must differ from the organization UUID.")
-
-    (not (parent-consistent-with-organization? organization-id parent-scope)) (assoc :parent-scope
-     "The parent must be this organization or an organization group.")
-
-    (and (uuid? id) (scope-reference? parent-scope) (= id (:scope/id parent-scope))) (assoc
-     :parent-scope
-     "A location cannot use its own UUID as its parent.")
-
-    (not (name? name)) (assoc :name
-     "A non-blank location name of at most 160 characters is required.")
-
-    (not (model.common/timestamp-value? now)) (assoc :now
-     "A valid location creation time is required.")))
-
-;; =============================================================================
-;; Failure and update helpers
-;; =============================================================================
-
-(defn- organization-context [organization] {:organization/id (:xt/id organization)
-
-   :organization/name (:organization/name organization)
-
-   :organization/status (:organization/status organization)})
-
-(defn- organization-group-context [group] {:organization-group/id (:xt/id group)
-
-   :organization-group/organization (:organization-group/organization group)
-
-   :organization-group/parent (organization-group-parent-scope group)
-
-   :organization-group/status (:organization-group/status group)})
-
-(defn- location-context [location] {:location/id (:xt/id location)
-
-   :location/organization (:location/organization location)
-
-   :location/parent (location-parent-scope location)
-
-   :location/status (:location/status location)})
-
-(defn- fail! [error-type message errors context] (model.common/throw-invalid! error-type message
-   errors context))
-
-(defn- ensure! [test error-type message errors context] (when-not test (fail! error-type message
-     errors context)))
-
-(defn- ensure-audit-input! [input error-type context] (let [{:keys [actor-id reason]} input]
-    (ensure! (optional-uuid? actor-id) error-type
-     "The Organization operation is invalid."
-     {:actor-id
-      "The actor must be a UUID when supplied."}
-     context)
-
-    (ensure! (optional-reason? reason) error-type
-     "The Organization operation is invalid."
-     {:reason
-      "The reason must be a qualified keyword when supplied."}
-     context)))
-
-(defn- ensure-organization-document! [organization] (ensure!
-   (organization-document-consistent? organization) :organization/invalid-document
-   "The organization operation is invalid."
-   {:organization
-    "The organization document is internally inconsistent."}
-   (organization-context organization))
-
-  organization)
-
-(defn- ensure-organization-group-document! [group] (ensure!
-   (organization-group-document-consistent? group) :organization-group/invalid-document
-   "The organization-group operation is invalid."
-   {:organization-group
-    "The organization-group document is internally inconsistent."}
-   (organization-group-context group))
-
-  group)
-
-(defn- ensure-location-document! [location] (ensure! (location-document-consistent? location)
-   :location/invalid-document
-   "The location operation is invalid."
-   {:location
-    "The location document is internally inconsistent."}
-   (location-context location))
-
-  location)
-
-(defn- update-organization [organization now f] (ensure-organization-document! organization)
-
-  (ensure! (model.common/valid-change-time? organization organization-version now)
-   :organization/invalid-time
-   "The organization operation is invalid."
-   {:now
-    "The change time must not precede the last update."}
-   (organization-context organization))
-
-  (let [changed (f organization)] (ensure! (not= organization changed) :organization/unchanged
-     "The organization operation is invalid."
-     {:organization
-      "The operation would not change the organization."}
-     (organization-context organization))
-
-    (-> changed (model.common/bump-revision organization-version now)
-        ensure-organization-document!)))
-
-(defn- update-organization-group [group now f] (ensure-organization-group-document! group)
-
-  (ensure! (model.common/valid-change-time? group organization-group-version now)
-   :organization-group/invalid-time
-   "The organization-group operation is invalid."
-   {:now
-    "The change time must not precede the last update."}
-   (organization-group-context group))
-
-  (let [changed (f group)] (ensure! (not= group changed) :organization-group/unchanged
-     "The organization-group operation is invalid."
-     {:organization-group
-      "The operation would not change the organization group."}
-     (organization-group-context group))
-
-    (-> changed (model.common/bump-revision organization-group-version now)
-        ensure-organization-group-document!)))
-
-(defn- update-location [location now f] (ensure-location-document! location)
-
-  (ensure! (model.common/valid-change-time? location location-version now) :location/invalid-time
-   "The location operation is invalid."
-   {:now
-    "The change time must not precede the last update."}
-   (location-context location))
-
-  (let [changed (f location)] (ensure! (not= location changed) :location/unchanged
-     "The location operation is invalid."
-     {:location
-      "The operation would not change the location."}
-     (location-context location))
-
-    (-> changed (model.common/bump-revision location-version now) ensure-location-document!)))
+(defn new-organization [input] (new-entity :organization input))
+(defn new-organization-group [input] (new-entity :organization-group input))
+(defn new-location [input] (new-entity :location input))
 
 ;; =============================================================================
-;; Construction
+;; Shared update mechanics
 ;; =============================================================================
 
-(defn new-organization [input] (let [{:keys [id name now] :as normalized}
-        (normalize-organization-create-input input)
-
-        errors (organization-create-input-errors normalized)] (when (seq errors) (fail!
-       :organization/invalid-create-input
-       "A valid organization could not be created."
-       errors {:organization/id id}))
-
-    (ensure-organization-document! {:xt/id id :organization/name name :organization/status :active
-      :organization/revision 0 :organization/created-at now :organization/updated-at now})))
-
-(defn new-organization-group [input] (let [{:keys [id organization-id parent-scope name now]
-         :as normalized} (normalize-organization-group-create-input input)
-
-        errors (organization-group-create-input-errors normalized)] (when (seq errors) (fail!
-       :organization-group/invalid-create-input
-       "A valid organization group could not be created."
-       errors {:organization-group/id id :organization-group/organization organization-id
-        :organization-group/parent parent-scope}))
-
-    (ensure-organization-group-document! {:xt/id id :organization-group/organization organization-id
-      :organization-group/parent-type (:scope/type parent-scope)
-      :organization-group/parent-id (:scope/id parent-scope) :organization-group/name name
-      :organization-group/status :active :organization-group/revision 0
-      :organization-group/created-at now :organization-group/updated-at now})))
-
-(defn new-location [input] (let [{:keys [id organization-id parent-scope name now] :as normalized}
-        (normalize-location-create-input input)
-
-        errors (location-create-input-errors normalized)] (when (seq errors) (fail!
-       :location/invalid-create-input
-       "A valid location could not be created."
-       errors {:location/id id :location/organization organization-id
-        :location/parent parent-scope}))
-
-    (ensure-location-document! {:xt/id id :location/organization organization-id
-      :location/parent-type (:scope/type parent-scope) :location/parent-id (:scope/id parent-scope)
-      :location/name name :location/status :active :location/revision 0 :location/created-at now
-      :location/updated-at now})))
-
-;; =============================================================================
-;; Rename transitions
-;; =============================================================================
-
-(defn rename-organization [organization {:keys [name now]}] (ensure-organization-document!
-   organization)
-
-  (ensure! (not (organization-closed? organization)) :organization/closed
-   "The organization operation is invalid."
-   {:status
-    "A closed organization cannot be renamed."}
-   (organization-context organization))
-
-  (let [name (normalize-name name)] (ensure! (name? name) :organization/invalid-input
-     "The organization operation is invalid."
-     {:name
-      "A non-blank organization name of at most 160 characters is required."}
-     (organization-context organization))
-
-    (update-organization organization now #(assoc % :organization/name name))))
-
-(defn rename-organization-group [group {:keys [name now]}] (ensure-organization-group-document!
-   group)
-
-  (ensure! (not (organization-group-closed? group)) :organization-group/closed
-   "The organization-group operation is invalid."
-   {:status
-    "A closed organization group cannot be renamed."}
-   (organization-group-context group))
-
-  (let [name (normalize-name name)] (ensure! (name? name) :organization-group/invalid-input
-     "The organization-group operation is invalid."
-     {:name
-      "A non-blank group name of at most 160 characters is required."}
-     (organization-group-context group))
-
-    (update-organization-group group now #(assoc % :organization-group/name name))))
-
-(defn rename-location [location {:keys [name now]}] (ensure-location-document! location)
-
-  (ensure! (not (location-closed? location)) :location/closed
-   "The location operation is invalid."
-   {:status
-    "A closed location cannot be renamed."}
-   (location-context location))
-
-  (let [name (normalize-name name)] (ensure! (name? name) :location/invalid-input
-     "The location operation is invalid."
-     {:name
-      "A non-blank location name of at most 160 characters is required."}
-     (location-context location))
-
-    (update-location location now #(assoc % :location/name name))))
-
-;; =============================================================================
-;; Move transitions
-;; =============================================================================
-
-(defn move-organization-group
-  "Changes the group's direct parent.
-
-   Graph/FX must prove that the new parent exists in the same organization and
-   is not the group itself or one of its descendants."
-  [group {:keys [parent-scope now actor-id reason] :as input}] (ensure-organization-group-document!
-   group)
-
-  (ensure-audit-input! input :organization-group/invalid-input (organization-group-context group))
-
-  (ensure! (not (organization-group-closed? group)) :organization-group/closed
-   "The organization-group operation is invalid."
-   {:status
-    "A closed organization group cannot be moved."}
-   (organization-group-context group))
-
-  (ensure! (parent-consistent-with-organization? (organization-group-organization-id group)
-    parent-scope) :organization-group/invalid-parent
-   "The organization-group operation is invalid."
-   {:parent-scope
-    "The parent must be this organization or an organization group."}
-   (organization-group-context group))
-
-  (ensure! (not= (organization-group-id group) (:scope/id parent-scope)) :organization-group/cycle
-   "The organization-group operation is invalid."
-   {:parent-scope
-    "An organization group cannot be its own parent."}
-   (organization-group-context group))
-
-  (ensure! (not (same-scope? (organization-group-parent-scope group) parent-scope))
-   :organization-group/parent-unchanged
-   "The organization-group operation is invalid."
-   {:parent-scope
-    "The requested parent is already current."}
-   (organization-group-context group))
-
-  (update-organization-group group now #(cond-> (assoc % :organization-group/parent-type
-      (:scope/type parent-scope)
-
-      :organization-group/parent-id (:scope/id parent-scope)
-
-      :organization-group/moved-at now)
-
-     actor-id (assoc :organization-group/moved-by actor-id)
-
-     reason (assoc :organization-group/move-reason reason))))
-
-(defn move-location
-  "Changes the location's direct parent.
-
-   Graph/FX must prove that an organization-group parent exists in the same
-   organization."
-  [location {:keys [parent-scope now actor-id reason] :as input}] (ensure-location-document!
-   location)
-
-  (ensure-audit-input! input :location/invalid-input (location-context location))
-
-  (ensure! (not (location-closed? location)) :location/closed
-   "The location operation is invalid."
-   {:status
-    "A closed location cannot be moved."}
-   (location-context location))
-
-  (ensure! (parent-consistent-with-organization? (location-organization-id location) parent-scope)
-   :location/invalid-parent
-   "The location operation is invalid."
-   {:parent-scope
-    "The parent must be this organization or an organization group."}
-   (location-context location))
-
-  (ensure! (not= (location-id location) (:scope/id parent-scope)) :location/invalid-parent
-   "The location operation is invalid."
-   {:parent-scope
-    "A location cannot use its own UUID as its parent."}
-   (location-context location))
-
-  (ensure! (not (same-scope? (location-parent-scope location) parent-scope))
-   :location/parent-unchanged
-   "The location operation is invalid."
-   {:parent-scope
-    "The requested parent is already current."}
-   (location-context location))
-
-  (update-location location now #(cond-> (assoc % :location/parent-type (:scope/type parent-scope)
-
-      :location/parent-id (:scope/id parent-scope)
-
-      :location/moved-at now)
-
-     actor-id (assoc :location/moved-by actor-id)
-
-     reason (assoc :location/move-reason reason))))
-
-;; =============================================================================
-;; Organization lifecycle transitions
-;; =============================================================================
-
-(defn suspend-organization [organization {:keys [now actor-id reason] :as input}]
-  (ensure-organization-document! organization)
-
-  (ensure-audit-input! input :organization/invalid-input (organization-context organization))
-
-  (ensure! (organization-active? organization) (cond (organization-closed? organization)
-     :organization/closed
-
-     (organization-suspended? organization) :organization/already-suspended
-
-     :else :organization/not-active)
-   "The organization operation is invalid."
-   {:status
-    "Only an active organization can be suspended."}
-   (organization-context organization))
-
-  (update-organization organization now #(cond-> (assoc % :organization/status :suspended
-
-      :organization/suspended-at now)
-
-     actor-id (assoc :organization/suspended-by actor-id)
-
-     reason (assoc :organization/suspension-reason reason))))
-
-(defn reactivate-organization [organization {:keys [now]}] (ensure-organization-document!
-   organization)
-
-  (ensure! (organization-suspended? organization) (cond (organization-closed? organization)
-     :organization/closed
-
-     (organization-active? organization) :organization/already-active
-
-     :else :organization/not-suspended)
-   "The organization operation is invalid."
-   {:status
-    "Only a suspended organization can be reactivated."}
-   (organization-context organization))
-
-  (update-organization organization now #(-> % (assoc :organization/status :active) (dissoc
-         :organization/suspended-at :organization/suspended-by :organization/suspension-reason))))
-
-(defn close-organization [organization {:keys [now actor-id reason] :as input}]
-  (ensure-organization-document! organization)
-
-  (ensure-audit-input! input :organization/invalid-input (organization-context organization))
-
-  (ensure! (organization-can-transition? organization :close) :organization/closed
-   "The organization operation is invalid."
-   {:status
-    "The organization is already closed."}
-   (organization-context organization))
-
-  (update-organization organization now #(cond-> (-> % (assoc :organization/status :closed
-
-          :organization/closed-at now) (dissoc :organization/suspended-at :organization/suspended-by
-          :organization/suspension-reason))
-
-     actor-id (assoc :organization/closed-by actor-id)
-
-     reason (assoc :organization/closure-reason reason))))
-
-;; =============================================================================
-;; Organization-group lifecycle transitions
-;; =============================================================================
-
-(defn suspend-organization-group [group {:keys [now actor-id reason] :as input}]
-  (ensure-organization-group-document! group)
-
-  (ensure-audit-input! input :organization-group/invalid-input (organization-group-context group))
-
-  (ensure! (organization-group-active? group) (cond (organization-group-closed? group)
-     :organization-group/closed
-
-     (organization-group-suspended? group) :organization-group/already-suspended
-
-     :else :organization-group/not-active)
-   "The organization-group operation is invalid."
-   {:status
-    "Only an active organization group can be suspended."}
-   (organization-group-context group))
-
-  (update-organization-group group now #(cond-> (assoc % :organization-group/status :suspended
-
-      :organization-group/suspended-at now)
-
-     actor-id (assoc :organization-group/suspended-by actor-id)
-
-     reason (assoc :organization-group/suspension-reason reason))))
-
-(defn reactivate-organization-group [group {:keys [now]}] (ensure-organization-group-document!
-   group)
-
-  (ensure! (organization-group-suspended? group) (cond (organization-group-closed? group)
-     :organization-group/closed
-
-     (organization-group-active? group) :organization-group/already-active
-
-     :else :organization-group/not-suspended)
-   "The organization-group operation is invalid."
-   {:status
-    "Only a suspended organization group can be reactivated."}
-   (organization-group-context group))
-
-  (update-organization-group group now #(-> % (assoc :organization-group/status :active) (dissoc
-         :organization-group/suspended-at :organization-group/suspended-by
-         :organization-group/suspension-reason))))
-
-(defn close-organization-group [group {:keys [now actor-id reason] :as input}]
-  (ensure-organization-group-document! group)
-
-  (ensure-audit-input! input :organization-group/invalid-input (organization-group-context group))
-
-  (ensure! (organization-group-can-transition? group :close) :organization-group/closed
-   "The organization-group operation is invalid."
-   {:status
-    "The organization group is already closed."}
-   (organization-group-context group))
-
-  (update-organization-group group now #(cond-> (-> % (assoc :organization-group/status :closed
-
-          :organization-group/closed-at now) (dissoc :organization-group/suspended-at
-          :organization-group/suspended-by :organization-group/suspension-reason))
-
-     actor-id (assoc :organization-group/closed-by actor-id)
-
-     reason (assoc :organization-group/closure-reason reason))))
-
-;; =============================================================================
-;; Location lifecycle transitions
-;; =============================================================================
-
-(defn suspend-location [location {:keys [now actor-id reason] :as input}] (ensure-location-document!
-   location)
-
-  (ensure-audit-input! input :location/invalid-input (location-context location))
-
-  (ensure! (location-active? location) (cond (location-closed? location) :location/closed
-
-     (location-suspended? location) :location/already-suspended
-
-     :else :location/not-active)
-   "The location operation is invalid."
-   {:status
-    "Only an active location can be suspended."}
-   (location-context location))
-
-  (update-location location now #(cond-> (assoc % :location/status :suspended
-
-      :location/suspended-at now)
-
-     actor-id (assoc :location/suspended-by actor-id)
-
-     reason (assoc :location/suspension-reason reason))))
-
-(defn reactivate-location [location {:keys [now]}] (ensure-location-document! location)
-
-  (ensure! (location-suspended? location) (cond (location-closed? location) :location/closed
-
-     (location-active? location) :location/already-active
-
-     :else :location/not-suspended)
-   "The location operation is invalid."
-   {:status
-    "Only a suspended location can be reactivated."}
-   (location-context location))
-
-  (update-location location now #(-> % (assoc :location/status :active) (dissoc
-         :location/suspended-at :location/suspended-by :location/suspension-reason))))
-
-(defn close-location [location {:keys [now actor-id reason] :as input}] (ensure-location-document!
-   location)
-
-  (ensure-audit-input! input :location/invalid-input (location-context location))
-
-  (ensure! (location-can-transition? location :close) :location/closed
-   "The location operation is invalid."
-   {:status
-    "The location is already closed."}
-   (location-context location))
-
-  (update-location location now #(cond-> (-> % (assoc :location/status :closed
-
-          :location/closed-at now) (dissoc :location/suspended-at :location/suspended-by
-          :location/suspension-reason))
-
-     actor-id (assoc :location/closed-by actor-id)
-
-     reason (assoc :location/closure-reason reason))))
+(defn- ensure-audit-input! [entity document input]
+  (let [{:keys [actor-id reason]} input
+        ctx (context entity document)]
+    (ensure! (optional-uuid? actor-id)
+             (keyword (clojure.core/name entity) "invalid-input")
+             (str "The " (:label (spec entity)) " operation is invalid.")
+             {:actor-id "The actor must be a UUID when supplied."}
+             ctx)
+    (ensure! (optional-reason? reason)
+             (keyword (clojure.core/name entity) "invalid-input")
+             (str "The " (:label (spec entity)) " operation is invalid.")
+             {:reason "The reason must be a qualified keyword when supplied."}
+             ctx)))
+
+(defn- update-entity [entity document now f]
+  (ensure-document! entity document)
+  (ensure! (model.common/valid-change-time? document (version entity) now)
+           (keyword (clojure.core/name entity) "invalid-time")
+           (str "The " (:label (spec entity)) " operation is invalid.")
+           {:now "The change time must not precede the last update."}
+           (context entity document))
+  (let [changed (f document)]
+    (ensure! (not= document changed)
+             (keyword (clojure.core/name entity) "unchanged")
+             (str "The " (:label (spec entity)) " operation is invalid.")
+             {(:document-key (spec entity))
+              (str "The operation would not change the " (:label (spec entity)) ".")}
+             (context entity document))
+    (ensure-document! entity (command/bump-version changed (version entity) now))))
+
+(defn- rename-entity [entity document {:keys [name now]}]
+  (ensure-document! entity document)
+  (ensure! (not (entity-closed? entity document))
+           (keyword (clojure.core/name entity) "closed")
+           (str "The " (:label (spec entity)) " operation is invalid.")
+           {:status (str "A closed " (:label (spec entity)) " cannot be renamed.")}
+           (context entity document))
+  (let [normalized-name (normalize-name name)]
+    (ensure! (name? normalized-name)
+             (keyword (clojure.core/name entity) "invalid-input")
+             (str "The " (:label (spec entity)) " operation is invalid.")
+             {:name (str "A non-blank " (:label (spec entity))
+                         " name of at most 160 characters is required.")}
+             (context entity document))
+    (update-entity entity document now
+                   #(assoc % (k entity :name) normalized-name))))
+
+(defn rename-organization [document input] (rename-entity :organization document input))
+(defn rename-organization-group [document input] (rename-entity :organization-group document input))
+(defn rename-location [document input] (rename-entity :location document input))
+
+(defn- audit-assoc [document entity audit now actor-id reason]
+  (let [at-key (k entity (keyword (str (clojure.core/name audit) "-at")))
+        by-key (k entity (keyword (str (clojure.core/name audit) "-by")))
+        reason-key (k entity (case audit
+                               :suspended :suspension-reason
+                               :closed :closure-reason
+                               :moved :move-reason))]
+    (cond-> (assoc document at-key now)
+      actor-id (assoc by-key actor-id)
+      reason (assoc reason-key reason))))
+
+(defn- clear-audit [document entity audit]
+  (apply dissoc document
+         [(k entity (keyword (str (clojure.core/name audit) "-at")))
+          (k entity (keyword (str (clojure.core/name audit) "-by")))
+          (k entity (case audit
+                      :suspended :suspension-reason
+                      :closed :closure-reason
+                      :moved :move-reason))]))
+
+(defn- move-entity [entity document {:keys [parent-scope now actor-id reason] :as input}]
+  (ensure-document! entity document)
+  (ensure-audit-input! entity document input)
+  (ensure! (not (entity-closed? entity document))
+           (keyword (clojure.core/name entity) "closed")
+           (str "The " (:label (spec entity)) " operation is invalid.")
+           {:status (str "A closed " (:label (spec entity)) " cannot be moved.")}
+           (context entity document))
+  (let [organization-id (get document (:organization-key (spec entity)))
+        current-parent {:scope/type (get document (k entity :parent-type))
+                        :scope/id (get document (k entity :parent-id))}]
+    (ensure! (parent-consistent-with-organization? organization-id parent-scope)
+             (keyword (clojure.core/name entity) "invalid-parent")
+             (str "The " (:label (spec entity)) " operation is invalid.")
+             {:parent-scope "The parent must be this organization or an organization group."}
+             (context entity document))
+    (ensure! (not= (:xt/id document) (:scope/id parent-scope))
+             (if (= entity :organization-group)
+               :organization-group/cycle
+               :location/invalid-parent)
+             (str "The " (:label (spec entity)) " operation is invalid.")
+             {:parent-scope (if (= entity :organization-group)
+                              "An organization group cannot be its own parent."
+                              "A location cannot use its own UUID as its parent.")}
+             (context entity document))
+    (ensure! (not (same-scope? current-parent parent-scope))
+             (keyword (clojure.core/name entity) "parent-unchanged")
+             (str "The " (:label (spec entity)) " operation is invalid.")
+             {:parent-scope "The requested parent is already current."}
+             (context entity document))
+    (update-entity
+     entity document now
+     #(-> %
+          (assoc (k entity :parent-type) (:scope/type parent-scope)
+                 (k entity :parent-id) (:scope/id parent-scope))
+          (audit-assoc entity :moved now actor-id reason)))))
+
+(defn move-organization-group [document input]
+  (move-entity :organization-group document input))
+(defn move-location [document input]
+  (move-entity :location document input))
+
+(defn- suspend-entity [entity document {:keys [now actor-id reason] :as input}]
+  (ensure-document! entity document)
+  (ensure-audit-input! entity document input)
+  (ensure! (entity-active? entity document)
+           (cond
+             (entity-closed? entity document) (keyword (clojure.core/name entity) "closed")
+             (entity-suspended? entity document) (keyword (clojure.core/name entity) "already-suspended")
+             :else (keyword (clojure.core/name entity) "not-active"))
+           (str "The " (:label (spec entity)) " operation is invalid.")
+           {:status (str "Only an active " (:label (spec entity)) " can be suspended.")}
+           (context entity document))
+  (update-entity entity document now
+                 #(-> %
+                      (assoc (k entity :status) :suspended)
+                      (audit-assoc entity :suspended now actor-id reason))))
+
+(defn- reactivate-entity [entity document {:keys [now]}]
+  (ensure-document! entity document)
+  (ensure! (entity-suspended? entity document)
+           (cond
+             (entity-closed? entity document) (keyword (clojure.core/name entity) "closed")
+             (entity-active? entity document) (keyword (clojure.core/name entity) "already-active")
+             :else (keyword (clojure.core/name entity) "not-suspended"))
+           (str "The " (:label (spec entity)) " operation is invalid.")
+           {:status (str "Only a suspended " (:label (spec entity)) " can be reactivated.")}
+           (context entity document))
+  (update-entity entity document now
+                 #(-> %
+                      (assoc (k entity :status) :active)
+                      (clear-audit entity :suspended))))
+
+(defn- close-entity [entity document {:keys [now actor-id reason] :as input}]
+  (ensure-document! entity document)
+  (ensure-audit-input! entity document input)
+  (ensure! (entity-can-transition? entity document :close)
+           (keyword (clojure.core/name entity) "closed")
+           (str "The " (:label (spec entity)) " operation is invalid.")
+           {:status (str "The " (:label (spec entity)) " is already closed.")}
+           (context entity document))
+  (update-entity entity document now
+                 #(-> %
+                      (assoc (k entity :status) :closed)
+                      (clear-audit entity :suspended)
+                      (audit-assoc entity :closed now actor-id reason))))
+
+(defn suspend-organization [document input] (suspend-entity :organization document input))
+(defn reactivate-organization [document input] (reactivate-entity :organization document input))
+(defn close-organization [document input] (close-entity :organization document input))
+(defn suspend-organization-group [document input] (suspend-entity :organization-group document input))
+(defn reactivate-organization-group [document input] (reactivate-entity :organization-group document input))
+(defn close-organization-group [document input] (close-entity :organization-group document input))
+(defn suspend-location [document input] (suspend-entity :location document input))
+(defn reactivate-location [document input] (reactivate-entity :location document input))
+(defn close-location [document input] (close-entity :location document input))
 
 ;; =============================================================================
 ;; Hierarchy composition
 ;; =============================================================================
 
-(defn organization-groups-for-organization [groups expected-organization-id] (filterv #(and
-     (organization-group-document-consistent? %) (organization-group-for-organization? %
-      expected-organization-id)) groups))
+(defn organization-groups-for-organization [groups organization-id]
+  (filterv #(and (organization-group-document-consistent? %)
+                 (organization-group-for-organization? % organization-id))
+           groups))
 
-(defn locations-for-organization [locations expected-organization-id] (filterv #(and
-     (location-document-consistent? %) (location-for-organization? % expected-organization-id))
-   locations))
+(defn locations-for-organization [locations organization-id]
+  (filterv #(and (location-document-consistent? %)
+                 (location-for-organization? % organization-id))
+           locations))
 
-(defn- distinct-document-ids? [documents] (let [ids (mapv :xt/id documents)] (= (count ids)
-       (count (set ids)))))
+(defn- distinct-document-ids? [documents]
+  (let [ids (mapv :xt/id documents)] (= (count ids) (count (set ids)))))
 
-(defn- group-chain-consistent? [organization-id initial-parent groups] (loop [expected-parent
-         initial-parent
-
-         remaining (vec groups)] (if-let [group (first remaining)] (and
-       (organization-group-document-consistent? group)
-
-       (organization-group-for-organization? group organization-id)
-
-       (same-scope? expected-parent (organization-group-scope-of group))
-
-       (recur (organization-group-parent-scope group) (subvec remaining 1)))
-
+(defn- group-chain-consistent? [organization-id initial-parent groups]
+  (loop [expected-parent initial-parent
+         remaining (seq groups)]
+    (if-let [group (first remaining)]
+      (and (organization-group-document-consistent? group)
+           (organization-group-for-organization? group organization-id)
+           (same-scope? expected-parent (organization-group-scope-of group))
+           (recur (organization-group-parent-scope group) (next remaining)))
       (same-scope? expected-parent (organization-scope organization-id)))))
 
-(defn organization-group-ancestry-consistent?
-  "Validates one group and its already-loaded ancestor groups.
+(defn organization-group-ancestry-consistent? [organization group ancestors]
+  (let [ancestors (vec ancestors)
+        organization-id (organization-id organization)]
+    (and (organization-document-consistent? organization)
+         (organization-group-document-consistent? group)
+         (organization-group-for-organization? group organization-id)
+         (distinct-document-ids? (into [group] ancestors))
+         (group-chain-consistent? organization-id
+                                  (organization-group-parent-scope group)
+                                  ancestors))))
 
-   ancestors must be ordered from the immediate parent toward the root and must
-   exclude the target group itself."
-  [organization group ancestors] (let [ancestors (vec ancestors)
+(defn location-ancestry-consistent? [organization location groups]
+  (let [groups (vec groups)
+        organization-id (organization-id organization)]
+    (and (organization-document-consistent? organization)
+         (location-document-consistent? location)
+         (location-for-organization? location organization-id)
+         (distinct-document-ids? (into [location] groups))
+         (group-chain-consistent? organization-id (location-parent-scope location) groups))))
 
-        organization-id (organization-id organization)] (and (organization-document-consistent?
-      organization)
+(defn organization-group-operational? [organization group ancestors]
+  (and (organization-group-ancestry-consistent? organization group ancestors)
+       (organization-active? organization)
+       (organization-group-active? group)
+       (every? organization-group-active? ancestors)))
 
-     (organization-group-document-consistent? group)
+(defn location-operational? [organization location groups]
+  (and (location-ancestry-consistent? organization location groups)
+       (organization-active? organization)
+       (location-active? location)
+       (every? organization-group-active? groups)))
 
-     (organization-group-for-organization? group organization-id)
-
-     (distinct-document-ids? (into [group] ancestors))
-
-     (group-chain-consistent? organization-id (organization-group-parent-scope group) ancestors))))
-
-(defn location-ancestry-consistent?
-  "Validates one location and its already-loaded ancestor groups.
-
-   groups must be ordered from the location's immediate group parent toward the
-   organization root. Pass an empty collection when the location is directly
-   beneath the organization."
-  [organization location groups] (let [groups (vec groups)
-
-        organization-id (organization-id organization)] (and (organization-document-consistent?
-      organization)
-
-     (location-document-consistent? location)
-
-     (location-for-organization? location organization-id)
-
-     (distinct-document-ids?
-      (into
-       [location]
-       groups))
-
-     (group-chain-consistent? organization-id (location-parent-scope location) groups))))
-
-(defn organization-group-operational?
-  "Returns true when the organization, target group, and every ancestor group
-   are individually active."
-  [organization group ancestors] (and (organization-group-ancestry-consistent? organization group
-    ancestors)
-
-   (organization-active? organization)
-
-   (organization-group-active? group)
-
-   (every? organization-group-active? ancestors)))
-
-(defn location-operational?
-  "Returns true when the organization, location, and every ancestor group are
-   individually active."
-  [organization location groups] (and (location-ancestry-consistent? organization location groups)
-
-   (organization-active? organization)
-
-   (location-active? location)
-
-   (every? organization-group-active? groups)))
-
-(defn scope-context?
-  "Returns true when value satisfies the shared structural authorization-scope
-   context contract.
-
-   Organization remains responsible for constructing the authoritative
-   hierarchy chain and operational value."
-  [value]
-  (authorization-scope/scope-context?
-   value))
-
-(defn organization-scope-context [organization] (ensure-organization-document! organization)
-
+(defn organization-scope-context [organization]
+  (ensure-document! :organization organization)
   {:organization/id (organization-id organization)
-
    :scope/target (organization-scope-of organization)
-
    :scope/applicable [(organization-scope-of organization)]
-
    :scope/operational? (organization-active? organization)})
 
-(defn organization-group-scope-context [organization group ancestors] (when-not
-   (organization-group-ancestry-consistent? organization group ancestors) (fail!
-     :organization-group/invalid-ancestry
-     "A scope context cannot be formed from an inconsistent group ancestry."
-     {:ancestry
-      "The target group and ancestors must form one same-organization chain."}
-     (organization-group-context group)))
-
-  (let [applicable (into [(organization-group-scope-of group)] (concat (map
-           organization-group-scope-of ancestors) [(organization-scope-of organization)]))]
+(defn- hierarchy-scope-context [entity organization target ancestors]
+  (let [consistent? (case entity
+                      :organization-group organization-group-ancestry-consistent?
+                      :location location-ancestry-consistent?)
+        target-scope (case entity
+                       :organization-group organization-group-scope-of
+                       :location location-scope-of)
+        operational? (case entity
+                       :organization-group organization-group-operational?
+                       :location location-operational?)]
+    (when-not (consistent? organization target ancestors)
+      (fail! (keyword (clojure.core/name entity) "invalid-ancestry")
+             (str "A scope context cannot be formed from an inconsistent "
+                  (:label (spec entity)) " ancestry.")
+             {:ancestry "The target and ancestors must form one same-organization chain."}
+             (context entity target)))
     {:organization/id (organization-id organization)
+     :scope/target (target-scope target)
+     :scope/applicable (into [(target-scope target)]
+                             (concat (map organization-group-scope-of ancestors)
+                                     [(organization-scope-of organization)]))
+     :scope/operational? (operational? organization target ancestors)}))
 
-     :scope/target (organization-group-scope-of group)
+(defn organization-group-scope-context [organization group ancestors]
+  (hierarchy-scope-context :organization-group organization group ancestors))
 
-     :scope/applicable applicable
+(defn location-scope-context [organization location groups]
+  (hierarchy-scope-context :location organization location groups))
 
-     :scope/operational? (organization-group-operational? organization group ancestors)}))
+(defn- authorization-documents [entity organization target ancestors]
+  (let [consistent? (case entity
+                      :organization-group organization-group-ancestry-consistent?
+                      :location location-ancestry-consistent?)]
+    (when-not (consistent? organization target ancestors)
+      (fail! (keyword (clojure.core/name entity) "invalid-ancestry")
+             (str "Authorization documents require a consistent "
+                  (:label (spec entity)) " ancestry.")
+             {:ancestry "The target and ancestors must form one same-organization chain."}
+             (context entity target)))
+    (into [target] (concat ancestors [organization]))))
 
-(defn location-scope-context [organization location groups] (when-not (location-ancestry-consistent?
-    organization location groups) (fail! :location/invalid-ancestry
-     "A scope context cannot be formed from an inconsistent location ancestry."
-     {:ancestry
-      "The location and groups must form one same-organization chain."}
-     (location-context location)))
-
-  (let [applicable (into [(location-scope-of location)] (concat (map organization-group-scope-of
-           groups) [(organization-scope-of organization)]))] {:organization/id
-     (organization-id organization)
-
-     :scope/target (location-scope-of location)
-
-     :scope/applicable applicable
-
-     :scope/operational? (location-operational? organization location groups)}))
-
-(defn organization-group-authorization-documents
-  "Returns documents whose versions establish the current group scope context."
-  [organization group ancestors] (when-not (organization-group-ancestry-consistent? organization
-    group ancestors) (fail! :organization-group/invalid-ancestry
-     "Authorization documents require a consistent group ancestry."
-     {:ancestry
-      "The target group and ancestors must form one same-organization chain."}
-     (organization-group-context group)))
-
-  (into [group] (concat ancestors [organization])))
-
-(defn location-authorization-documents
-  "Returns documents whose versions establish the current location scope
-   context. The order matches the target-first applicable scope order."
-  [organization location groups] (when-not (location-ancestry-consistent? organization location
-    groups) (fail! :location/invalid-ancestry
-     "Authorization documents require a consistent location ancestry."
-     {:ancestry
-      "The location and groups must form one same-organization chain."}
-     (location-context location)))
-
-  (into [location] (concat groups [organization])))
+(defn organization-group-authorization-documents [organization group ancestors]
+  (authorization-documents :organization-group organization group ancestors))
+(defn location-authorization-documents [organization location groups]
+  (authorization-documents :location organization location groups))
 
 ;; =============================================================================
-;; Model commands
+;; Canonical model commands
 ;; =============================================================================
 
-(defn create-organization-command [input] (model.common/create-command organization-entity-type
-   (new-organization input) organization-version))
+(defn- create-command* [entity input]
+  (command/create (:entity-type (spec entity)) (new-entity entity input) (version entity)))
 
-(defn create-organization-group-command [input] (model.common/create-command
-   organization-group-entity-type (new-organization-group input) organization-group-version))
+(defn- update-command* [entity operation document transition input]
+  (command/update-command (:entity-type (spec entity)) operation document
+                          (transition document input) (version entity)))
 
-(defn create-location-command [input] (model.common/create-command location-entity-type
-   (new-location input) location-version))
+(defn create-organization-command [input] (create-command* :organization input))
+(defn create-organization-group-command [input] (create-command* :organization-group input))
+(defn create-location-command [input] (create-command* :location input))
 
-(defn- organization-change-command [operation before after] (model.common/update-command
-   organization-entity-type operation before after organization-version))
+(defn rename-organization-command [document input]
+  (update-command* :organization :rename document rename-organization input))
+(defn suspend-organization-command [document input]
+  (update-command* :organization :suspend document suspend-organization input))
+(defn reactivate-organization-command [document input]
+  (update-command* :organization :reactivate document reactivate-organization input))
+(defn close-organization-command [document input]
+  (update-command* :organization :close document close-organization input))
 
-(defn- organization-group-change-command [operation before after] (model.common/update-command
-   organization-group-entity-type operation before after organization-group-version))
+(defn rename-organization-group-command [document input]
+  (update-command* :organization-group :rename document rename-organization-group input))
+(defn move-organization-group-command [document input]
+  (update-command* :organization-group :move document move-organization-group input))
+(defn suspend-organization-group-command [document input]
+  (update-command* :organization-group :suspend document suspend-organization-group input))
+(defn reactivate-organization-group-command [document input]
+  (update-command* :organization-group :reactivate document reactivate-organization-group input))
+(defn close-organization-group-command [document input]
+  (update-command* :organization-group :close document close-organization-group input))
 
-(defn- location-change-command [operation before after] (model.common/update-command
-   location-entity-type operation before after location-version))
-
-(defn rename-organization-command [organization input] (organization-change-command :rename
-   organization (rename-organization organization input)))
-
-(defn suspend-organization-command [organization input] (organization-change-command :suspend
-   organization (suspend-organization organization input)))
-
-(defn reactivate-organization-command [organization input] (organization-change-command :reactivate
-   organization (reactivate-organization organization input)))
-
-(defn close-organization-command [organization input] (organization-change-command :close
-   organization (close-organization organization input)))
-
-(defn rename-organization-group-command [group input] (organization-group-change-command :rename
-   group (rename-organization-group group input)))
-
-(defn move-organization-group-command [group input] (organization-group-change-command :move group
-   (move-organization-group group input)))
-
-(defn suspend-organization-group-command [group input] (organization-group-change-command :suspend
-   group (suspend-organization-group group input)))
-
-(defn reactivate-organization-group-command [group input] (organization-group-change-command
-   :reactivate group (reactivate-organization-group group input)))
-
-(defn close-organization-group-command [group input] (organization-group-change-command :close group
-   (close-organization-group group input)))
-
-(defn rename-location-command [location input] (location-change-command :rename location
-   (rename-location location input)))
-
-(defn move-location-command [location input] (location-change-command :move location (move-location
-    location input)))
-
-(defn suspend-location-command [location input] (location-change-command :suspend location
-   (suspend-location location input)))
-
-(defn reactivate-location-command [location input] (location-change-command :reactivate location
-   (reactivate-location location input)))
-
-(defn close-location-command [location input] (location-change-command :close location
-   (close-location location input)))
+(defn rename-location-command [document input]
+  (update-command* :location :rename document rename-location input))
+(defn move-location-command [document input]
+  (update-command* :location :move document move-location input))
+(defn suspend-location-command [document input]
+  (update-command* :location :suspend document suspend-location input))
+(defn reactivate-location-command [document input]
+  (update-command* :location :reactivate document reactivate-location input))
+(defn close-location-command [document input]
+  (update-command* :location :close document close-location input))
