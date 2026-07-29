@@ -1,145 +1,74 @@
 (ns net.humanhelp.site.model.user-test
+  "Tests for the rewritten HumanHelp User model.
+
+   The old User aggregate included Membership, roles, access, and Invitation.
+   This suite deliberately tests only the new global User model: domain rules,
+   persisted schema, generated gesso.model plumbing, dependency guards,
+   uniqueness assertions, planners, and the stable user.core boundary."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [gesso.graph :as graph]
+   [gesso.fx :as fx]
+   [gesso.model.command :as command]
+   [gesso.model.core :as model]
+   [gesso.model.tx :as model.tx]
    [malli.core :as m]
-   [net.humanhelp.site.model.common :as model.common]
-   [net.humanhelp.site.model.fx :as model.fx]
    [net.humanhelp.site.model.user.core :as user]
-   [net.humanhelp.site.model.user.domain.access :as access]
-   [net.humanhelp.site.model.user.domain.common :as user.common]
-   [net.humanhelp.site.model.user.domain.identity :as identity]
-   [net.humanhelp.site.model.user.domain.invitation :as invitation]
-   [net.humanhelp.site.model.user.domain.membership :as membership]
-   [net.humanhelp.site.model.user.domain.role :as role]
-   [net.humanhelp.site.model.user.fx :as user.fx]
-   [net.humanhelp.site.model.user.graph :as user.graph]
+   [net.humanhelp.site.model.user.domain :as domain]
    [net.humanhelp.site.model.user.schema :as user.schema])
   (:import
    [java.time Instant]
    [java.util UUID]))
-(defn uuid [value] (UUID/fromString value))
-(def user-id (uuid "00000000-0000-0000-0000-000000000001"))
-(def admin-user-id (uuid "00000000-0000-0000-0000-000000000003"))
-(def organization-id (uuid "10000000-0000-0000-0000-000000000001"))
-(def other-organization-id (uuid "10000000-0000-0000-0000-000000000002"))
-(def group-id (uuid "20000000-0000-0000-0000-000000000001"))
-(def location-id (uuid "30000000-0000-0000-0000-000000000001"))
-(def other-location-id (uuid "30000000-0000-0000-0000-000000000002"))
-(def membership-id (uuid "40000000-0000-0000-0000-000000000001"))
-(def other-membership-id (uuid "40000000-0000-0000-0000-000000000002"))
-(def helper-role-id (uuid "50000000-0000-0000-0000-000000000001"))
-(def admin-role-id (uuid "50000000-0000-0000-0000-000000000002"))
-(def duplicate-helper-role-id (uuid "50000000-0000-0000-0000-000000000003"))
-(def supervisor-role-id (uuid "50000000-0000-0000-0000-000000000004"))
-(def invitation-id (uuid "60000000-0000-0000-0000-000000000001"))
-(def generated-membership-id (uuid "70000000-0000-0000-0000-000000000001"))
-(def generated-role-id (uuid "70000000-0000-0000-0000-000000000002"))
-(def t0 (Instant/parse "2026-07-01T12:00:00Z"))
-(def t1 (Instant/parse "2026-07-01T12:01:00Z"))
-(def t2 (Instant/parse "2026-07-01T12:02:00Z"))
-(def t7 (Instant/parse "2026-07-08T12:00:00Z"))
-(def t8 (Instant/parse "2026-07-09T12:00:00Z"))
-(def far-future (Instant/parse "2099-01-01T00:00:00Z"))
-(def raw-token "test-invitation-token")
-(def canonical-email "person@example.com")
+
+;; =============================================================================
+;; Fixtures
+;; =============================================================================
+
+(def user-id
+  (UUID/fromString "00000000-0000-0000-0000-000000000001"))
+
+(def other-user-id
+  (UUID/fromString "00000000-0000-0000-0000-000000000002"))
+
+(def missing-user-id
+  (UUID/fromString "00000000-0000-0000-0000-000000000099"))
+
+(def generated-user-id
+  (UUID/fromString "70000000-0000-7000-8000-000000000001"))
+
+(def actor-id
+  (UUID/fromString "50000000-0000-0000-0000-000000000001"))
+
 (def canonical-phone "+12065550123")
-(def location-scope (role/location-scope location-id))
-(def group-scope (role/organization-group-scope group-id))
-(def organization-scope (role/organization-scope organization-id))
-(def applicable-scopes [location-scope group-scope organization-scope])
-(def scope-context {:organization/id organization-id
-                    :scope/target location-scope
-                    :scope/applicable applicable-scopes
-                    :scope/operational? true})
-(def location-expected-version
-  {:model/id location-id :model/revision-key :location/revision
-   :model/revision 4 :model/updated-at-key :location/updated-at
-   :model/updated-at t0})
-(def location-authorization-versions
-  [{:model/entity-type :location :model/expected location-expected-version}])
-(defn active-user
+(def replacement-phone "+12065550124")
+(def canonical-email "person@example.com")
+(def replacement-email "replacement@example.com")
+
+(def t-before (Instant/parse "2026-06-30T23:59:00Z"))
+(def t0 (Instant/parse "2026-07-01T00:00:00Z"))
+(def t1 (Instant/parse "2026-07-01T00:01:00Z"))
+(def t2 (Instant/parse "2026-07-01T00:02:00Z"))
+(def t3 (Instant/parse "2026-07-01T00:03:00Z"))
+
+(defn- after [model-command]
+  (command/after model-command))
+
+(defn- user-document
   ([]
-   (active-user {}))
+   (user-document {}))
   ([overrides]
-   (identity/new-user
-    (merge
-     {:id user-id
-      :email canonical-email
-      :email-verified? true
-      :display-name "Person"
-      :now t0}
-     overrides))))
-(defn admin-user []
-  (active-user {:id admin-user-id :email "admin@example.com"
-                :display-name "Admin"}))
-(defn active-membership
-  ([]
-   (active-membership {}))
-  ([overrides]
-   (membership/new-membership
-    (merge
-     {:id membership-id
-      :user-id user-id
-      :organization-id organization-id
-      :now t0}
-     overrides))))
-(defn role-assignment
-  ([]
-   (role-assignment {}))
-  ([overrides]
-   (role/new-role-assignment
-    (merge
-     {:id helper-role-id
-      :membership-id membership-id
-      :organization-id organization-id
-      :role :helper
-      :scope location-scope
-      :actor-id admin-user-id
-      :reason :test/seed
-      :now t0}
-     overrides))))
-(defn admin-assignment
-  []
-  (role-assignment
-   {:id admin-role-id
-    :membership-id other-membership-id
-    :role :admin
-    :scope organization-scope}))
-(defn pending-invitation
-  ([]
-   (pending-invitation {}))
-  ([overrides]
-   (invitation/new-invitation
-    (merge
-     {:id invitation-id
-      :organization-id organization-id
-      :invited-by admin-user-id
-      :email canonical-email
-      :role :helper
-      :scope location-scope
-      :token-hash (user.fx/hash-token raw-token)
-      :now t0
-      :expires-at t7}
-     overrides))))
-(defn suspended-membership
-  []
-  (membership/suspend
-   (active-membership)
-   {:now t1
-    :actor-id admin-user-id
-    :reason :test/suspended}))
-(defn revoked-role
-  ([]
-   (revoked-role (role-assignment)))
-  ([assignment]
-   (role/revoke
-    assignment
-    {:now t1
-     :actor-id admin-user-id
-     :reason :test/revoked})))
-(defn error-type
-  [f]
+   (after
+    (domain/create-user-command
+     (merge {:id user-id :now t0} overrides)))))
+
+(defn- verified-user []
+  (user-document
+   {:phone canonical-phone
+    :email canonical-email
+    :display-name "Person"
+    :phone-verified? true
+    :email-verified? true}))
+
+(defn- error-type [f]
   (try
     (f)
     ::did-not-throw
@@ -148,1477 +77,757 @@
         (when error
           (or (:error/type (ex-data error))
               (recur (ex-cause error))))))))
-(defn command-document [command]
-  (model.common/command-document command))
-(defn topic-set [changes] (set (map :topic changes)))
-(deftest identity-normalization-and-validation-test
-  (testing "contacts and display names normalize canonically"
-    (is (= canonical-email
-           (user.common/normalize-email "  PERSON@EXAMPLE.COM  ")))
+
+(defn- plan-fragment [plan]
+  (:transaction-fragment plan))
+
+(defn- plan-command [plan]
+  (first (:commands (plan-fragment plan))))
+
+(defn- plan-change [plan]
+  (first (:changes (plan-fragment plan))))
+
+(defn- plan-assertions [plan]
+  (:assertions (plan-fragment plan)))
+
+(defn- normalize-plan [plan]
+  (model.tx/normalize-plan
+   (merge (plan-fragment plan)
+          (:transaction-options plan))))
+
+(defn- with-users* [documents f]
+  (let [documents (vec documents)
+        by-id (into {} (map (juxt :xt/id identity)) documents)]
+    (with-redefs
+     [model/load-by-id
+      (fn [descriptor _ctx id]
+        (when (= :user (:entity-type descriptor))
+          (get by-id id)))
+
+      model/load-by-lookup
+      (fn [descriptor _ctx field value]
+        (when (= :user (:entity-type descriptor))
+          (first (filter #(= value (get % field)) documents))))]
+      (f))))
+
+(defmacro with-users [documents & body]
+  `(with-users* ~documents (fn [] ~@body)))
+
+;; =============================================================================
+;; Values and construction
+;; =============================================================================
+
+(deftest value-normalization-test
+  (testing "phone and email normalization"
     (is (= canonical-phone
-           (user.common/normalize-phone "  +12065550123  ")))
+           (user/normalize-phone "  +12065550123  ")))
+    (is (= canonical-email
+           (user/normalize-email "  PERSON@EXAMPLE.COM  ")))
+    (is (nil? (user/normalize-phone "   ")))
+    (is (nil? (user/normalize-email "   ")))
+    (is (user/phone? canonical-phone))
+    (is (user/email? canonical-email))
+    (is (false? (user/phone? "2065550123")))
+    (is (false? (user/email? "not-an-email"))))
+
+  (testing "blank display names remain invalid"
     (is (= "Person Name"
-           (identity/normalize-display-name "  Person Name  ")))
-    (is (= "forklift operator"
-           (user.common/normalize-skill "  Forklift Operator  ")))
-    (is (= #{"forklift operator" "paint mixer"}
-           (user.common/normalize-skills
-            [" Forklift Operator "
-             "paint mixer"
-             "FORKLIFT OPERATOR"])))
-    (is (user.common/email? canonical-email))
-    (is (user.common/phone? canonical-phone))
-    (is (user.common/skill? "forklift operator"))
-    (is (user.common/skills? #{"forklift operator" "paint mixer"}))
-    (is (identity/display-name? "Person")))
-  (testing "invalid values fail validation"
-    (is (false? (user.common/email? "not-an-email")))
-    (is (false? (user.common/phone? "2065550123")))
-    (is (false? (user.common/skill? " Forklift Operator ")))
-    (is (false? (user.common/skill? "")))
-    (is (false? (identity/display-name? "   ")))))
-(deftest identity-create-and-schema-test
+           (user/normalize-display-name "  Person Name  ")))
+    (is (= ""
+           (user/normalize-display-name "   ")))
+    (is (user/display-name? "Person Name"))
+    (is (false? (user/display-name? "   "))))
+
+  (testing "non-string values are not silently erased"
+    (is (= 42 (user/normalize-phone 42)))
+    (is (= 42 (user/normalize-email 42)))
+    (is (= 42 (user/normalize-display-name 42)))
+    (is (false? (user/phone? 42)))
+    (is (false? (user/email? 42)))
+    (is (false? (user/display-name? 42)))))
+
+(deftest zero-contact-user-test
+  (let [document (user-document)]
+    (testing "User identity is independent of contact/authentication method"
+      (is (= user-id (user/user-id document)))
+      (is (user/active? document))
+      (is (false? (user/has-phone? document)))
+      (is (false? (user/has-email? document)))
+      (is (false? (user/has-contact? document)))
+      (is (false? (user/has-verified-contact? document))))
+
+    (testing "initial version is conventional"
+      (is (= 0 (:user/revision document)))
+      (is (= t0 (:user/created-at document)))
+      (is (= t0 (:user/updated-at document))))
+
+    (testing "domain and Malli accept the same persisted document"
+      (is (domain/document-consistent? document))
+      (is (m/validate user.schema/user-document-schema document)))))
+
+(deftest create-contact-test
   (let [document
-        (active-user
-         {:phone canonical-phone
-          :phone-verified? true})]
-    (is (= user-id (:xt/id document)))
-    (is (= :active (:user/status document)))
-    (is (= 0 (:user/revision document)))
-    (is (= t0 (:user/created-at document)))
-    (is (= t0 (:user/updated-at document)))
-    (is (identity/document-consistent? document))
-    (is (identity/phone-verified? document))
-    (is (identity/email-verified? document))
-    (is (identity/has-verified-contact? document))
-    (is (m/validate user.schema/user-document-schema document))
-    (is (false?
-         (m/validate
-          user.schema/user-document-schema
-          (assoc document :unexpected/value true))))))
-  (is (= :user/invalid-create-input
-         (error-type
-          #(identity/new-user
-            {:id user-id
-             :display-name "Missing contact"
-             :now t0}))))
-(deftest identity-contact-lifecycle-test
-  (let [original
-        (active-user
-         {:phone canonical-phone
-          :phone-verified? true})
-        replaced
-        (identity/replace-email
+        (user-document
+         {:phone "  +12065550123  "
+          :email "  PERSON@EXAMPLE.COM  "
+          :display-name "  Person  "
+          :phone-verified? true
+          :email-verified? true})]
+    (is (= canonical-phone (user/user-phone document)))
+    (is (= canonical-email (user/user-email document)))
+    (is (= "Person" (user/user-display-name document)))
+    (is (= t0 (:user/phone-verified-at document)))
+    (is (= t0 (:user/email-verified-at document)))
+    (is (user/phone-verified? document))
+    (is (user/email-verified? document))
+    (is (user/has-verified-contact? document))
+    (is (m/validate user.schema/user-document-schema document))))
+
+(deftest create-validation-test
+  (doseq [input
+          [{:id user-id :display-name "   " :now t0}
+           {:id user-id :phone-verified? true :now t0}
+           {:id user-id :email-verified? true :now t0}
+           {:id user-id :phone "2065550123" :now t0}
+           {:id user-id :email "not-an-email" :now t0}
+           {:now t0}
+           {:id user-id}]]
+    (is (= :user/invalid-create-input
+           (error-type
+            #(domain/create-user-command input)))))
+
+  (is (false?
+       (m/validate
+        user.schema/user-document-schema
+        (assoc (user-document) :unexpected/value true)))))
+
+(deftest corrupt-document-test
+  (let [document (user-document)]
+    (doseq [corrupt
+            [(assoc document :user/phone-verified-at t0)
+             (assoc document :user/email-verified-at t0)
+             (assoc document :user/status :suspended)
+             (assoc document :user/status :deleted)
+             (assoc document
+                    :user/phone canonical-phone
+                    :user/phone-verified-at t1)
+             (assoc document
+                    :user/status :suspended
+                    :user/suspended-at t1)
+             (assoc document :user/suspended-at t0)
+             (assoc document :user/deleted-at t0)]]
+      (is (false? (domain/document-consistent? corrupt))))))
+
+;; =============================================================================
+;; Domain commands
+;; =============================================================================
+
+(deftest profile-command-test
+  (let [original (user-document)
+        command
+        (domain/edit-profile-command
          original
-         {:email "new@example.com"
+         {:display-name "  Person Name  "
           :now t1})
-        verified
-        (identity/verify-email
-         replaced
-         {:email "new@example.com"
-          :now t2})]
-    (is (= "new@example.com" (:user/email replaced)))
-    (is (nil? (:user/email-verified-at replaced)))
-    (is (= 1 (:user/revision replaced)))
-    (is (= t1 (:user/updated-at replaced)))
-    (is (identity/email-verified? verified))
-    (is (= 2 (:user/revision verified)))
+        changed (after command)
+        removed
+        (after
+         (domain/edit-profile-command
+          changed
+          {:display-name nil
+           :now t2}))]
+    (is (command/update? command))
+    (is (= :edit-profile (command/operation command)))
+    (is (= "Person Name" (user/user-display-name changed)))
+    (is (= 1 (:user/revision changed)))
+    (is (= t1 (:user/updated-at changed)))
+    (is (nil? (user/user-display-name removed)))
+    (is (= 2 (:user/revision removed)))
+
+    (is (= :user/invalid-input
+           (error-type
+            #(domain/edit-profile-command
+              original
+              {:display-name "   "
+               :now t1}))))))
+
+(deftest contact-command-test
+  (let [original (verified-user)
+        phone-replaced
+        (after
+         (domain/replace-phone-command
+          original
+          {:phone "  +12065550124  "
+           :now t1}))
+        email-replaced
+        (after
+         (domain/replace-email-command
+          phone-replaced
+          {:email "  REPLACEMENT@EXAMPLE.COM  "
+           :now t2}))
+        without-phone
+        (after
+         (domain/remove-phone-command
+          original
+          {:now t1}))
+        without-contact
+        (after
+         (domain/remove-email-command
+          without-phone
+          {:now t2}))]
+    (testing "replacement canonicalizes and clears only matching verification"
+      (is (= replacement-phone (user/user-phone phone-replaced)))
+      (is (false? (user/phone-verified? phone-replaced)))
+      (is (user/email-verified? phone-replaced))
+      (is (= replacement-email (user/user-email email-replaced)))
+      (is (false? (user/email-verified? email-replaced)))
+      (is (= 2 (:user/revision email-replaced))))
+
+    (testing "zero-contact identity remains valid after removals"
+      (is (false? (user/has-contact? without-contact)))
+      (is (false? (user/has-verified-contact? without-contact)))
+      (is (domain/document-consistent? without-contact))
+      (is (m/validate user.schema/user-document-schema without-contact)))
+
+    (testing "same canonical replacement is rejected"
+      (is (= :user/contact-unchanged
+             (error-type
+              #(domain/replace-phone-command
+                original
+                {:phone canonical-phone :now t1}))))
+      (is (= :user/contact-unchanged
+             (error-type
+              #(domain/replace-email-command
+                original
+                {:email "PERSON@EXAMPLE.COM" :now t1})))))))
+
+(deftest verification-command-test
+  (let [original
+        (user-document
+         {:phone canonical-phone
+          :email canonical-email})
+        phone-verified
+        (after
+         (domain/verify-phone-command
+          original
+          {:phone canonical-phone :now t1}))
+        fully-verified
+        (after
+         (domain/verify-email-command
+          phone-verified
+          {:email "PERSON@EXAMPLE.COM" :now t2}))]
+    (is (user/phone-verified? phone-verified))
+    (is (user/email-verified? fully-verified))
+    (is (= t1 (:user/phone-verified-at phone-verified)))
+    (is (= t2 (:user/email-verified-at fully-verified)))
+
     (is (= :user/verification-target-mismatch
            (error-type
-            #(identity/verify-email
-              replaced
-              {:email canonical-email
-               :now t2}))))
-    (is (= :user/contact-unchanged
-           (error-type
-            #(identity/replace-email
+            #(domain/verify-phone-command
               original
-              {:email canonical-email
-               :now t1}))))))
-(deftest identity-status-lifecycle-test
-  (let [original (active-user)
-        suspended
-        (identity/suspend
-         original
-         {:now t1
-          :actor-id admin-user-id
-          :reason :test/suspended})
-        reactivated
-        (identity/reactivate suspended {:now t2})
-        deleted
-        (identity/delete-user
-         suspended
-         {:now t2
-          :actor-id admin-user-id
-          :reason :test/deleted})]
-    (is (identity/suspended? suspended))
-    (is (= 1 (:user/revision suspended)))
-    (is (= admin-user-id (:user/suspended-by suspended)))
-    (is (identity/active? reactivated))
-    (is (nil? (:user/suspended-at reactivated)))
-    (is (identity/deleted? deleted))
-    (is (nil? (:user/suspended-at deleted)))
-    (is (= :user/deleted
+              {:phone replacement-phone :now t1}))))
+
+    (is (= :user/phone-already-verified
            (error-type
-            #(identity/reactivate deleted {:now t8}))))
-    (is (= :user/not-active
+            #(domain/verify-phone-command
+              phone-verified
+              {:phone canonical-phone :now t2}))))
+
+    (is (= :user/email-already-verified
            (error-type
-            #(identity/suspend suspended {:now t2}))))))
-(deftest membership-create-and-schema-test
-  (let [document (active-membership)]
-    (is (= membership-id (:xt/id document)))
-    (is (= user-id (membership/user-id document)))
-    (is (= organization-id (membership/organization-id document)))
-    (is (= #{} (membership/skills document)))
-    (is (membership/active? document))
-    (is (membership/for-user? document user-id))
-    (is (membership/for-organization? document organization-id))
-    (is (membership/document-consistent? document))
-    (is (m/validate user.schema/membership-document-schema document))))
-(deftest membership-skill-test
-  (let [original
-        (active-membership
-         {:skills #{" Forklift Operator "
-                    "paint mixer"
-                    "FORKLIFT OPERATOR"}})
-        added
-        (membership/add-skill
+            #(domain/verify-email-command
+              fully-verified
+              {:email canonical-email :now t3}))))))
+
+(deftest lifecycle-command-test
+  (let [original (user-document)
+        suspend-command
+        (domain/suspend-user-command
          original
-         {:skill "  Spanish Speaker  "
+         {:actor-id actor-id
+          :reason :test/suspended
           :now t1})
-        removed
-        (membership/remove-skill
-         added
-         {:skill "PAINT MIXER"
-          :now t2})]
-    (is (= #{"forklift operator" "paint mixer"}
-           (membership/skills original)))
-    (is (membership/has-skill? original "Forklift Operator"))
-    (is (membership/has-skill? original " forklift operator "))
-    (is (false? (membership/has-skill? original "spanish speaker")))
-    (is (= #{"forklift operator" "paint mixer" "spanish speaker"}
-           (membership/skills added)))
-    (is (= 1 (:membership/revision added)))
-    (is (= t1 (:membership/updated-at added)))
-    (is (= #{"forklift operator" "spanish speaker"}
-           (membership/skills removed)))
-    (is (= 2 (:membership/revision removed)))
-    (is (= :membership/skill-already-present
-           (error-type
-            #(membership/add-skill
-              original
-              {:skill "FORKLIFT OPERATOR"
-               :now t1}))))
-    (is (= :membership/skill-missing
-           (error-type
-            #(membership/remove-skill
-              original
-              {:skill "spanish speaker"
-               :now t1}))))
-    (is (= :membership/invalid-skill
-           (error-type
-            #(membership/add-skill
-              original
-              {:skill "   "
-               :now t1}))))
-    (is (membership/document-consistent? added))
-    (is (membership/document-consistent? removed))
-    (is (m/validate user.schema/membership-document-schema added))
-    (is (m/validate user.schema/membership-document-schema removed))))
-
-(deftest membership-skill-command-test
-  (let [original (active-membership)
-        add-command
-        (membership/add-skill-command
-         original
-         {:skill "Forklift Operator"
-          :now t1})
-        added (command-document add-command)
-        remove-command
-        (membership/remove-skill-command
-         added
-         {:skill "forklift operator"
-          :now t2})]
-    (is (= :add-skill (:model/operation add-command)))
-    (is (= #{"forklift operator"} (:membership/skills added)))
-    (is (= :remove-skill (:model/operation remove-command)))
-    (is (= #{} (:membership/skills (command-document remove-command))))))
-
-(deftest membership-lifecycle-test
-  (let [original (active-membership)
-        suspended
-        (membership/suspend
-         original
-         {:now t1
-          :actor-id admin-user-id
-          :reason :test/suspended})
-        reactivated
-        (membership/reactivate suspended {:now t2})
-        revoked
-        (membership/revoke
+        suspended (after suspend-command)
+        reactivate-command
+        (domain/reactivate-user-command suspended {:now t2})
+        reactivated (after reactivate-command)
+        delete-command
+        (domain/delete-user-command
          suspended
-         {:now t2
-          :actor-id admin-user-id
-          :reason :test/revoked})]
-    (is (membership/suspended? suspended))
-    (is (= 1 (:membership/revision suspended)))
-    (is (membership/active? reactivated))
-    (is (nil? (:membership/suspended-at reactivated)))
-    (is (membership/revoked? revoked))
-    (is (nil? (:membership/suspended-at revoked)))
-    (is (= :membership/already-suspended
-           (error-type
-            #(membership/suspend suspended {:now t2}))))
-    (is (= :membership/revoked
-           (error-type
-            #(membership/reactivate revoked {:now t8}))))))
-(deftest role-scope-test
-  (is (= {:scope/type :organization
-          :scope/id organization-id}
-         organization-scope))
-  (is (= {:scope/type :organization-group
-          :scope/id group-id}
-         group-scope))
-  (is (= {:scope/type :location
-          :scope/id location-id}
-         location-scope))
-  (is (role/organization-group-scope? group-scope))
-  (is (role/location-scope? location-scope))
-  (is (user.common/scope-reference? organization-scope))
-  (is (user.common/same-scope? location-scope
-                               (role/location-scope location-id))))
-(deftest role-assignment-create-grant-and-schema-test
-  (let [assignment (role-assignment)]
-    (is (role/active? assignment))
-    (is (= :helper (role/assigned-role assignment)))
-    (is (= location-scope (role/scope assignment)))
-    (is (role/grants-role? assignment :helper))
-    (is (role/at-scope? assignment location-scope))
-    (is (role/grants?
-         assignment
-         membership-id
-         :helper
-         location-scope))
-    (is (false?
-         (role/grants?
-          assignment
-          membership-id
-          :admin
-          location-scope)))
-    (is (role/document-consistent? assignment))
-    (is (m/validate user.schema/role-assignment-document-schema assignment))))
-(deftest role-assignment-lifecycle-and-collections-test
-  (let [location-helper (role-assignment)
-        organization-admin
-        (role-assignment
-         {:id admin-role-id
-          :role :admin
-          :scope organization-scope})
-        revoked-helper (revoked-role location-helper)
-        assignments [location-helper organization-admin revoked-helper]]
-    (is (role/revoked? revoked-helper))
-    (is (= [location-helper organization-admin]
-           (role/active-assignments assignments)))
-    (is (= [location-helper revoked-helper]
-           (filterv #(role/at-scope? % location-scope) assignments)))
-    (is (= [location-helper]
-           (role/active-at-scope assignments location-scope)))
-    (is (= :role-assignment/revoked
-           (error-type
-            #(role/revoke revoked-helper {:now t2}))))
-    (let [commands
-          (role/revoke-at-scope-commands
-           assignments
-           location-scope
-           {:now t2
-            :actor-id admin-user-id
-            :reason :location/closed})]
-      (is (= 1 (count commands)))
-      (is (= :revoke (:model/operation (first commands))))
-      (is (role/revoked? (command-document (first commands)))))))
-(deftest invitation-create-recipient-and-schema-test
-  (let [document (pending-invitation)]
-    (is (invitation/pending? document))
-    (is (= organization-id (invitation/organization-id document)))
-    (is (= :helper (invitation/offered-role document)))
-    (is (= location-scope (invitation/scope document)))
-    (is (= :email (invitation/recipient-type document)))
-    (is (= canonical-email (invitation/recipient-value document)))
-    (is (invitation/addressed-to? document {:email canonical-email}))
-    (is (invitation/usable-at? document t1))
-    (is (false? (invitation/past-expiration? document t1)))
-    (is (invitation/document-consistent? document))
-    (is (m/validate user.schema/invitation-document-schema document)))
-  (is (= :invitation/invalid-create-input
-         (error-type
-          #(pending-invitation
-            {:phone canonical-phone}))))
-  (is (= :invitation/invalid-create-input
-         (error-type
-          #(pending-invitation
-            {:expires-at t0})))))
-(deftest invitation-terminal-lifecycle-test
-  (let [pending (pending-invitation)
-        accepted
-        (invitation/accept
-         pending
-         {:now t1
-          :user-id user-id
-          :membership-id membership-id
-          :role-assignment-id helper-role-id})
-        declined
-        (invitation/decline
-         pending
-         {:now t1
-          :actor-id user-id})
-        revoked
-        (invitation/revoke
-         pending
-         {:now t1
-          :actor-id admin-user-id
-          :reason :test/revoked})
-        expired
-        (invitation/expire pending {:now t8})]
-    (is (invitation/accepted? accepted))
-    (is (= membership-id (:invitation/membership accepted)))
-    (is (= helper-role-id (:invitation/role-assignment accepted)))
-    (is (invitation/declined? declined))
-    (is (invitation/revoked? revoked))
-    (is (invitation/expired? expired))
-    (doseq [document [accepted declined revoked expired]]
-      (is (invitation/terminal? document))
-      (is (invitation/document-consistent? document)))
-    (is (= :invitation/accepted
-           (error-type
-            #(invitation/decline accepted {:now t2}))))
-    (is (= :invitation/not-expired
-           (error-type
-            #(invitation/expire pending {:now t1}))))))
-(deftest membership-access-composition-test
-  (let [user-document (active-user)
-        membership-document (active-membership)
-        suspended (suspended-membership)]
-    (is (access/membership-for-user? user-document membership-document))
-    (is (access/current-membership? membership-document))
-    (is (access/current-membership? suspended))
-    (is (access/access-enabled-membership? user-document membership-document))
-    (is (= #{} (access/member-skills user-document membership-document)))
-    (is (= #{} (access/member-skills user-document suspended)))
-    (is (false?
-         (access/has-skill? user-document membership-document "forklift operator")))
-    (is (false?
-         (access/access-enabled-membership? user-document suspended)))
-    (is (access/organization-affiliated?
-         user-document
-         [membership-document]))
-    (is (false?
-         (access/customer? user-document [membership-document])))
-    (is (access/customer? user-document []))))
-(deftest scoped-role-access-test
-  (let [user-document (active-user)
-        membership-document (active-membership)
-        helper (role-assignment)
-        admin
-        (role-assignment
-         {:id admin-role-id
-          :role :admin
-          :scope organization-scope})
-        assignments [helper admin]]
-    (is (access/applicable-scopes? applicable-scopes))
-    (is (access/assignment-applies-at? helper applicable-scopes))
-    (is (access/assignment-applies-at? admin applicable-scopes))
-    (is (= assignments
-           (access/effective-assignments
-            user-document
-            membership-document
-            assignments
-            applicable-scopes)))
-    (is (= #{:helper :admin}
-           (access/effective-roles
-            user-document
-            membership-document
-            assignments
-            applicable-scopes)))
-    (is (= admin
-           (access/administrator-assignment
-            user-document
-            membership-document
-            assignments
-            applicable-scopes)))
-    (is (access/helper?
-         user-document membership-document assignments applicable-scopes))
-    (is (access/admin?
-         user-document membership-document assignments applicable-scopes))
-    (is (access/staff?
-         user-document membership-document assignments applicable-scopes))
-    (is (false?
-         (access/supervisor?
-          user-document membership-document assignments applicable-scopes))))
-  (testing "roles do not imply a hierarchy"
-    (let [user-document (active-user)
-          membership-document (active-membership)
-          admin
-          (role-assignment
-           {:id admin-role-id
-            :role :admin
-            :scope organization-scope})]
-      (is (= #{:admin}
-             (access/effective-roles
-              user-document
-              membership-document
-              [admin]
-              applicable-scopes)))
-      (is (access/admin?
-           user-document membership-document [admin] applicable-scopes))
-      (is (false?
-           (access/helper?
-            user-document membership-document [admin] applicable-scopes))))))
-(deftest access-fails-closed-test
-  (let [user-document (active-user)
-        membership-document (active-membership)
-        helper (role-assignment)]
-    (is (= []
-           (access/effective-assignments
-            user-document
-            (suspended-membership)
-            [helper]
-            applicable-scopes)))
-    (is (= []
-           (access/effective-assignments
-            user-document
-            membership-document
-            [(revoked-role helper)]
-            applicable-scopes)))
-    (is (= []
-           (access/effective-assignments
-            user-document
-            membership-document
-            [helper]
-            [organization-scope])))
-    (is (= []
-           (access/effective-assignments
-            user-document
-            (active-membership {:organization-id other-organization-id})
-            [helper]
-            applicable-scopes)))))
-(deftest public-access-context-test
-  (let [user-document (active-user)
-        membership-document
-        (active-membership
-         {:skills #{"forklift operator" "paint mixer"}})
-        helper (role-assignment)
-        admin
-        (role-assignment
-         {:id admin-role-id
-          :role :admin
-          :scope organization-scope})
-        context
-        (access/access-context
-         user-document
-         membership-document
-         [helper admin]
-         applicable-scopes
-         organization-id)]
-    (is (access/access-context? context))
-    (is (= user-id (:user/id context)))
-    (is (= membership-id (:membership/id context)))
-    (is (= #{"forklift operator" "paint mixer"}
-           (:membership/skills context)))
-    (is (= #{:helper :admin} (:user/effective-roles context)))
-    (is (= #{:user/invite-helper-to-location
-             :user/manage-member-skills}
-           (:user/capabilities context)))
-    (is (access/can-invite-helper? context))
-    (is (access/can-manage-member-skills? context))
-    (is (not-any?
-         #(contains? context %)
-         [:user/doc :membership/doc :role-assignment/doc]))
-    (is (false?
-         (access/access-context?
-          (assoc context
-                 :user/capabilities #{}))))))
-(deftest supervisor-skill-management-capability-test
-  (let [user-document (active-user)
-        membership-document (active-membership)
-        supervisor
-        (role-assignment
-         {:id supervisor-role-id
-          :role :supervisor
-          :scope location-scope})
-        context
-        (access/access-context
-         user-document
-         membership-document
-         [supervisor]
-         applicable-scopes
-         organization-id)]
-    (is (access/access-context? context))
-    (is (= #{:supervisor} (:user/effective-roles context)))
-    (is (= #{:user/manage-member-skills}
-           (:user/capabilities context)))
-    (is (access/can-manage-member-skills? context))
-    (is (false? (access/can-invite-helper? context)))))
+         {:actor-id actor-id
+          :reason :test/deleted
+          :now t2})
+        deleted (after delete-command)]
+    (testing "suspend"
+      (is (= :suspend (command/operation suspend-command)))
+      (is (user/suspended? suspended))
+      (is (= t1 (:user/suspended-at suspended)))
+      (is (= actor-id (:user/suspended-by suspended)))
+      (is (= :test/suspended (:user/suspension-reason suspended))))
 
-(deftest public-access-context-without-membership-test
-  (let [context
-        (access/access-context
-         (active-user)
-         nil
-         []
-         applicable-scopes
-         organization-id)]
-    (is (access/access-context? context))
-    (is (nil? (:membership/id context)))
-    (is (false? (:membership/active? context)))
-    (is (= #{} (:membership/skills context)))
-    (is (= #{} (:user/effective-roles context)))
-    (is (= #{} (:user/capabilities context)))
-    (is (false? (access/can-invite-helper? context)))))
-(deftest schema-registry-test
-  (is (= user.schema/user-document-schema
-         (:user user.schema/schema)))
-  (is (= user.schema/membership-document-schema
-         (:membership user.schema/schema)))
-  (is (= user.schema/role-assignment-document-schema
-         (:role-assignment user.schema/schema)))
-  (is (= user.schema/invitation-document-schema
-         (:invitation user.schema/schema)))
-  (is (m/validate (::user.schema/skill user.schema/schema)
-                  "forklift operator"))
-  (is (m/validate (::user.schema/skills user.schema/schema)
-                  #{"forklift operator" "paint mixer"}))
-  (is (m/validate (:user/doc user.schema/schema) (active-user)))
-  (is (m/validate (:membership/doc user.schema/schema)
-                  (active-membership
-                   {:skills #{"forklift operator"}})))
-  (is (m/validate (:role-assignment/doc user.schema/schema) (role-assignment)))
-  (is (m/validate (:invitation/doc user.schema/schema) (pending-invitation))))
-(deftest graph-input-builder-test
-  (is (= {:user/id user-id}
-         (user.graph/user-query-input {:user-id user-id})))
-  (is (= {:user/phone canonical-phone}
-         (user.graph/user-query-input {:phone canonical-phone})))
-  (is (= {:user/email canonical-email}
-         (user.graph/user-query-input {:email canonical-email})))
-  (is (= {:membership/id membership-id}
-         (user.graph/membership-query-input
-          {:membership-id membership-id})))
-  (is (= {:role-assignment/id helper-role-id}
-         (user.graph/role-assignment-query-input
-          {:role-assignment-id helper-role-id})))
-  (is (= {:invitation/id invitation-id}
-         (user.graph/invitation-query-input
-          {:invitation-id invitation-id})))
-  (is (= {:invitation/token-hash "hash"}
-         (user.graph/invitation-query-input
-          {:token-hash "hash"})))
-  (is (= {:user/id user-id
-          :membership/organization-id organization-id
-          :user/applicable-scopes applicable-scopes}
-         (user.graph/access-query-input
-          {:user-id user-id
-           :organization-id organization-id
-           :applicable-scopes applicable-scopes})))
-  (is (= {:role-assignment/organization-id organization-id
-          :role-assignment/scope-type :location
-          :role-assignment/scope-id location-id}
-         (user.graph/scoped-role-assignment-query-input
-          {:organization-id organization-id
-           :scope location-scope}))))
-(deftest core-registration-and-operation-contract-test
-  (is (= user.schema/schema user/schema))
-  (is (= user.graph/resolvers user/resolvers))
-  (is (= {:schema user/schema
-          :biff.graph/resolvers user/resolvers}
-         user/module))
-  (is (= identity/entity-type user/user-entity-type))
-  (is (= membership/entity-type user/membership-entity-type))
-  (is (= role/entity-type user/role-assignment-entity-type))
-  (is (= invitation/entity-type user/invitation-entity-type))
-  (is (identical?
-       #'user/invite-helper-to-location
-       (:user/invite-helper-to-location user/operations)))
-  (is (identical?
-       #'user/accept-invitation
-       (:user/accept-invitation user/operations)))
-  (is (identical?
-       #'user/add-member-skill
-       (:user/add-member-skill user/operations)))
-  (is (identical?
-       #'user/remove-member-skill
-       (:user/remove-member-skill user/operations))))
-(deftest core-scope-context-validation-test
-  (is (user/scope-context? scope-context))
-  (is (false?
-       (user/scope-context?
-        (update scope-context :scope/applicable conj location-scope))))
-  (is (false?
-       (user/scope-context?
-        (assoc scope-context
-               :scope/applicable [location-scope]))))
-  (is (false?
-       (user/scope-context?
-        (assoc scope-context
-               :scope/target
-               (role/location-scope other-location-id))))))
-(deftest core-access-context-read-test
-  (let [seen (atom nil)
-        facts
-        {:user/found? true
-         :user/doc (active-user)
-         :user/current-membership-found? true
-         :user/current-membership
-         {:membership/doc
-          (active-membership
-           {:skills #{"forklift operator"}})
-          :membership/role-assignments
-          [{:role-assignment/doc (role-assignment)}
-           {:role-assignment/doc
-            (role-assignment
-             {:id admin-role-id
-              :role :admin
-              :scope organization-scope})}]}}
-        context
-        (with-redefs
-         [graph/query
-          (fn [_ctx input query]
-            (reset! seen {:input input :query query})
-            facts)]
-          (user/access-context
-           {:request/id :test}
-           {:user-id user-id
-            :scope-context scope-context}))]
-    (is (= (user.graph/access-query-input
+    (testing "reactivate"
+      (is (= :reactivate (command/operation reactivate-command)))
+      (is (user/active? reactivated))
+      (is (nil? (:user/suspended-at reactivated)))
+      (is (nil? (:user/suspended-by reactivated)))
+      (is (nil? (:user/suspension-reason reactivated))))
+
+    (testing "delete"
+      (is (= :delete (command/operation delete-command)))
+      (is (user/deleted? deleted))
+      (is (= t2 (:user/deleted-at deleted)))
+      (is (= actor-id (:user/deleted-by deleted)))
+      (is (nil? (:user/suspended-at deleted)))
+      (is (domain/document-consistent? deleted)))
+
+    (testing "invalid transitions"
+      (is (= :user/not-active
+             (error-type
+              #(domain/suspend-user-command suspended {:now t2}))))
+      (is (= :user/already-active
+             (error-type
+              #(domain/reactivate-user-command original {:now t1}))))
+      (is (= :user/deleted
+             (error-type
+              #(domain/delete-user-command deleted {:now t3}))))
+      (is (= :user/deleted
+             (error-type
+              #(domain/edit-profile-command
+                deleted
+                {:display-name "No" :now t3})))))))
+
+(deftest update-time-test
+  (is (= :user/invalid-time
+         (error-type
+          #(domain/edit-profile-command
+            (user-document {:display-name "Person"})
+            {:display-name "Changed"
+             :now t-before})))))
+
+;; =============================================================================
+;; Descriptor and generated model
+;; =============================================================================
+
+(deftest descriptor-and-module-test
+  (testing "descriptor is the complete conventional model declaration"
+    (is (model/descriptor? user.schema/user-descriptor))
+    (is (= :user (:entity-type user.schema/user-descriptor)))
+    (is (= {:graph-key :user/id}
+           (:identity user.schema/user-descriptor)))
+    (is (= domain/version (:version user.schema/user-descriptor)))
+    (is (= [:user/phone :user/email]
+           (:lookups user.schema/user-descriptor))))
+
+  (testing "generated registry contains entity and projected Graph values"
+    (doseq [key
+            [:user
+             :user/id
+             :user/doc
+             :user/found?
+             :user/phone
+             :user/email
+             :user/display-name
+             :user/status
+             :user/revision
+             :user/created-at
+             :user/updated-at
+             :user/phone-verified-at
+             :user/email-verified-at
+             :user/suspended-at
+             :user/suspended-by
+             :user/suspension-reason
+             :user/deleted-at
+             :user/deleted-by
+             :user/deletion-reason]]
+      (is (contains? user/schema key))))
+
+  (testing "User intentionally contributes no generated mutation handlers"
+    (is (false? (contains? user/module :biff.fx/handlers))))
+
+  (testing "Graph is entirely descriptor-generated"
+    (let [expected
+          #{(model/by-id-resolver-id user.schema/user-descriptor)
+            (model/fields-resolver-id user.schema/user-descriptor)
+            (model/lookup-resolver-id
+             user.schema/user-descriptor
+             :user/phone)
+            (model/lookup-resolver-id
+             user.schema/user-descriptor
+             :user/email)}
+          actual (set (map :biff.graph/id user/resolvers))]
+      (is (= expected actual))
+      (is (= 4 (count user/resolvers))))))
+
+;; =============================================================================
+;; Stable core reads
+;; =============================================================================
+
+(deftest core-read-api-test
+  (let [document (verified-user)
+        other
+        (user-document
+         {:id other-user-id
+          :email replacement-email})]
+    (with-users
+     [document other]
+
+     (testing "ID reads"
+       (is (= document (user/user {} user-id)))
+       (is (= document (user/require-user {} user-id)))
+       (is (nil? (user/user {} missing-user-id)))
+       (is (= :user/not-found
+              (error-type
+               #(user/require-user {} missing-user-id))))
+       (is (= :user.core/invalid-user-id
+              (error-type
+               #(user/user {} "not-a-uuid")))))
+
+     (testing "phone read boundary"
+       (is (= document
+              (user/user-by-phone {} "  +12065550123  ")))
+       (is (= document
+              (user/require-user-by-phone {} canonical-phone)))
+       (is (= :user.core/invalid-phone
+              (error-type
+               #(user/user-by-phone {} "2065550123")))))
+
+     (testing "email read boundary"
+       (is (= document
+              (user/user-by-email {} " PERSON@EXAMPLE.COM ")))
+       (is (= other
+              (user/require-user-by-email
+               {}
+               "REPLACEMENT@EXAMPLE.COM")))
+       (is (= :user/not-found
+              (error-type
+               #(user/require-user-by-email
+                 {}
+                 "missing@example.com"))))
+       (is (= :user.core/invalid-email
+              (error-type
+               #(user/user-by-email {} "not-an-email"))))))))
+
+(deftest core-document-facts-test
+  (let [document (verified-user)]
+    (is (= user-id (user/user-id document)))
+    (is (= canonical-phone (user/user-phone document)))
+    (is (= canonical-email (user/user-email document)))
+    (is (= "Person" (user/user-display-name document)))
+    (is (= :active (user/user-status document)))
+    (is (user/active? document))
+    (is (false? (user/suspended? document)))
+    (is (false? (user/deleted? document)))
+    (is (user/has-phone? document))
+    (is (user/has-email? document))
+    (is (user/has-contact? document))
+    (is (user/phone-verified? document))
+    (is (user/email-verified? document))
+    (is (user/has-verified-contact? document))))
+
+;; =============================================================================
+;; Cross-model dependency
+;; =============================================================================
+
+(deftest user-dependency-test
+  (let [document (verified-user)]
+    (with-users
+     [document]
+
+     (let [{:keys [user transaction-fragment]}
+           (user/require-user-dependency {} user-id)
+           guard (first (:guards transaction-fragment))]
+       (is (= document user))
+       (is (= [[:user user-id]]
+              (mapv command/guard-target
+                    (:guards transaction-fragment))))
+       (is (= {:model/id user-id
+               :model/checks
+               [[:user/revision 0]
+                [:user/updated-at t0]]}
+              (:model/expected guard))))
+
+     (is (nil? (user/user-dependency {} missing-user-id)))
+     (is (= :user/not-found
+            (error-type
+             #(user/require-user-dependency
+               {}
+               missing-user-id)))))))
+
+(deftest dependency-composition-test
+  (let [document (user-document {:display-name "Person"})]
+    (with-users
+     [document]
+
+     (let [dependency
+           (user/require-user-dependency {} user-id)
+           plan
+           (user/plan-edit-profile
+            {:biff.fx/now t1}
             {:user-id user-id
-             :organization-id organization-id
-             :applicable-scopes applicable-scopes})
-           (:input @seen)))
-    (is (= user.graph/access-query (:query @seen)))
-    (is (user/access-context? context))
-    (is (= location-scope (:scope/target context)))
-    (is (= "Person" (:user/display-name context)))
-    (is (= #{"forklift operator"} (:membership/skills context)))
-    (is (= #{:helper :admin} (:user/effective-roles context)))
-    (is (user/can-invite-helper? context))
-    (is (user/can-manage-member-skills? context))
-    (is (not-any?
-         #(contains? context %)
-         [:user/doc :membership/doc :role-assignment/doc]))))
-(deftest core-access-context-no-membership-test
-  (let [facts
-        {:user/found? true
-         :user/doc (active-user)
-         :user/current-membership-found? false}
-        context
-        (with-redefs
-         [graph/query (fn [& _] facts)]
-          (user/access-context
-           {}
-           {:user-id user-id
-            :scope-context scope-context}))]
-    (is (user/access-context? context))
-    (is (nil? (:membership/id context)))
-    (is (= #{} (:membership/skills context)))
-    (is (= #{} (:user/effective-roles context)))
-    (is (false? (user/can-invite-helper? context)))
-    (is (false? (user/can-manage-member-skills? context)))))
-(deftest core-access-context-errors-test
+             :display-name "Changed"})
+           combined
+           (model.tx/compose
+            (:transaction-fragment dependency)
+            (plan-fragment plan))
+           normalized
+           (model.tx/normalize-plan
+            (merge combined (:transaction-options plan)))
+           effective
+           (model.tx/effective-guards
+            (:commands normalized)
+            (:guards normalized))]
+       (is (= [[:user user-id]]
+              (mapv command/guard-target
+                    (:guards normalized))))
+       (is (empty? effective))))))
+
+;; =============================================================================
+;; Planning
+;; =============================================================================
+
+(deftest create-plan-test
+  (with-redefs
+   [fx/uuid7 (fn [_seed _now] [generated-user-id])]
+
+   (let [plan
+         (user/plan-create-user
+          {:biff.fx/seed 7
+           :biff.fx/now t1}
+          {:phone canonical-phone
+           :email "PERSON@EXAMPLE.COM"
+           :display-name "  Created Person  "})
+         model-command (plan-command plan)
+         document (after model-command)]
+     (is (command/create? model-command))
+     (is (= :user (:model/entity-type model-command)))
+     (is (= generated-user-id (:xt/id document)))
+     (is (= canonical-email (:user/email document)))
+     (is (= "Created Person" (:user/display-name document)))
+     (is (= document (get-in plan [:result :user])))
+
+     (is (= [(model.tx/assert-none
+              :user
+              [:= :user/phone canonical-phone])
+             (model.tx/assert-none
+              :user
+              [:= :user/email canonical-email])]
+            (plan-assertions plan)))
+
+     (is (= {:topic :user
+             :id generated-user-id
+             :change/kind :created
+             :user/operation :create
+             :user/id generated-user-id
+             :user/status :active
+             :user/revision 0}
+            (plan-change plan)))
+
+     (is (= {:coalesce-key [:user generated-user-id]}
+            ((:entry-fn (:transaction-options plan))
+             (plan-change plan)))))))
+
+(deftest zero-contact-create-plan-test
+  (with-redefs
+   [fx/uuid7 (fn [_seed _now] [generated-user-id])]
+
+   (let [plan
+         (user/plan-create-user
+          {:biff.fx/seed 7
+           :biff.fx/now t1}
+          {})]
+     (is (empty? (plan-assertions plan)))
+     (is (false?
+          (user/has-contact?
+           (get-in plan [:result :user])))))))
+
+(deftest contact-update-plan-test
+  (with-users
+   [(verified-user)]
+
+   (let [plan
+         (user/plan-replace-email
+          {:biff.fx/now t1}
+          {:user-id user-id
+           :email "REPLACEMENT@EXAMPLE.COM"})
+         model-command (plan-command plan)
+         changed (after model-command)]
+     (is (command/update? model-command))
+     (is (= :replace-email
+            (command/operation model-command)))
+     (is (= replacement-email (:user/email changed)))
+     (is (false? (user/email-verified? changed)))
+     (is (empty? (:guards (plan-fragment plan))))
+
+     (is (= [(model.tx/assert-none
+              :user
+              [:= :user/email replacement-email])]
+            (plan-assertions plan)))
+
+     (is (= {:topic :user
+             :id user-id
+             :change/kind :updated
+             :user/operation :replace-email
+             :user/id user-id
+             :user/status :active
+             :user/revision 1}
+            (plan-change plan))))))
+
+(deftest non-contact-plans-have-no-uniqueness-assertions-test
+  (let [active
+        (user-document
+         {:phone canonical-phone
+          :display-name "Person"})
+        suspended
+        (after
+         (domain/suspend-user-command active {:now t1}))]
+
+    (with-users
+     [active]
+     (doseq [plan
+             [(user/plan-edit-profile
+               {:biff.fx/now t1}
+               {:user-id user-id
+                :display-name "Changed"})
+              (user/plan-verify-phone
+               {:biff.fx/now t1}
+               {:user-id user-id
+                :phone canonical-phone})
+              (user/plan-remove-phone
+               {:biff.fx/now t1}
+               {:user-id user-id})
+              (user/plan-suspend-user
+               {:biff.fx/now t1}
+               {:user-id user-id})]]
+       (is (empty? (plan-assertions plan)))))
+
+    (with-users
+     [suspended]
+     (is (empty?
+          (plan-assertions
+           (user/plan-reactivate-user
+            {:biff.fx/now t2}
+            {:user-id user-id})))))))
+
+(deftest planner-errors-test
+  (is (= :user.fx/missing-seed
+         (error-type
+          #(user/plan-create-user
+            {:biff.fx/now t1}
+            {}))))
+
+  (is (= :user.fx/missing-now
+         (error-type
+          #(user/plan-create-user
+            {:biff.fx/seed 1}
+            {}))))
+
+  (with-users
+   [(user-document)]
+   (is (= :user.fx/missing-now
+          (error-type
+           #(user/plan-edit-profile
+             {}
+             {:user-id user-id
+              :display-name "Changed"})))))
+
+  (with-users
+   []
+   (is (= :user/not-found
+          (error-type
+           #(user/plan-edit-profile
+             {:biff.fx/now t1}
+             {:user-id missing-user-id
+              :display-name "Changed"})))))
+
   (is (= :user/invalid-user-id
          (error-type
-          #(user/access-context
-            {}
-            {:user-id "not-a-uuid"
-             :scope-context scope-context}))))
-  (is (= :user/invalid-scope-context
-         (error-type
-          #(user/access-context
-            {}
-            {:user-id user-id
-             :scope-context {}}))))
-  (is (= :user/not-found
-         (with-redefs
-          [graph/query
-           (fn [& _]
-             {:user/found? false})]
-           (error-type
-            #(user/access-context
-              {}
-              {:user-id user-id
-               :scope-context scope-context}))))))
-(deftest core-named-read-delegation-test
-  (let [calls (atom [])]
-    (with-redefs
-     [graph/query
-      (fn [_ctx input query]
-        (swap! calls conj [input query])
-        {:ok true})]
-      (is (= {:ok true} (user/user-facts {} {:user-id user-id})))
-      (is (= {:ok true} (user/membership-facts {} membership-id)))
-      (is (= {:ok true}
-             (user/role-assignment-facts {} helper-role-id)))
-      (is (= {:ok true} (user/invitation-facts {} invitation-id)))
-      (is (= {:ok true} (user/customer-facts {} user-id)))
-      (is (= {:ok true}
-             (user/active-role-assignments-at-scope
-              {}
-              organization-id
-              location-scope))))
-    (is (= 6 (count @calls)))
-    (is (= user/user-query (second (nth @calls 0))))
-    (is (= user/membership-query (second (nth @calls 1))))
-    (is (= user/role-assignment-query (second (nth @calls 2))))
-    (is (= user/invitation-query (second (nth @calls 3))))
-    (is (= user/customer-query (second (nth @calls 4))))
-    (is (= user/active-role-assignments-at-scope-query
-           (second (nth @calls 5))))))
-(deftest core-write-delegation-test
-  (let [invite-call (atom nil)
-        accept-call (atom nil)
-        add-skill-call (atom nil)
-        remove-skill-call (atom nil)]
-    (with-redefs
-     [user.fx/invite-helper-to-location
-      (fn [ctx input]
-        (reset! invite-call [ctx input])
-        :invited)
-      user.fx/accept-invitation
-      (fn [ctx input]
-        (reset! accept-call [ctx input])
-        :accepted)
-      user.fx/add-member-skill
-      (fn [ctx input]
-        (reset! add-skill-call [ctx input])
-        :skill-added)
-      user.fx/remove-member-skill
-      (fn [ctx input]
-        (reset! remove-skill-call [ctx input])
-        :skill-removed)]
-      (is (= :invited
-             (user/invite-helper-to-location
-              {:ctx true}
-              {:organization-id organization-id})))
-      (is (= :accepted
-             (user/accept-invitation
-              {:ctx true}
-              {:token raw-token})))
-      (is (= :skill-added
-             (user/add-member-skill
-              {:ctx true}
-              {:organization-id organization-id
-               :location-id location-id
-               :membership-id membership-id
-               :skill "forklift operator"})))
-      (is (= :skill-removed
-             (user/remove-member-skill
-              {:ctx true}
-              {:organization-id organization-id
-               :location-id location-id
-               :membership-id membership-id
-               :skill "forklift operator"}))))
-    (is (= [{:ctx true}
-            {:organization-id organization-id}]
-           @invite-call))
-    (is (= [{:ctx true}
-            {:token raw-token}]
-           @accept-call))
-    (is (= [{:ctx true}
-            {:organization-id organization-id
-             :location-id location-id
-             :membership-id membership-id
-             :skill "forklift operator"}]
-           @add-skill-call))
-    (is (= [{:ctx true}
-            {:organization-id organization-id
-             :location-id location-id
-             :membership-id membership-id
-             :skill "forklift operator"}]
-           @remove-skill-call))))
-(deftest core-skill-contract-test
-  (let [membership-document
-        (active-membership
-         {:skills #{"forklift operator" "paint mixer"}})]
-    (is (= "forklift operator"
-           (user/normalize-skill " Forklift Operator ")))
-    (is (user/skill? "forklift operator"))
-    (is (= #{"forklift operator" "paint mixer"}
-           (user/membership-skills membership-document)))
-    (is (user/membership-has-skill?
-         membership-document
-         "FORKLIFT OPERATOR"))
-    (is (= user.common/roles user/roles))
-    (is (= access/capabilities user/capabilities))
-    (is (= :user/manage-member-skills
-           user/manage-member-skills-capability))))
+          #(user/plan-edit-profile
+            {:biff.fx/now t1}
+            {:user-id "bad-id"
+             :display-name "Changed"})))))
 
-(deftest invitation-token-test
-  (let [hash-a (user.fx/hash-token raw-token)
-        hash-b (user.fx/hash-token raw-token)
-        generated (user.fx/generate-token)]
-    (is (= hash-a hash-b))
-    (is (not= raw-token hash-a))
-    (is (invitation/token-hash? hash-a))
-    (is (= 43 (count generated)))
-    (is (re-matches #"[A-Za-z0-9_-]+" generated))
-    (is (= :invitation/invalid-token
-           (error-type #(user.fx/hash-token "   "))))))
-(deftest model-fx-assertion-helper-test
-  (is (= {:assert
-          [:= 0
-           {:select [[[:count '*]]]
-            :from 'invitation
-            :where [:= :xt/id invitation-id]}]}
-         (model.fx/assert-document-absent
-          :invitation
-          invitation-id)))
-  (is (= {:assert
-          [:= 1
-           {:select [[[:count '*]]]
-            :from 'location
-            :where
-            [:and
-             [:= :xt/id location-id]
-             [:= :location/revision 4]
-             [:= :location/updated-at t0]]}]}
-         (model.fx/assert-document-current
-          :location
-          location-expected-version)))
-  (is (= :model.fx/invalid-document-id
-         (error-type
-          #(model.fx/assert-document-absent :user "bad")))))
-(deftest model-fx-command-translation-test
-  (let [create-command
-        (invitation/create-command
-         {:id invitation-id
-          :organization-id organization-id
-          :invited-by admin-user-id
-          :email canonical-email
-          :role :helper
-          :scope location-scope
-          :token-hash (user.fx/hash-token raw-token)
-          :now t0
-          :expires-at t7})
-        create-document (command-document create-command)
-        accept-command
-        (invitation/accept-command
-         create-document
-         {:now t1
-          :user-id user-id
-          :membership-id membership-id
-          :role-assignment-id helper-role-id})]
-    (is (= (model.fx/assert-document-absent
-            :invitation
-            invitation-id)
-           (model.fx/command-precondition create-command)))
-    (is (= [:put-docs :invitation create-document]
-           (model.fx/command->tx-op create-command)))
-    (is (= (model.fx/assert-document-current
-            :invitation
-            (:model/expected accept-command))
-           (model.fx/command-precondition accept-command)))
-    (let [custom (model.fx/assert-none
-                  :invitation
-                  [:= :invitation/token-hash "hash"])
-          ops
-          (model.fx/transaction-ops
-           {:assertions [custom]
-            :commands [create-command]})]
-      (is (= custom (nth ops 0)))
-      (is (= (model.fx/command-precondition create-command)
-             (nth ops 1)))
-      (is (= (model.fx/command->tx-op create-command)
-             (nth ops 2))))
-    (is (= :model.fx/duplicate-command-targets
-           (error-type
-            #(model.fx/transaction-ops
-              {:commands [create-command create-command]}))))))
-(deftest plan-helper-invitation-test
-  (let [inviter (admin-user)
-        inviter-membership
-        (active-membership
-         {:id other-membership-id
-          :user-id admin-user-id})
-        admin-role (admin-assignment)
-        command
-        (invitation/create-command
-         {:id invitation-id
-          :organization-id organization-id
-          :invited-by admin-user-id
-          :email canonical-email
-          :role :helper
-          :scope location-scope
-          :token-hash (user.fx/hash-token raw-token)
-          :now t0
-          :expires-at t7})
-        plan
-        (user.fx/plan-helper-invitation
-         {:command command
-          :raw-token raw-token
-          :location-authorization-versions location-authorization-versions
-          :access-proof
-          {:user inviter
-           :membership inviter-membership
-           :role-assignment admin-role}})
-        transaction-plan (:transaction-plan plan)
-        result (:result plan)]
-    (is (= [command] (:commands transaction-plan)))
-    (is (= 4 (count (:authorization-versions transaction-plan))))
-    (is (= 1 (count (:assertions transaction-plan))))
-    (is (= #{:invitation}
-           (topic-set (:changes transaction-plan))))
-    (is (ifn? (:entry-fn transaction-plan)))
-    (is (= raw-token (:token result)))
-    (is (= (command-document command) (:invitation result)))
-    (is (not= raw-token
-              (:invitation/token-hash (:invitation result))))))
-(deftest plan-member-skill-change-test
-  (let [target-membership (active-membership)
-        command
-        (membership/add-skill-command
-         target-membership
-         {:skill "Forklift Operator"
-          :now t1})
-        inviter (admin-user)
-        inviter-membership
-        (active-membership
-         {:id other-membership-id
-          :user-id admin-user-id})
-        admin-role (admin-assignment)
-        plan
-        (user.fx/plan-member-skill-change
-         {:command command
-          :location-authorization-versions location-authorization-versions
-          :access-proof
-          {:user inviter
-           :membership inviter-membership
-           :role-assignment admin-role}
-          :target-membership target-membership
-          :operation :add-skill
-          :skill "forklift operator"})
-        transaction-plan (:transaction-plan plan)
-        result (:result plan)]
-    (is (= [command] (:commands transaction-plan)))
-    (is (= 5 (count (:authorization-versions transaction-plan))))
-    (is (= 0 (count (:assertions transaction-plan))))
-    (is (= #{:membership}
-           (topic-set (:changes transaction-plan))))
-    (is (= :updated
-           (:change/kind (first (:changes transaction-plan)))))
-    (is (= :add-skill
-           (:membership/operation (first (:changes transaction-plan)))))
-    (is (= "forklift operator"
-           (:membership/skill (first (:changes transaction-plan)))))
-    (is (= #{"forklift operator"}
-           (get-in result [:membership :membership/skills])))
-    (is (= :add-skill (:operation result)))
-    (is (= "forklift operator" (:skill result)))
-    (is (ifn? (:entry-fn transaction-plan)))))
+(deftest public-planner-operation-test
+  (let [active (verified-user)
+        unverified
+        (user-document
+         {:phone canonical-phone
+          :email canonical-email})
+        suspended
+        (after
+         (domain/suspend-user-command active {:now t1}))]
 
-(deftest plan-invitation-acceptance-creates-missing-documents-test
-  (let [plan
-        (user.fx/plan-invitation-acceptance
-         {:now t1
-          :user (active-user)
-          :invitation-document (pending-invitation)
-          :location-authorization-versions location-authorization-versions
-          :existing-membership nil
-          :existing-role-assignments []
-          :generated-membership-id generated-membership-id
-          :generated-role-assignment-id generated-role-id})
-        transaction-plan (:transaction-plan plan)
-        result (:result plan)]
-    (is (= 3 (count (:commands transaction-plan))))
-    (is (= [:create :create :accept]
-           (mapv :model/operation (:commands transaction-plan))))
-    (is (= 2 (count (:authorization-versions transaction-plan))))
-    (is (= 2 (count (:assertions transaction-plan))))
-    (is (= #{:membership :role-assignment :invitation}
-           (topic-set (:changes transaction-plan))))
-    (is (= generated-membership-id
-           (get-in result [:membership :xt/id])))
-    (is (= generated-role-id
-           (get-in result [:role-assignment :xt/id])))
-    (is (invitation/accepted? (:invitation result)))
-    (is (= generated-membership-id
-           (get-in result [:invitation :invitation/membership])))
-    (is (= generated-role-id
-           (get-in result [:invitation :invitation/role-assignment])))))
-(deftest plan-invitation-acceptance-reuses-existing-documents-test
-  (let [membership-document (active-membership)
-        assignment (role-assignment)
-        plan
-        (user.fx/plan-invitation-acceptance
-         {:now t1
-          :user (active-user)
-          :invitation-document (pending-invitation)
-          :location-authorization-versions location-authorization-versions
-          :existing-membership membership-document
-          :existing-role-assignments [assignment]
-          :generated-membership-id generated-membership-id
-          :generated-role-assignment-id generated-role-id})
-        transaction-plan (:transaction-plan plan)
-        result (:result plan)]
-    (is (= 1 (count (:commands transaction-plan))))
-    (is (= :accept
-           (:model/operation (first (:commands transaction-plan)))))
-    (is (= 4 (count (:authorization-versions transaction-plan))))
-    (is (= 2 (count (:assertions transaction-plan))))
-    (is (= #{:invitation}
-           (topic-set (:changes transaction-plan))))
-    (is (= membership-document (:membership result)))
-    (is (= assignment (:role-assignment result)))))
-(deftest plan-invitation-acceptance-creates-only-missing-role-test
-  (let [membership-document (active-membership)
-        plan
-        (user.fx/plan-invitation-acceptance
-         {:now t1
-          :user (active-user)
-          :invitation-document (pending-invitation)
-          :location-authorization-versions location-authorization-versions
-          :existing-membership membership-document
-          :existing-role-assignments []
-          :generated-membership-id generated-membership-id
-          :generated-role-assignment-id generated-role-id})
-        transaction-plan (:transaction-plan plan)]
-    (is (= [:create :accept]
-           (mapv :model/operation (:commands transaction-plan))))
-    (is (= 3 (count (:authorization-versions transaction-plan))))
-    (is (= 2 (count (:assertions transaction-plan))))
-    (is (= #{:role-assignment :invitation}
-           (topic-set (:changes transaction-plan))))))
-(deftest plan-invitation-acceptance-rejects-invalid-state-test
-  (is (= :membership/suspended
-         (error-type
-          #(user.fx/plan-invitation-acceptance
-            {:now t1
-             :user (active-user)
-             :invitation-document (pending-invitation)
-             :location-authorization-versions location-authorization-versions
-             :existing-membership (suspended-membership)
-             :existing-role-assignments []
-             :generated-membership-id generated-membership-id
-             :generated-role-assignment-id generated-role-id}))))
-  (is (= :role-assignment/ambiguous
-         (error-type
-          #(user.fx/plan-invitation-acceptance
-            {:now t1
-             :user (active-user)
-             :invitation-document (pending-invitation)
-             :location-authorization-versions location-authorization-versions
-             :existing-membership (active-membership)
-             :existing-role-assignments
-             [(role-assignment)
-              (role-assignment {:id duplicate-helper-role-id})]
-             :generated-membership-id generated-membership-id
-             :generated-role-assignment-id generated-role-id}))))
-  (is (= :invitation/recipient-mismatch
-         (error-type
-          #(user.fx/plan-invitation-acceptance
-            {:now t1
-             :user (active-user {:email-verified? false})
-             :invitation-document (pending-invitation)
-             :location-authorization-versions location-authorization-versions
-             :existing-membership nil
-             :existing-role-assignments []
-             :generated-membership-id generated-membership-id
-             :generated-role-assignment-id generated-role-id}))))
-  (is (= :invitation/expired
-         (error-type
-          #(user.fx/plan-invitation-acceptance
-            {:now t8
-             :user (active-user)
-             :invitation-document (pending-invitation)
-             :location-authorization-versions location-authorization-versions
-             :existing-membership nil
-             :existing-role-assignments []
-             :generated-membership-id generated-membership-id
-             :generated-role-assignment-id generated-role-id})))))
-(defn location-facts
-  ([]
-   (location-facts true))
-  ([active?]
-   {:location/found? true
-    :location/doc {:xt/id location-id
-                   :location/revision 4
-                   :location/updated-at t0}
-    :location/active? active?
-    :location/organization-id organization-id
-    :location/applicable-scopes applicable-scopes
-    :location/authorization-versions location-authorization-versions}))
-(defn admin-access-facts
-  []
-  (let [admin (admin-user)
-        membership-document
-        (active-membership
-         {:id other-membership-id
-          :user-id admin-user-id})
-        assignment (admin-assignment)]
-    {:user/found? true
-     :user/doc admin
-     :user/current-membership-found? true
-     :user/current-membership
-     {:membership/doc membership-document
-      :membership/role-assignments
-      [{:role-assignment/doc assignment}]}
-     :user/effective-roles #{:admin}
-     :user/helper? false
-     :user/supervisor? false
-     :user/admin? true
-     :user/staff? true}))
-(defn supervisor-access-facts
-  []
-  (let [supervisor (admin-user)
-        membership-document
-        (active-membership
-         {:id other-membership-id
-          :user-id admin-user-id})
-        assignment
-        (role-assignment
-         {:id supervisor-role-id
-          :membership-id other-membership-id
-          :role :supervisor
-          :scope location-scope})]
-    {:user/found? true
-     :user/doc supervisor
-     :user/current-membership-found? true
-     :user/current-membership
-     {:membership/doc membership-document
-      :membership/role-assignments
-      [{:role-assignment/doc assignment}]}
-     :user/effective-roles #{:supervisor}
-     :user/helper? false
-     :user/supervisor? true
-     :user/admin? false
-     :user/staff? true}))
+    (doseq [[planner document now input expected-operation]
+            [[user/plan-edit-profile
+              active t1
+              {:user-id user-id :display-name "Changed"}
+              :edit-profile]
+             [user/plan-replace-phone
+              active t1
+              {:user-id user-id :phone replacement-phone}
+              :replace-phone]
+             [user/plan-replace-email
+              active t1
+              {:user-id user-id :email replacement-email}
+              :replace-email]
+             [user/plan-remove-phone
+              active t1
+              {:user-id user-id}
+              :remove-phone]
+             [user/plan-remove-email
+              active t1
+              {:user-id user-id}
+              :remove-email]
+             [user/plan-verify-phone
+              unverified t1
+              {:user-id user-id :phone canonical-phone}
+              :verify-phone]
+             [user/plan-verify-email
+              unverified t1
+              {:user-id user-id :email canonical-email}
+              :verify-email]
+             [user/plan-suspend-user
+              active t1
+              {:user-id user-id}
+              :suspend]
+             [user/plan-reactivate-user
+              suspended t2
+              {:user-id user-id}
+              :reactivate]
+             [user/plan-delete-user
+              active t1
+              {:user-id user-id}
+              :delete]]]
 
-(defn committed-result
-  []
-  {:commit/status :committed
-   :tx-result {:tx-id 1}
-   :consistency {:tx-id 1}
-   :changes []
-   :emit :async
-   :publication {:status :submitted}})
-(deftest invite-helper-machine-happy-path-test
-  (let [captured-plan (atom nil)
-        graph-handler
-        (fn [_ctx _input query]
-          (cond
-            (= query user.fx/location-context-query)
-            (location-facts)
-            (= query user.graph/access-query)
-            (admin-access-facts)
-            :else
-            (throw
-             (ex-info "Unexpected Graph query."
-                      {:query query}))))
-        transaction-handler
-        (fn [_ctx plan]
-          (reset! captured-plan plan)
-          (committed-result))
-        result
-        (user.fx/invite-helper-to-location
-         {:current-user/id admin-user-id
-          user.fx/token-generator-key (constantly raw-token)
-          :biff.fx/handlers
-          {:biff.graph.fx/query graph-handler
-           model.fx/transact-effect transaction-handler}}
-         {:organization-id organization-id
-          :location-id location-id
-          :email canonical-email})]
-    (is (= raw-token (:token result)))
-    (is (invitation/pending? (:invitation result)))
-    (is (= (user.fx/hash-token raw-token)
-           (get-in result [:invitation :invitation/token-hash])))
-    (is (= :committed
-           (get-in result [:transaction :commit/status])))
-    (is (= 1 (count (:commands @captured-plan))))
-    (is (= 4 (count (:authorization-versions @captured-plan))))
-    (is (= 1 (count (:assertions @captured-plan))))
-    (is (= #{:invitation}
-           (topic-set (:changes @captured-plan))))))
-(deftest invite-helper-machine-authorization-test
-  (let [graph-handler
-        (fn [_ctx _input query]
-          (cond
-            (= query user.fx/location-context-query)
-            (location-facts)
-            (= query user.graph/access-query)
-            (let [facts (admin-access-facts)
-                  helper
-                  (role-assignment
-                   {:id helper-role-id
-                    :membership-id other-membership-id
-                    :role :helper
-                    :scope organization-scope})]
-              (-> facts
-                  (assoc :user/admin? false
-                         :user/effective-roles #{:helper})
-                  (assoc-in
-                   [:user/current-membership
-                    :membership/role-assignments]
-                   [{:role-assignment/doc helper}])))
-            :else nil))]
-    (is (= :user/not-authorized
-           (error-type
-            #(user.fx/invite-helper-to-location
-              {:current-user/id admin-user-id
-               user.fx/token-generator-key (constantly raw-token)
-               :biff.fx/handlers
-               {:biff.graph.fx/query graph-handler
-                model.fx/transact-effect
-                (fn [& _]
-                  (throw (AssertionError. "Must not commit.")))}}
-              {:organization-id organization-id
-               :location-id location-id
-               :email canonical-email}))))))
-(deftest add-member-skill-machine-happy-path-test
-  (let [target-membership (active-membership)
-        captured-plan (atom nil)
-        graph-handler
-        (fn [_ctx _input query]
-          (cond
-            (= query user.fx/location-context-query)
-            (location-facts)
+      (with-users
+       [document]
+       (let [plan (planner {:biff.fx/now now} input)
+             model-command (plan-command plan)]
+         (is (command/update? model-command))
+         (is (= :user (:model/entity-type model-command)))
+         (is (= expected-operation
+                (command/operation model-command)))
+         (is (= user-id (:model/id model-command)))
+         (is (= (after model-command)
+                (get-in plan [:result :user]))))))))
 
-            (= query user.graph/membership-command-query)
-            {:membership/found? true
-             :membership/doc target-membership}
+(deftest plans-normalize-through-gesso-model-test
+  (with-users
+   [(verified-user)]
 
-            (= query user.graph/access-query)
-            (supervisor-access-facts)
-
-            :else
-            (throw
-             (ex-info "Unexpected Graph query."
-                      {:query query}))))
-        transaction-handler
-        (fn [_ctx plan]
-          (reset! captured-plan plan)
-          (committed-result))
-        result
-        (user.fx/add-member-skill
-         {:current-user/id admin-user-id
-          :biff.fx/handlers
-          {:biff.graph.fx/query graph-handler
-           model.fx/transact-effect transaction-handler}}
-         {:organization-id organization-id
-          :location-id location-id
-          :membership-id membership-id
-          :skill "  Forklift Operator  "})]
-    (is (= "forklift operator" (:skill result)))
-    (is (= :add-skill (:operation result)))
-    (is (= #{"forklift operator"}
-           (get-in result [:membership :membership/skills])))
-    (is (= :committed
-           (get-in result [:transaction :commit/status])))
-    (is (= 1 (count (:commands @captured-plan))))
-    (is (= 5 (count (:authorization-versions @captured-plan))))
-    (is (= #{:membership}
-           (topic-set (:changes @captured-plan))))))
-
-(deftest remove-member-skill-machine-happy-path-test
-  (let [target-membership
-        (active-membership
-         {:skills #{"forklift operator" "paint mixer"}})
-        captured-plan (atom nil)
-        graph-handler
-        (fn [_ctx _input query]
-          (cond
-            (= query user.fx/location-context-query)
-            (location-facts)
-
-            (= query user.graph/membership-command-query)
-            {:membership/found? true
-             :membership/doc target-membership}
-
-            (= query user.graph/access-query)
-            (admin-access-facts)
-
-            :else
-            (throw
-             (ex-info "Unexpected Graph query."
-                      {:query query}))))
-        transaction-handler
-        (fn [_ctx plan]
-          (reset! captured-plan plan)
-          (committed-result))
-        result
-        (user.fx/remove-member-skill
-         {:current-user/id admin-user-id
-          :biff.fx/handlers
-          {:biff.graph.fx/query graph-handler
-           model.fx/transact-effect transaction-handler}}
-         {:organization-id organization-id
-          :location-id location-id
-          :membership-id membership-id
-          :skill "FORKLIFT OPERATOR"})]
-    (is (= "forklift operator" (:skill result)))
-    (is (= :remove-skill (:operation result)))
-    (is (= #{"paint mixer"}
-           (get-in result [:membership :membership/skills])))
-    (is (= :committed
-           (get-in result [:transaction :commit/status])))
-    (is (= #{:membership}
-           (topic-set (:changes @captured-plan))))))
-
-(deftest member-skill-machine-authorization-test
-  (let [target-membership (active-membership)
-        helper-access
-        (let [facts (admin-access-facts)
-              helper
-              (role-assignment
-               {:id helper-role-id
-                :membership-id other-membership-id
-                :role :helper
-                :scope location-scope})]
-          (-> facts
-              (assoc :user/admin? false
-                     :user/helper? true
-                     :user/effective-roles #{:helper})
-              (assoc-in
-               [:user/current-membership
-                :membership/role-assignments]
-               [{:role-assignment/doc helper}])))
-        graph-handler
-        (fn [_ctx _input query]
-          (cond
-            (= query user.fx/location-context-query)
-            (location-facts)
-
-            (= query user.graph/membership-command-query)
-            {:membership/found? true
-             :membership/doc target-membership}
-
-            (= query user.graph/access-query)
-            helper-access
-
-            :else
-            nil))]
-    (is (= :user/not-authorized
-           (error-type
-            #(user.fx/add-member-skill
-              {:current-user/id admin-user-id
-               :biff.fx/handlers
-               {:biff.graph.fx/query graph-handler
-                model.fx/transact-effect
-                (fn [& _]
-                  (throw
-                   (AssertionError.
-                    "Must not commit.")))}}
-              {:organization-id organization-id
-               :location-id location-id
-               :membership-id membership-id
-               :skill "forklift operator"}))))))
-
-(deftest member-skill-machine-target-validation-test
-  (let [wrong-organization-membership
-        (active-membership
-         {:organization-id other-organization-id})
-        graph-handler
-        (fn [_ctx _input query]
-          (cond
-            (= query user.fx/location-context-query)
-            (location-facts)
-
-            (= query user.graph/membership-command-query)
-            {:membership/found? true
-             :membership/doc wrong-organization-membership}
-
-            (= query user.graph/access-query)
-            (admin-access-facts)
-
-            :else
-            nil))]
-    (is (= :membership/organization-mismatch
-           (error-type
-            #(user.fx/add-member-skill
-              {:current-user/id admin-user-id
-               :biff.fx/handlers
-               {:biff.graph.fx/query graph-handler}}
-              {:organization-id organization-id
-               :location-id location-id
-               :membership-id membership-id
-               :skill "forklift operator"}))))))
-
-(deftest accept-invitation-machine-happy-path-test
-  (let [invitation-document
-        (pending-invitation {:expires-at far-future})
-        user-document (active-user)
-        captured-plan (atom nil)
-        graph-handler
-        (fn [_ctx _input query]
-          (cond
-            (= query user.graph/invitation-command-query)
-            {:invitation/found? true
-             :invitation/doc invitation-document}
-            (= query user.graph/user-command-query)
-            {:user/found? true
-             :user/doc user-document}
-            (= query user.fx/location-context-query)
-            (location-facts)
-            (= query user.fx/membership-with-roles-query)
-            {:user/found? true
-             :user/doc user-document
-             :user/current-membership-found? false}
-            :else
-            (throw
-             (ex-info "Unexpected Graph query."
-                      {:query query}))))
-        transaction-handler
-        (fn [_ctx plan]
-          (reset! captured-plan plan)
-          (committed-result))
-        result
-        (user.fx/accept-invitation
-         {:current-user/id user-id
-          :biff.fx/handlers
-          {:biff.graph.fx/query graph-handler
-           model.fx/transact-effect transaction-handler}}
-         {:token raw-token})]
-    (is (invitation/accepted? (:invitation result)))
-    (is (= user-id (get-in result [:user :xt/id])))
-    (is (= :helper
-           (get-in result [:role-assignment :role-assignment/role])))
-    (is (= :committed
-           (get-in result [:transaction :commit/status])))
-    (is (= 3 (count (:commands @captured-plan))))
-    (is (= #{:membership :role-assignment :invitation}
-           (topic-set (:changes @captured-plan))))))
-(deftest accept-invitation-machine-rejects-missing-and-wrong-recipient-test
-  (testing "missing invitation"
-    (let [handler
-          (fn [_ctx _input query]
-            (cond
-              (= query user.graph/invitation-command-query)
-              {:invitation/found? false}
-              (= query user.graph/user-command-query)
-              {:user/found? true
-               :user/doc (active-user)}))]
-      (is (= :invitation/not-found
-             (error-type
-              #(user.fx/accept-invitation
-                {:current-user/id user-id
-                 :biff.fx/handlers
-                 {:biff.graph.fx/query handler}}
-                {:token raw-token}))))))
-  (testing "verified contact must match"
-    (let [wrong-user
-          (active-user
-           {:email "someone-else@example.com"})
-          handler
-          (fn [_ctx _input query]
-            (cond
-              (= query user.graph/invitation-command-query)
-              {:invitation/found? true
-               :invitation/doc
-               (pending-invitation {:expires-at far-future})}
-              (= query user.graph/user-command-query)
-              {:user/found? true
-               :user/doc wrong-user}))]
-      (is (= :invitation/recipient-mismatch
-             (error-type
-              #(user.fx/accept-invitation
-                {:current-user/id user-id
-                 :biff.fx/handlers
-                 {:biff.graph.fx/query handler}}
-                {:token raw-token})))))))
+   (doseq [plan
+           [(user/plan-edit-profile
+             {:biff.fx/now t1}
+             {:user-id user-id
+              :display-name "Changed"})
+            (user/plan-replace-phone
+             {:biff.fx/now t1}
+             {:user-id user-id
+              :phone replacement-phone})
+            (user/plan-delete-user
+             {:biff.fx/now t1}
+             {:user-id user-id})]]
+     (let [normalized (normalize-plan plan)]
+       (is (= 1 (count (:commands normalized))))
+       (is (every? map? (:assertions normalized)))
+       (is (= 1 (count (:changes normalized))))
+       (is (ifn? (:entry-fn normalized)))))))
