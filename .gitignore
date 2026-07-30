@@ -15,3 +15,4 @@
 .portal/
 .shadow-cljs/
 target/resources/public/css/main.css
+bin/tailwindcss
