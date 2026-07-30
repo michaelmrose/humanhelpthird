@@ -275,7 +275,7 @@
    demo-specific wording for the obvious cases."
   [input]
   (let [humanized (or (malli-humanized-errors create-request-input-schema input)
-                     {})]
+                      {})]
     (not-empty
      (compact-map
       {:title
@@ -1324,11 +1324,11 @@
         desired-event-ids   (doc-ids desired-event-docs)
 
         delete-store-ids   (remove desired-store-ids
-                                    (doc-ids existing-store-docs))
+                                   (doc-ids existing-store-docs))
         delete-request-ids (remove desired-request-ids
-                                    (doc-ids existing-request-docs))
+                                   (doc-ids existing-request-docs))
         delete-event-ids   (remove desired-event-ids
-                                    (doc-ids existing-event-docs))]
+                                   (doc-ids existing-event-docs))]
     (concat
      (delete-doc-ops store-table delete-store-ids)
      (delete-doc-ops request-table delete-request-ids)
@@ -1698,7 +1698,6 @@
     (if (str/blank? search')
       ""
       search')))
-
 
 (defn normalize-visible-revision
   [ctx visible-revision]

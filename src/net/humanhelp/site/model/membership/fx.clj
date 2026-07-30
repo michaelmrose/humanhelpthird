@@ -382,8 +382,8 @@
      (if
       (command/create?
        model-command)
-      :created
-      :updated)
+       :created
+       :updated)
 
      :membership/operation
      (command/operation
@@ -419,8 +419,8 @@
      (if
       (command/create?
        model-command)
-      :created
-      :updated)
+       :created
+       :updated)
 
      :role-assignment/operation
      (command/operation

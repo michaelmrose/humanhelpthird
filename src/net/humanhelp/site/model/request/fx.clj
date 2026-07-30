@@ -1976,7 +1976,7 @@
              (request/assignment-for-helper?
               %
               helper-id))
-            %)
+             %)
           assignments)
 
          (fail!

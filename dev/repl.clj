@@ -33,14 +33,14 @@
 (defn add-fixtures []
   (let [user-id (random-uuid)]
     (biffx/submit-tx (get-context)
-      [[:put-docs :user {:xt/id user-id
-                         :email "a@example.com"
-                         :foo "Some Value"
-                         :joined-at (Instant/now)}]
-       [:put-docs :msg {:xt/id (random-uuid)
-                        :user user-id
-                        :text "hello there"
-                        :sent-at (Instant/now)}]])))
+                     [[:put-docs :user {:xt/id user-id
+                                        :email "a@example.com"
+                                        :foo "Some Value"
+                                        :joined-at (Instant/now)}]
+                      [:put-docs :msg {:xt/id (random-uuid)
+                                       :user user-id
+                                       :text "hello there"
+                                       :sent-at (Instant/now)}]])))
 
 (defn check-config []
   (let [prod-config (biff/use-aero-config {:biff.config/profile "prod"})
@@ -81,8 +81,8 @@
         [{user-id :xt/id}] (xt/q node ["select _id from user where email = ?"
                                        "hello@example.com"])]
     (biffx/submit-tx ctx
-      [[:patch-docs :user {:xt/id user-id
-                           :email "new.address@example.com"}]]))
+                     [[:patch-docs :user {:xt/id user-id
+                                          :email "new.address@example.com"}]]))
 
   (sort (keys (get-context)))
 

@@ -167,8 +167,8 @@
            live-system))))))
 
 (use-fixtures
- :each
- with-runtime)
+  :each
+  with-runtime)
 
 ;; =============================================================================
 ;; Prerequisite model commands

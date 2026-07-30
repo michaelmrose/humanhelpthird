@@ -1531,27 +1531,27 @@
     (case
      op
 
-     :=
-     (let [[key value]
-           args]
-       (=
-        value
-        (get
+      :=
+      (let [[key value]
+            args]
+        (=
+         value
+         (get
+          document
+          key)))
+
+      :and
+      (every?
+       #(predicate-match?
          document
-         key)))
+         %)
+       args)
 
-     :and
-     (every?
-      #(predicate-match?
-        document
-        %)
-      args)
-
-     (throw
-      (ex-info
-       "Unsupported test query predicate."
-       {:predicate
-        predicate})))))
+      (throw
+       (ex-info
+        "Unsupported test query predicate."
+        {:predicate
+         predicate})))))
 
 (defn- with-graph-documents*
   [documents f]
@@ -1591,13 +1591,12 @@
 
       (f))))
 
-
 (defmacro with-graph-documents
   [documents & body]
   `(with-graph-documents*
-    ~documents
-    (fn []
-      ~@body)))
+     ~documents
+     (fn []
+       ~@body)))
 
 (def graph-ctx
   {:biff/conn
@@ -1612,26 +1611,26 @@
         (pending-invitation)]
 
     (with-graph-documents
-     [document]
+      [document]
 
-     (is
-      (=
-       document
-       (invitation.graph/invitation-by-token-hash
-        graph-ctx
-        token-hash)))
+      (is
+       (=
+        document
+        (invitation.graph/invitation-by-token-hash
+         graph-ctx
+         token-hash)))
 
-     (is
-      (nil?
-       (invitation.graph/invitation-by-token-hash
-        graph-ctx
-        other-token-hash)))
+      (is
+       (nil?
+        (invitation.graph/invitation-by-token-hash
+         graph-ctx
+         other-token-hash)))
 
-     (is
-      (nil?
-       (invitation.graph/invitation-by-token-hash
-        graph-ctx
-        "short"))))))
+      (is
+       (nil?
+        (invitation.graph/invitation-by-token-hash
+         graph-ctx
+         "short"))))))
 
 (deftest duplicate-token-is-corruption-test
   (let [first-document
@@ -1643,16 +1642,16 @@
           other-invitation-id})]
 
     (with-graph-documents
-     [first-document
-      second-document]
+      [first-document
+       second-document]
 
-     (is
-      (=
-       :invitation.graph/non-unique-token-hash
-       (error-type
-        #(invitation.graph/invitation-by-token-hash
-          graph-ctx
-          token-hash)))))))
+      (is
+       (=
+        :invitation.graph/non-unique-token-hash
+        (error-type
+         #(invitation.graph/invitation-by-token-hash
+           graph-ctx
+           token-hash)))))))
 
 (deftest graph-collection-test
   (let [first-document
@@ -1684,37 +1683,37 @@
            t2}))]
 
     (with-graph-documents
-     [declined
-      first-document]
+      [declined
+       first-document]
 
-     (is
-      (=
-       [first-document
-        declined]
-       (invitation/invitations-for-organization
-        graph-ctx
-        organization-id)))
+      (is
+       (=
+        [first-document
+         declined]
+        (invitation/invitations-for-organization
+         graph-ctx
+         organization-id)))
 
-     (is
-      (=
-       [first-document]
-       (invitation/pending-invitations-for-organization
-        graph-ctx
-        organization-id)))
+      (is
+       (=
+        [first-document]
+        (invitation/pending-invitations-for-organization
+         graph-ctx
+         organization-id)))
 
-     (is
-      (=
-       [first-document]
-       (invitation/pending-invitations-for-email
-        graph-ctx
-        canonical-email)))
+      (is
+       (=
+        [first-document]
+        (invitation/pending-invitations-for-email
+         graph-ctx
+         canonical-email)))
 
-     (is
-      (=
-       [first-document]
-       (invitation/pending-invitations-at-scope
-        graph-ctx
-        location-scope))))))
+      (is
+       (=
+        [first-document]
+        (invitation/pending-invitations-at-scope
+         graph-ctx
+         location-scope))))))
 
 (deftest exact-pending-offer-query-test
   (let [document
@@ -1734,39 +1733,39 @@
          location-scope}]
 
     (with-graph-documents
-     [document]
+      [document]
 
-     (is
-      (=
-       [document]
-       (invitation/pending-invitations-for-offer
-        graph-ctx
-        offer)))
+      (is
+       (=
+        [document]
+        (invitation/pending-invitations-for-offer
+         graph-ctx
+         offer)))
 
-     (is
-      (=
-       document
-       (invitation/pending-invitation-for-offer
-        graph-ctx
-        offer)))
+      (is
+       (=
+        document
+        (invitation/pending-invitation-for-offer
+         graph-ctx
+         offer)))
 
-     (is
-      (empty?
-       (invitation/pending-invitations-for-offer
-        graph-ctx
-        (assoc
-         offer
-         :role
-         :admin))))
+      (is
+       (empty?
+        (invitation/pending-invitations-for-offer
+         graph-ctx
+         (assoc
+          offer
+          :role
+          :admin))))
 
-     (is
-      (empty?
-       (invitation/pending-invitations-for-offer
-        graph-ctx
-        (assoc
-         offer
-         :scope
-         other-location-scope)))))))
+      (is
+       (empty?
+        (invitation/pending-invitations-for-offer
+         graph-ctx
+         (assoc
+          offer
+          :scope
+          other-location-scope)))))))
 
 (deftest duplicate-pending-offer-is-corruption-test
   (let [first-document
@@ -1794,16 +1793,16 @@
          location-scope}]
 
     (with-graph-documents
-     [first-document
-      second-document]
+      [first-document
+       second-document]
 
-     (is
-      (=
-       :invitation.graph/non-unique-pending-offer
-       (error-type
-        #(invitation/pending-invitation-for-offer
-          graph-ctx
-          offer)))))))
+      (is
+       (=
+        :invitation.graph/non-unique-pending-offer
+        (error-type
+         #(invitation/pending-invitation-for-offer
+           graph-ctx
+           offer)))))))
 
 ;; =============================================================================
 ;; Guarded Invitation dependency
@@ -2036,23 +2035,23 @@
               :invitation/token-hash
               token-hash])
 
-             (model.tx/assert-none
-              :invitation
-              (invitation.graph/pending-offer-predicate
-               {:organization-id
-                organization-id
+            (model.tx/assert-none
+             :invitation
+             (invitation.graph/pending-offer-predicate
+              {:organization-id
+               organization-id
 
-                :email
-                canonical-email
+               :email
+               canonical-email
 
-                :phone
-                nil
+               :phone
+               nil
 
-                :role
-                :helper
+               :role
+               :helper
 
-                :scope
-                location-scope}))}
+               :scope
+               location-scope}))}
           (set
            (plan-assertions
             plan))))

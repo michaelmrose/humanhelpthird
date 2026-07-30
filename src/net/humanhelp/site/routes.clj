@@ -175,9 +175,9 @@
    base-path)
   ([{:keys [location-id]}]
    (with-query
-    base-path
-    {location-id-param
-     location-id})))
+     base-path
+     {location-id-param
+      location-id})))
 
 (defn location-selected-url
   [location-id]

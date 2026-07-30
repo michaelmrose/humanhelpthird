@@ -444,11 +444,11 @@
     (cond->
      (assoc user at-key now)
 
-     actor-id
-     (assoc by-key actor-id)
+      actor-id
+      (assoc by-key actor-id)
 
-     reason
-     (assoc reason-key reason))))
+      reason
+      (assoc reason-key reason))))
 
 ;; =============================================================================
 ;; Construction
@@ -595,8 +595,8 @@
      now
      #(if
        (nil? display-name)
-       (dissoc % :user/display-name)
-       (assoc % :user/display-name display-name)))))
+        (dissoc % :user/display-name)
+        (assoc % :user/display-name display-name)))))
 
 (defn- replace-phone
   [user {:keys [phone now]}]

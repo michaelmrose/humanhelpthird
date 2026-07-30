@@ -183,8 +183,8 @@
      :change/kind
      (if
       (command/create? model-command)
-      :created
-      :updated)
+       :created
+       :updated)
 
      :user/operation
      (command/operation model-command)

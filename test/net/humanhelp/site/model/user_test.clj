@@ -469,43 +469,43 @@
          {:id other-user-id
           :email replacement-email})]
     (with-users
-     [document other]
+      [document other]
 
-     (testing "ID reads"
-       (is (= document (user/user {} user-id)))
-       (is (= document (user/require-user {} user-id)))
-       (is (nil? (user/user {} missing-user-id)))
-       (is (= :user/not-found
-              (error-type
-               #(user/require-user {} missing-user-id))))
-       (is (= :user.core/invalid-user-id
-              (error-type
-               #(user/user {} "not-a-uuid")))))
+      (testing "ID reads"
+        (is (= document (user/user {} user-id)))
+        (is (= document (user/require-user {} user-id)))
+        (is (nil? (user/user {} missing-user-id)))
+        (is (= :user/not-found
+               (error-type
+                #(user/require-user {} missing-user-id))))
+        (is (= :user.core/invalid-user-id
+               (error-type
+                #(user/user {} "not-a-uuid")))))
 
-     (testing "phone read boundary"
-       (is (= document
-              (user/user-by-phone {} "  +12065550123  ")))
-       (is (= document
-              (user/require-user-by-phone {} canonical-phone)))
-       (is (= :user.core/invalid-phone
-              (error-type
-               #(user/user-by-phone {} "2065550123")))))
+      (testing "phone read boundary"
+        (is (= document
+               (user/user-by-phone {} "  +12065550123  ")))
+        (is (= document
+               (user/require-user-by-phone {} canonical-phone)))
+        (is (= :user.core/invalid-phone
+               (error-type
+                #(user/user-by-phone {} "2065550123")))))
 
-     (testing "email read boundary"
-       (is (= document
-              (user/user-by-email {} " PERSON@EXAMPLE.COM ")))
-       (is (= other
-              (user/require-user-by-email
-               {}
-               "REPLACEMENT@EXAMPLE.COM")))
-       (is (= :user/not-found
-              (error-type
-               #(user/require-user-by-email
-                 {}
-                 "missing@example.com"))))
-       (is (= :user.core/invalid-email
-              (error-type
-               #(user/user-by-email {} "not-an-email"))))))))
+      (testing "email read boundary"
+        (is (= document
+               (user/user-by-email {} " PERSON@EXAMPLE.COM ")))
+        (is (= other
+               (user/require-user-by-email
+                {}
+                "REPLACEMENT@EXAMPLE.COM")))
+        (is (= :user/not-found
+               (error-type
+                #(user/require-user-by-email
+                  {}
+                  "missing@example.com"))))
+        (is (= :user.core/invalid-email
+               (error-type
+                #(user/user-by-email {} "not-an-email"))))))))
 
 (deftest core-document-facts-test
   (let [document (verified-user)]
@@ -531,55 +531,55 @@
 (deftest user-dependency-test
   (let [document (verified-user)]
     (with-users
-     [document]
+      [document]
 
-     (let [{:keys [user transaction-fragment]}
-           (user/require-user-dependency {} user-id)
-           guard (first (:guards transaction-fragment))]
-       (is (= document user))
-       (is (= [[:user user-id]]
-              (mapv command/guard-target
-                    (:guards transaction-fragment))))
-       (is (= {:model/id user-id
-               :model/checks
-               [[:user/revision 0]
-                [:user/updated-at t0]]}
-              (:model/expected guard))))
+      (let [{:keys [user transaction-fragment]}
+            (user/require-user-dependency {} user-id)
+            guard (first (:guards transaction-fragment))]
+        (is (= document user))
+        (is (= [[:user user-id]]
+               (mapv command/guard-target
+                     (:guards transaction-fragment))))
+        (is (= {:model/id user-id
+                :model/checks
+                [[:user/revision 0]
+                 [:user/updated-at t0]]}
+               (:model/expected guard))))
 
-     (is (nil? (user/user-dependency {} missing-user-id)))
-     (is (= :user/not-found
-            (error-type
-             #(user/require-user-dependency
-               {}
-               missing-user-id)))))))
+      (is (nil? (user/user-dependency {} missing-user-id)))
+      (is (= :user/not-found
+             (error-type
+              #(user/require-user-dependency
+                {}
+                missing-user-id)))))))
 
 (deftest dependency-composition-test
   (let [document (user-document {:display-name "Person"})]
     (with-users
-     [document]
+      [document]
 
-     (let [dependency
-           (user/require-user-dependency {} user-id)
-           plan
-           (user/plan-edit-profile
-            {:biff.fx/now t1}
-            {:user-id user-id
-             :display-name "Changed"})
-           combined
-           (model.tx/compose
-            (:transaction-fragment dependency)
-            (plan-fragment plan))
-           normalized
-           (model.tx/normalize-plan
-            (merge combined (:transaction-options plan)))
-           effective
-           (model.tx/effective-guards
-            (:commands normalized)
-            (:guards normalized))]
-       (is (= [[:user user-id]]
-              (mapv command/guard-target
-                    (:guards normalized))))
-       (is (empty? effective))))))
+      (let [dependency
+            (user/require-user-dependency {} user-id)
+            plan
+            (user/plan-edit-profile
+             {:biff.fx/now t1}
+             {:user-id user-id
+              :display-name "Changed"})
+            combined
+            (model.tx/compose
+             (:transaction-fragment dependency)
+             (plan-fragment plan))
+            normalized
+            (model.tx/normalize-plan
+             (merge combined (:transaction-options plan)))
+            effective
+            (model.tx/effective-guards
+             (:commands normalized)
+             (:guards normalized))]
+        (is (= [[:user user-id]]
+               (mapv command/guard-target
+                     (:guards normalized))))
+        (is (empty? effective))))))
 
 ;; =============================================================================
 ;; Planning
@@ -589,88 +589,88 @@
   (with-redefs
    [fx/uuid7 (fn [_seed _now] [generated-user-id])]
 
-   (let [plan
-         (user/plan-create-user
-          {:biff.fx/seed 7
-           :biff.fx/now t1}
-          {:phone canonical-phone
-           :email "PERSON@EXAMPLE.COM"
-           :display-name "  Created Person  "})
-         model-command (plan-command plan)
-         document (after model-command)]
-     (is (command/create? model-command))
-     (is (= :user (:model/entity-type model-command)))
-     (is (= generated-user-id (:xt/id document)))
-     (is (= canonical-email (:user/email document)))
-     (is (= "Created Person" (:user/display-name document)))
-     (is (= document (get-in plan [:result :user])))
+    (let [plan
+          (user/plan-create-user
+           {:biff.fx/seed 7
+            :biff.fx/now t1}
+           {:phone canonical-phone
+            :email "PERSON@EXAMPLE.COM"
+            :display-name "  Created Person  "})
+          model-command (plan-command plan)
+          document (after model-command)]
+      (is (command/create? model-command))
+      (is (= :user (:model/entity-type model-command)))
+      (is (= generated-user-id (:xt/id document)))
+      (is (= canonical-email (:user/email document)))
+      (is (= "Created Person" (:user/display-name document)))
+      (is (= document (get-in plan [:result :user])))
 
-     (is (= [(model.tx/assert-none
-              :user
-              [:= :user/phone canonical-phone])
-             (model.tx/assert-none
-              :user
-              [:= :user/email canonical-email])]
-            (plan-assertions plan)))
+      (is (= [(model.tx/assert-none
+               :user
+               [:= :user/phone canonical-phone])
+              (model.tx/assert-none
+               :user
+               [:= :user/email canonical-email])]
+             (plan-assertions plan)))
 
-     (is (= {:topic :user
-             :id generated-user-id
-             :change/kind :created
-             :user/operation :create
-             :user/id generated-user-id
-             :user/status :active
-             :user/revision 0}
-            (plan-change plan)))
+      (is (= {:topic :user
+              :id generated-user-id
+              :change/kind :created
+              :user/operation :create
+              :user/id generated-user-id
+              :user/status :active
+              :user/revision 0}
+             (plan-change plan)))
 
-     (is (= {:coalesce-key [:user generated-user-id]}
-            ((:entry-fn (:transaction-options plan))
-             (plan-change plan)))))))
+      (is (= {:coalesce-key [:user generated-user-id]}
+             ((:entry-fn (:transaction-options plan))
+              (plan-change plan)))))))
 
 (deftest zero-contact-create-plan-test
   (with-redefs
    [fx/uuid7 (fn [_seed _now] [generated-user-id])]
 
-   (let [plan
-         (user/plan-create-user
-          {:biff.fx/seed 7
-           :biff.fx/now t1}
-          {})]
-     (is (empty? (plan-assertions plan)))
-     (is (false?
-          (user/has-contact?
-           (get-in plan [:result :user])))))))
+    (let [plan
+          (user/plan-create-user
+           {:biff.fx/seed 7
+            :biff.fx/now t1}
+           {})]
+      (is (empty? (plan-assertions plan)))
+      (is (false?
+           (user/has-contact?
+            (get-in plan [:result :user])))))))
 
 (deftest contact-update-plan-test
   (with-users
-   [(verified-user)]
+    [(verified-user)]
 
-   (let [plan
-         (user/plan-replace-email
-          {:biff.fx/now t1}
-          {:user-id user-id
-           :email "REPLACEMENT@EXAMPLE.COM"})
-         model-command (plan-command plan)
-         changed (after model-command)]
-     (is (command/update? model-command))
-     (is (= :replace-email
-            (command/operation model-command)))
-     (is (= replacement-email (:user/email changed)))
-     (is (false? (user/email-verified? changed)))
-     (is (empty? (:guards (plan-fragment plan))))
+    (let [plan
+          (user/plan-replace-email
+           {:biff.fx/now t1}
+           {:user-id user-id
+            :email "REPLACEMENT@EXAMPLE.COM"})
+          model-command (plan-command plan)
+          changed (after model-command)]
+      (is (command/update? model-command))
+      (is (= :replace-email
+             (command/operation model-command)))
+      (is (= replacement-email (:user/email changed)))
+      (is (false? (user/email-verified? changed)))
+      (is (empty? (:guards (plan-fragment plan))))
 
-     (is (= [(model.tx/assert-none
-              :user
-              [:= :user/email replacement-email])]
-            (plan-assertions plan)))
+      (is (= [(model.tx/assert-none
+               :user
+               [:= :user/email replacement-email])]
+             (plan-assertions plan)))
 
-     (is (= {:topic :user
-             :id user-id
-             :change/kind :updated
-             :user/operation :replace-email
-             :user/id user-id
-             :user/status :active
-             :user/revision 1}
-            (plan-change plan))))))
+      (is (= {:topic :user
+              :id user-id
+              :change/kind :updated
+              :user/operation :replace-email
+              :user/id user-id
+              :user/status :active
+              :user/revision 1}
+             (plan-change plan))))))
 
 (deftest non-contact-plans-have-no-uniqueness-assertions-test
   (let [active
@@ -682,31 +682,31 @@
          (domain/suspend-user-command active {:now t1}))]
 
     (with-users
-     [active]
-     (doseq [plan
-             [(user/plan-edit-profile
-               {:biff.fx/now t1}
-               {:user-id user-id
-                :display-name "Changed"})
-              (user/plan-verify-phone
-               {:biff.fx/now t1}
-               {:user-id user-id
-                :phone canonical-phone})
-              (user/plan-remove-phone
-               {:biff.fx/now t1}
-               {:user-id user-id})
-              (user/plan-suspend-user
-               {:biff.fx/now t1}
-               {:user-id user-id})]]
-       (is (empty? (plan-assertions plan)))))
+      [active]
+      (doseq [plan
+              [(user/plan-edit-profile
+                {:biff.fx/now t1}
+                {:user-id user-id
+                 :display-name "Changed"})
+               (user/plan-verify-phone
+                {:biff.fx/now t1}
+                {:user-id user-id
+                 :phone canonical-phone})
+               (user/plan-remove-phone
+                {:biff.fx/now t1}
+                {:user-id user-id})
+               (user/plan-suspend-user
+                {:biff.fx/now t1}
+                {:user-id user-id})]]
+        (is (empty? (plan-assertions plan)))))
 
     (with-users
-     [suspended]
-     (is (empty?
-          (plan-assertions
-           (user/plan-reactivate-user
-            {:biff.fx/now t2}
-            {:user-id user-id})))))))
+      [suspended]
+      (is (empty?
+           (plan-assertions
+            (user/plan-reactivate-user
+             {:biff.fx/now t2}
+             {:user-id user-id})))))))
 
 (deftest planner-errors-test
   (is (= :user.fx/missing-seed
@@ -722,22 +722,22 @@
             {}))))
 
   (with-users
-   [(user-document)]
-   (is (= :user.fx/missing-now
-          (error-type
-           #(user/plan-edit-profile
-             {}
-             {:user-id user-id
-              :display-name "Changed"})))))
+    [(user-document)]
+    (is (= :user.fx/missing-now
+           (error-type
+            #(user/plan-edit-profile
+              {}
+              {:user-id user-id
+               :display-name "Changed"})))))
 
   (with-users
-   []
-   (is (= :user/not-found
-          (error-type
-           #(user/plan-edit-profile
-             {:biff.fx/now t1}
-             {:user-id missing-user-id
-              :display-name "Changed"})))))
+    []
+    (is (= :user/not-found
+           (error-type
+            #(user/plan-edit-profile
+              {:biff.fx/now t1}
+              {:user-id missing-user-id
+               :display-name "Changed"})))))
 
   (is (= :user/invalid-user-id
          (error-type
@@ -799,35 +799,35 @@
               :delete]]]
 
       (with-users
-       [document]
-       (let [plan (planner {:biff.fx/now now} input)
-             model-command (plan-command plan)]
-         (is (command/update? model-command))
-         (is (= :user (:model/entity-type model-command)))
-         (is (= expected-operation
-                (command/operation model-command)))
-         (is (= user-id (:model/id model-command)))
-         (is (= (after model-command)
-                (get-in plan [:result :user]))))))))
+        [document]
+        (let [plan (planner {:biff.fx/now now} input)
+              model-command (plan-command plan)]
+          (is (command/update? model-command))
+          (is (= :user (:model/entity-type model-command)))
+          (is (= expected-operation
+                 (command/operation model-command)))
+          (is (= user-id (:model/id model-command)))
+          (is (= (after model-command)
+                 (get-in plan [:result :user]))))))))
 
 (deftest plans-normalize-through-gesso-model-test
   (with-users
-   [(verified-user)]
+    [(verified-user)]
 
-   (doseq [plan
-           [(user/plan-edit-profile
-             {:biff.fx/now t1}
-             {:user-id user-id
-              :display-name "Changed"})
-            (user/plan-replace-phone
-             {:biff.fx/now t1}
-             {:user-id user-id
-              :phone replacement-phone})
-            (user/plan-delete-user
-             {:biff.fx/now t1}
-             {:user-id user-id})]]
-     (let [normalized (normalize-plan plan)]
-       (is (= 1 (count (:commands normalized))))
-       (is (every? map? (:assertions normalized)))
-       (is (= 1 (count (:changes normalized))))
-       (is (ifn? (:entry-fn normalized)))))))
+    (doseq [plan
+            [(user/plan-edit-profile
+              {:biff.fx/now t1}
+              {:user-id user-id
+               :display-name "Changed"})
+             (user/plan-replace-phone
+              {:biff.fx/now t1}
+              {:user-id user-id
+               :phone replacement-phone})
+             (user/plan-delete-user
+              {:biff.fx/now t1}
+              {:user-id user-id})]]
+      (let [normalized (normalize-plan plan)]
+        (is (= 1 (count (:commands normalized))))
+        (is (every? map? (:assertions normalized)))
+        (is (= 1 (count (:changes normalized))))
+        (is (ifn? (:entry-fn normalized)))))))

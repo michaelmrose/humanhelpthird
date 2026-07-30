@@ -1555,10 +1555,10 @@
       :request/cancelled-at
       now)
 
-     reason
-     (assoc
-      :request/cancellation-reason
-      reason))))
+      reason
+      (assoc
+       :request/cancellation-reason
+       reason))))
 
 ;; =============================================================================
 ;; Canonical Request commands
@@ -1888,24 +1888,24 @@
      (count
       matches)
 
-     0
-     nil
+      0
+      nil
 
-     1
-     (first
-      matches)
+      1
+      (first
+       matches)
 
-     (fail!
-      :request-assignment/ambiguous-helper
-      "The Request assignment set is invalid."
-      {:helper
-       "A helper may have at most one active assignment on a Request."}
-      {:request-assignment/helper
-       expected-helper-id
+      (fail!
+       :request-assignment/ambiguous-helper
+       "The Request assignment set is invalid."
+       {:helper
+        "A helper may have at most one active assignment on a Request."}
+       {:request-assignment/helper
+        expected-helper-id
 
-       :request-assignment/count
-       (count
-        matches)}))))
+        :request-assignment/count
+        (count
+         matches)}))))
 
 (defn active-primary-assignment
   "Returns the one active primary assignment, nil when absent, and throws when
@@ -1918,21 +1918,21 @@
      (count
       matches)
 
-     0
-     nil
+      0
+      nil
 
-     1
-     (first
-      matches)
+      1
+      (first
+       matches)
 
-     (fail!
-      :request-assignment/ambiguous-primary
-      "The Request assignment set is invalid."
-      {:role
-       "A Request may have at most one active primary assignment."}
-      {:request-assignment/count
-       (count
-        matches)}))))
+      (fail!
+       :request-assignment/ambiguous-primary
+       "The Request assignment set is invalid."
+       {:role
+        "A Request may have at most one active primary assignment."}
+       {:request-assignment/count
+        (count
+         matches)}))))
 
 (defn active-helper-ids
   [assignments]
@@ -2395,10 +2395,10 @@
       :request-assignment/end-reason
       reason)
 
-     actor-id
-     (assoc
-      :request-assignment/ended-by
-      actor-id))))
+      actor-id
+      (assoc
+       :request-assignment/ended-by
+       actor-id))))
 
 ;; =============================================================================
 ;; Canonical Request Assignment commands

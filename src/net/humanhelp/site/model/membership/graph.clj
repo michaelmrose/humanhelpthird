@@ -140,19 +140,19 @@
   (case
    (count documents)
 
-   0
-   nil
+    0
+    nil
 
-   1
-   (first documents)
+    1
+    (first documents)
 
-   (fail!
-    error-type
-    message
-    (assoc
-     details
-     :result-count
-     (count documents)))))
+    (fail!
+     error-type
+     message
+     (assoc
+      details
+      :result-count
+      (count documents)))))
 
 ;; =============================================================================
 ;; Membership relationship reads

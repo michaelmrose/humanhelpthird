@@ -1122,34 +1122,34 @@
      (count
       assignments)
 
-     0
-     nil
+      0
+      nil
 
-     1
-     (first
-      assignments)
+      1
+      (first
+       assignments)
 
-     (fail!
-      :invitation/non-unique-role-assignment
-      "More than one active RoleAssignment satisfies the exact Invitation offer."
-      {:invitation/id
-       (invitation/invitation-id
-        invitation-document)
+      (fail!
+       :invitation/non-unique-role-assignment
+       "More than one active RoleAssignment satisfies the exact Invitation offer."
+       {:invitation/id
+        (invitation/invitation-id
+         invitation-document)
 
-       :membership/id
-       (membership/membership-id
-        membership-document)
+        :membership/id
+        (membership/membership-id
+         membership-document)
 
-       :role
-       invitation-role
+        :role
+        invitation-role
 
-       :scope
-       invitation-scope
+        :scope
+        invitation-scope
 
-       :role-assignment/ids
-       (mapv
-        membership/role-assignment-id
-        assignments)}))))
+        :role-assignment/ids
+        (mapv
+         membership/role-assignment-id
+         assignments)}))))
 
 ;; =============================================================================
 ;; Final acceptance plan
@@ -1504,9 +1504,9 @@
         user-document
         (when
          invitation-document
-         (user/user
-          ctx
-          user-id))
+          (user/user
+           ctx
+           user-id))
 
         recipient?
         (and
@@ -1520,11 +1520,11 @@
         membership-document
         (when
          recipient?
-         (membership/current-membership
-          ctx
-          user-id
-          (invitation/organization-id
-           invitation-document)))
+          (membership/current-membership
+           ctx
+           user-id
+           (invitation/organization-id
+            invitation-document)))
 
         role-assignment
         (when
@@ -1532,10 +1532,10 @@
           membership-document
           (membership/membership-active?
            membership-document))
-         (exact-active-role-assignment
-          ctx
-          membership-document
-          invitation-document))]
+          (exact-active-role-assignment
+           ctx
+           membership-document
+           invitation-document))]
     {:invitation
      invitation-document
 

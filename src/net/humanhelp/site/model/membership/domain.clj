@@ -381,39 +381,39 @@
    (case
     (membership-status membership)
 
-    :active
-    (none-present?
-     membership
-     [:membership/suspended-at
-      :membership/suspended-by
-      :membership/suspension-reason
-      :membership/revoked-at
-      :membership/revoked-by
-      :membership/revocation-reason])
-
-    :suspended
-    (and
-     (some?
-      (:membership/suspended-at membership))
-
-     (none-present?
-      membership
-      [:membership/revoked-at
-       :membership/revoked-by
-       :membership/revocation-reason]))
-
-    :revoked
-    (and
-     (some?
-      (:membership/revoked-at membership))
-
+     :active
      (none-present?
       membership
       [:membership/suspended-at
        :membership/suspended-by
-       :membership/suspension-reason]))
+       :membership/suspension-reason
+       :membership/revoked-at
+       :membership/revoked-by
+       :membership/revocation-reason])
 
-    false)))
+     :suspended
+     (and
+      (some?
+       (:membership/suspended-at membership))
+
+      (none-present?
+       membership
+       [:membership/revoked-at
+        :membership/revoked-by
+        :membership/revocation-reason]))
+
+     :revoked
+     (and
+      (some?
+       (:membership/revoked-at membership))
+
+      (none-present?
+       membership
+       [:membership/suspended-at
+        :membership/suspended-by
+        :membership/suspension-reason]))
+
+     false)))
 
 (defn- membership-context
   [membership]
@@ -732,15 +732,15 @@
       :membership/suspended-at
       now)
 
-     actor-id
-     (assoc
-      :membership/suspended-by
-      actor-id)
+      actor-id
+      (assoc
+       :membership/suspended-by
+       actor-id)
 
-     reason
-     (assoc
-      :membership/suspension-reason
-      reason))))
+      reason
+      (assoc
+       :membership/suspension-reason
+       reason))))
 
 (defn- reactivate-membership
   [membership {:keys [now]}]
@@ -810,15 +810,15 @@
           :membership/suspended-by
           :membership/suspension-reason))
 
-     actor-id
-     (assoc
-      :membership/revoked-by
-      actor-id)
+      actor-id
+      (assoc
+       :membership/revoked-by
+       actor-id)
 
-     reason
-     (assoc
-      :membership/revocation-reason
-      reason))))
+      reason
+      (assoc
+       :membership/revocation-reason
+       reason))))
 
 ;; =============================================================================
 ;; Canonical Membership commands
@@ -1029,18 +1029,18 @@
    (case
     (role-assignment-status role-assignment)
 
-    :active
-    (none-present?
-     role-assignment
-     [:role-assignment/revoked-at
-      :role-assignment/revoked-by
-      :role-assignment/revocation-reason])
+     :active
+     (none-present?
+      role-assignment
+      [:role-assignment/revoked-at
+       :role-assignment/revoked-by
+       :role-assignment/revocation-reason])
 
-    :revoked
-    (some?
-     (:role-assignment/revoked-at role-assignment))
+     :revoked
+     (some?
+      (:role-assignment/revoked-at role-assignment))
 
-    false)))
+     false)))
 
 (defn- role-assignment-context
   [role-assignment]
@@ -1314,15 +1314,15 @@
       :role-assignment/revoked-at
       now)
 
-     actor-id
-     (assoc
-      :role-assignment/revoked-by
-      actor-id)
+      actor-id
+      (assoc
+       :role-assignment/revoked-by
+       actor-id)
 
-     reason
-     (assoc
-      :role-assignment/revocation-reason
-      reason))))
+      reason
+      (assoc
+       :role-assignment/revocation-reason
+       reason))))
 
 ;; =============================================================================
 ;; RoleAssignment collection and authorization semantics

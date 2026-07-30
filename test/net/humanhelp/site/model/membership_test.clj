@@ -489,9 +489,9 @@
 (defmacro with-model-documents
   [documents & body]
   `(with-model-documents*
-    ~documents
-    (fn []
-      ~@body)))
+     ~documents
+     (fn []
+       ~@body)))
 
 (defmacro with-active-cross-model-dependencies
   [& body]
@@ -523,7 +523,7 @@
          :else
          (scope-dependency-value
           location-context)))]
-    ~@body))
+     ~@body))
 
 ;; =============================================================================
 ;; Skill and role values
@@ -1858,59 +1858,59 @@
         assignment
         (role-assignment-document)]
     (with-model-documents
-     [membership-document
-      assignment]
+      [membership-document
+       assignment]
 
-     (is
-      (=
-       membership-document
-       (membership/membership
-        {}
-        membership-id)))
+      (is
+       (=
+        membership-document
+        (membership/membership
+         {}
+         membership-id)))
 
-     (is
-      (=
-       membership-document
-       (membership/require-membership
-        {}
-        membership-id)))
+      (is
+       (=
+        membership-document
+        (membership/require-membership
+         {}
+         membership-id)))
 
-     (is
-      (=
-       assignment
-       (membership/role-assignment
-        {}
-        helper-assignment-id)))
+      (is
+       (=
+        assignment
+        (membership/role-assignment
+         {}
+         helper-assignment-id)))
 
-     (is
-      (nil?
-       (membership/membership
-        {}
-        missing-id)))
+      (is
+       (nil?
+        (membership/membership
+         {}
+         missing-id)))
 
-     (is
-      (=
-       :membership/not-found
-       (error-type
-        #(membership/require-membership
-          {}
-          missing-id))))
+      (is
+       (=
+        :membership/not-found
+        (error-type
+         #(membership/require-membership
+           {}
+           missing-id))))
 
-     (is
-      (=
-       :membership.core/invalid-membership-id
-       (error-type
-        #(membership/membership
-          {}
-          :bad-id))))
+      (is
+       (=
+        :membership.core/invalid-membership-id
+        (error-type
+         #(membership/membership
+           {}
+           :bad-id))))
 
-     (is
-      (=
-       :membership.core/invalid-role-assignment-id
-       (error-type
-        #(membership/role-assignment
-          {}
-          :bad-id)))))))
+      (is
+       (=
+        :membership.core/invalid-role-assignment-id
+        (error-type
+         #(membership/role-assignment
+           {}
+           :bad-id)))))))
 
 ;; =============================================================================
 ;; Ordinary read-side authorization
@@ -2151,27 +2151,27 @@
         "Membership query should not run for missing User."
         {})))]
 
-   (is
-    (nil?
-     (membership/effective-role-state
-      {}
-      user-id
-      location-scope)))
+    (is
+     (nil?
+      (membership/effective-role-state
+       {}
+       user-id
+       location-scope)))
 
-   (is
-    (=
-     #{}
-     (membership/effective-roles
-      {}
-      user-id
-      location-scope)))
+    (is
+     (=
+      #{}
+      (membership/effective-roles
+       {}
+       user-id
+       location-scope)))
 
-   (is
-    (false?
-     (membership/helper?
-      {}
-      user-id
-      location-scope)))))
+    (is
+     (false?
+      (membership/helper?
+       {}
+       user-id
+       location-scope)))))
 
 (deftest read-side-authorization-rejects-missing-membership-test
   (with-redefs
@@ -2194,27 +2194,27 @@
         "RoleAssignment query should not run without Membership."
         {})))]
 
-   (is
-    (nil?
-     (membership/effective-role-state
-      {}
-      user-id
-      location-scope)))
+    (is
+     (nil?
+      (membership/effective-role-state
+       {}
+       user-id
+       location-scope)))
 
-   (is
-    (=
-     #{}
-     (membership/effective-roles
-      {}
-      user-id
-      location-scope)))
+    (is
+     (=
+      #{}
+      (membership/effective-roles
+       {}
+       user-id
+       location-scope)))
 
-   (is
-    (false?
-     (membership/staff?
-      {}
-      user-id
-      location-scope)))))
+    (is
+     (false?
+      (membership/staff?
+       {}
+       user-id
+       location-scope)))))
 
 (deftest read-side-authorization-respects-suspended-membership-test
   (let [suspended
@@ -2345,39 +2345,39 @@
   (let [document
         (membership-document)]
     (with-model-documents
-     [document]
+      [document]
 
-     (let [{:keys
-            [membership
-             transaction-fragment]}
-           (membership/require-membership-dependency
-            {}
-            membership-id)]
-       (is
-        (=
-         document
-         membership))
+      (let [{:keys
+             [membership
+              transaction-fragment]}
+            (membership/require-membership-dependency
+             {}
+             membership-id)]
+        (is
+         (=
+          document
+          membership))
 
-       (is
-        (=
-         [[:membership
-           membership-id]]
-         (guard-targets
-          transaction-fragment))))
+        (is
+         (=
+          [[:membership
+            membership-id]]
+          (guard-targets
+           transaction-fragment))))
 
-     (is
-      (nil?
-       (membership/membership-dependency
-        {}
-        missing-id)))
+      (is
+       (nil?
+        (membership/membership-dependency
+         {}
+         missing-id)))
 
-     (is
-      (=
-       :membership/not-found
-       (error-type
-        #(membership/require-membership-dependency
-          {}
-          missing-id)))))))
+      (is
+       (=
+        :membership/not-found
+        (error-type
+         #(membership/require-membership-dependency
+           {}
+           missing-id)))))))
 
 (deftest current-membership-dependency-test
   (let [document
@@ -2398,8 +2398,8 @@
         document)]
 
       (let [{:keys
-            [membership
-             transaction-fragment]}
+             [membership
+              transaction-fragment]}
             (membership/current-membership-dependency
              {}
              user-id
@@ -2422,94 +2422,94 @@
 
 (deftest create-membership-plan-test
   (with-active-cross-model-dependencies
-   (with-redefs
-    [fx/uuid7
-     (fn [_seed _now]
-       [generated-membership-id])]
+    (with-redefs
+     [fx/uuid7
+      (fn [_seed _now]
+        [generated-membership-id])]
 
-    (let [plan
-          (membership/plan-create-membership
-           {:biff.fx/seed
-            7
+      (let [plan
+            (membership/plan-create-membership
+             {:biff.fx/seed
+              7
 
-            :biff.fx/now
-            t1}
-           {:user-id
-            user-id
+              :biff.fx/now
+              t1}
+             {:user-id
+              user-id
 
-            :organization-id
-            organization-id
+              :organization-id
+              organization-id
 
-            :skills
-            [" Paint "]})
+              :skills
+              [" Paint "]})
 
-          model-command
-          (plan-command
-           plan)
+            model-command
+            (plan-command
+             plan)
 
-          document
-          (after
-           model-command)
+            document
+            (after
+             model-command)
 
-          normalized
-          (normalized-plan
-           plan)]
-      (is
-       (command/create?
-        model-command))
+            normalized
+            (normalized-plan
+             plan)]
+        (is
+         (command/create?
+          model-command))
 
-      (is
-       (=
-        generated-membership-id
-        (:xt/id
-         document)))
-
-      (is
-       (=
-        #{"paint"}
-        (:membership/skills
-         document)))
-
-      (testing "User and Organization facts are guarded"
         (is
          (=
-          #{[:user
-             user-id]
+          generated-membership-id
+          (:xt/id
+           document)))
 
-            [:organization
-             organization-id]}
-          (set
-           (guard-targets
-            normalized)))))
-
-      (testing "current Membership uniqueness is atomic"
         (is
          (=
-          1
-          (count
-           (plan-assertions
-            plan)))))
+          #{"paint"}
+          (:membership/skills
+           document)))
 
-      (is
-       (=
-        :membership
-        (:topic
-         (plan-change
-          plan))))
+        (testing "User and Organization facts are guarded"
+          (is
+           (=
+            #{[:user
+               user-id]
 
-      (is
-       (=
-        :created
-        (:change/kind
-         (plan-change
-          plan))))
+              [:organization
+               organization-id]}
+            (set
+             (guard-targets
+              normalized)))))
 
-      (is
-       (=
-        :create
-        (:membership/operation
-         (plan-change
-          plan))))))))
+        (testing "current Membership uniqueness is atomic"
+          (is
+           (=
+            1
+            (count
+             (plan-assertions
+              plan)))))
+
+        (is
+         (=
+          :membership
+          (:topic
+           (plan-change
+            plan))))
+
+        (is
+         (=
+          :created
+          (:change/kind
+           (plan-change
+            plan))))
+
+        (is
+         (=
+          :create
+          (:membership/operation
+           (plan-change
+            plan))))))))
 
 ;; =============================================================================
 ;; Ordinary Membership planners
@@ -2524,127 +2524,127 @@
         suspended
         (suspended-membership)]
     (with-model-documents
-     [active]
+      [active]
 
-     (let [add-plan
-           (membership/plan-add-skill
-            {:biff.fx/now
-             t1}
-            {:membership-id
-             membership-id
-
-             :skill
-             "customer service"})
-
-           remove-plan
-           (membership/plan-remove-skill
-            {:biff.fx/now
-             t1}
-            {:membership-id
-             membership-id
-
-             :skill
-             "paint"})
-
-           suspend-plan
-           (membership/plan-suspend-membership
-            {:biff.fx/now
-             t1}
-            {:membership-id
-             membership-id})]
-       (is
-        (=
-         :add-skill
-         (command/operation
-          (plan-command
-           add-plan))))
-
-       (is
-        (=
-         :remove-skill
-         (command/operation
-          (plan-command
-           remove-plan))))
-
-       (is
-        (=
-         :suspend
-         (command/operation
-          (plan-command
-           suspend-plan))))
-
-       (is
-        (empty?
-         (:guards
-          (plan-fragment
-           add-plan))))))
-
-    (with-model-documents
-     [suspended]
-
-     (with-active-cross-model-dependencies
-      (let [plan
-            (membership/plan-reactivate-membership
+      (let [add-plan
+            (membership/plan-add-skill
              {:biff.fx/now
-              t2}
+              t1}
              {:membership-id
-              membership-id})
+              membership-id
 
-            normalized
-            (normalized-plan
-             plan)]
+              :skill
+              "customer service"})
+
+            remove-plan
+            (membership/plan-remove-skill
+             {:biff.fx/now
+              t1}
+             {:membership-id
+              membership-id
+
+              :skill
+              "paint"})
+
+            suspend-plan
+            (membership/plan-suspend-membership
+             {:biff.fx/now
+              t1}
+             {:membership-id
+              membership-id})]
         (is
          (=
-          :reactivate
+          :add-skill
           (command/operation
            (plan-command
-            plan))))
+            add-plan))))
 
         (is
          (=
-          #{[:user
-             user-id]
+          :remove-skill
+          (command/operation
+           (plan-command
+            remove-plan))))
 
-            [:organization
-             organization-id]}
-          (set
-           (guard-targets
-            normalized)))))))))
+        (is
+         (=
+          :suspend
+          (command/operation
+           (plan-command
+            suspend-plan))))
+
+        (is
+         (empty?
+          (:guards
+           (plan-fragment
+            add-plan))))))
+
+    (with-model-documents
+      [suspended]
+
+      (with-active-cross-model-dependencies
+        (let [plan
+              (membership/plan-reactivate-membership
+               {:biff.fx/now
+                t2}
+               {:membership-id
+                membership-id})
+
+              normalized
+              (normalized-plan
+               plan)]
+          (is
+           (=
+            :reactivate
+            (command/operation
+             (plan-command
+              plan))))
+
+          (is
+           (=
+            #{[:user
+               user-id]
+
+              [:organization
+               organization-id]}
+            (set
+             (guard-targets
+              normalized)))))))))
 
 (deftest revoke-membership-does-not-cascade-role-assignments-test
   (with-model-documents
-   [(membership-document)]
+    [(membership-document)]
 
-   (let [plan
-         (membership/plan-revoke-membership
-          {:biff.fx/now
-           t1}
-          {:membership-id
-           membership-id})
+    (let [plan
+          (membership/plan-revoke-membership
+           {:biff.fx/now
+            t1}
+           {:membership-id
+            membership-id})
 
-         commands
-         (:commands
-          (plan-fragment
-           plan))]
-     (is
-      (=
-       1
-       (count
-        commands)))
+          commands
+          (:commands
+           (plan-fragment
+            plan))]
+      (is
+       (=
+        1
+        (count
+         commands)))
 
-     (is
-      (=
-       :membership
-       (:model/entity-type
-        (first
-         commands))))
+      (is
+       (=
+        :membership
+        (:model/entity-type
+         (first
+          commands))))
 
-     (is
-      (=
-       :revoke
-       (command/operation
-        (first
-         commands)))))))
+      (is
+       (=
+        :revoke
+        (command/operation
+         (first
+          commands)))))))
 
 ;; =============================================================================
 ;; RoleAssignment creation planning
@@ -2652,142 +2652,142 @@
 
 (deftest create-role-assignment-plan-test
   (with-model-documents
-   [(membership-document)]
+    [(membership-document)]
 
-   (with-active-cross-model-dependencies
-    (with-redefs
-     [fx/uuid7
-      (fn [_seed _now]
-        [generated-role-assignment-id])]
+    (with-active-cross-model-dependencies
+      (with-redefs
+       [fx/uuid7
+        (fn [_seed _now]
+          [generated-role-assignment-id])]
 
-     (let [plan
-           (membership/plan-create-role-assignment
-            {:biff.fx/seed
-             7
+        (let [plan
+              (membership/plan-create-role-assignment
+               {:biff.fx/seed
+                7
 
-             :biff.fx/now
-             t1}
-            {:membership-id
-             membership-id
+                :biff.fx/now
+                t1}
+               {:membership-id
+                membership-id
 
-             :role
-             :helper
+                :role
+                :helper
 
-             :scope
-             location-scope
+                :scope
+                location-scope
 
-             :actor-id
-             actor-id
+                :actor-id
+                actor-id
 
-             :reason
-             :test/granted})
+                :reason
+                :test/granted})
 
-           model-command
-           (plan-command
-            plan)
+              model-command
+              (plan-command
+               plan)
 
-           document
-           (after
-            model-command)
+              document
+              (after
+               model-command)
 
-           normalized
-           (normalized-plan
-            plan)]
-       (is
-        (command/create?
-         model-command))
+              normalized
+              (normalized-plan
+               plan)]
+          (is
+           (command/create?
+            model-command))
 
-       (is
-        (=
-         generated-role-assignment-id
-         (:xt/id
-          document)))
+          (is
+           (=
+            generated-role-assignment-id
+            (:xt/id
+             document)))
 
-       (is
-        (=
-         membership-id
-         (:role-assignment/membership
-          document)))
+          (is
+           (=
+            membership-id
+            (:role-assignment/membership
+             document)))
 
-       (is
-        (=
-         location-scope
-         (membership/role-assignment-scope
-          document)))
+          (is
+           (=
+            location-scope
+            (membership/role-assignment-scope
+             document)))
 
-       (testing "Membership, User, and Organization are dependencies"
-         (is
-          (=
-           #{[:membership
-              membership-id]
+          (testing "Membership, User, and Organization are dependencies"
+            (is
+             (=
+              #{[:membership
+                 membership-id]
 
-             [:user
-              user-id]
+                [:user
+                 user-id]
 
-             [:organization
-              organization-id]}
-           (set
-            (guard-targets
-             normalized)))))
+                [:organization
+                 organization-id]}
+              (set
+               (guard-targets
+                normalized)))))
 
-       (testing "duplicate exact active grant is prevented atomically"
-         (is
-          (=
-           1
-           (count
-            (plan-assertions
-             plan)))))
+          (testing "duplicate exact active grant is prevented atomically"
+            (is
+             (=
+              1
+              (count
+               (plan-assertions
+                plan)))))
 
-       (is
-        (=
-         :role-assignment
-         (:topic
-          (plan-change
-           plan))))
+          (is
+           (=
+            :role-assignment
+            (:topic
+             (plan-change
+              plan))))
 
-       (is
-        (=
-         :create
-         (:role-assignment/operation
-          (plan-change
-           plan)))))))))
+          (is
+           (=
+            :create
+            (:role-assignment/operation
+             (plan-change
+              plan)))))))))
 
 (deftest role-assignment-scope-ownership-test
   (with-model-documents
-   [(membership-document)]
+    [(membership-document)]
 
-   (with-redefs
-    [user/require-user-dependency
-     (fn [& _]
-       (user-dependency-value))
+    (with-redefs
+     [user/require-user-dependency
+      (fn [& _]
+        (user-dependency-value))
 
-     organization/require-scope-dependency
-     (fn [& _]
-       (scope-dependency-value
-        other-organization-context))
+      organization/require-scope-dependency
+      (fn [& _]
+        (scope-dependency-value
+         other-organization-context))
 
-     fx/uuid7
-     (fn [& _]
-       [generated-role-assignment-id])]
+      fx/uuid7
+      (fn [& _]
+        [generated-role-assignment-id])]
 
-    (is
-     (=
-      :membership/scope-ownership-mismatch
-      (error-type
-       #(membership/plan-create-role-assignment
-         {:biff.fx/seed
-          7
+      (is
+       (=
+        :membership/scope-ownership-mismatch
+        (error-type
+         #(membership/plan-create-role-assignment
+           {:biff.fx/seed
+            7
 
-          :biff.fx/now
-          t1}
-         {:membership-id
-          membership-id
+            :biff.fx/now
+            t1}
+           {:membership-id
+            membership-id
 
-          :role
-          :helper
+            :role
+            :helper
 
-          :scope
-          other-organization-scope})))))))
+            :scope
+            other-organization-scope})))))))
 
 ;; =============================================================================
 ;; RoleAssignment revocation planning
@@ -2797,38 +2797,38 @@
   (let [assignment
         (role-assignment-document)]
     (with-model-documents
-     [assignment]
+      [assignment]
 
-     (let [plan
-           (membership/plan-revoke-role-assignment
-            {:biff.fx/now
-             t1}
-            {:role-assignment-id
-             helper-assignment-id
+      (let [plan
+            (membership/plan-revoke-role-assignment
+             {:biff.fx/now
+              t1}
+             {:role-assignment-id
+              helper-assignment-id
 
-             :actor-id
-             actor-id
+              :actor-id
+              actor-id
 
-             :reason
-             :test/revoked})
+              :reason
+              :test/revoked})
 
-           model-command
-           (plan-command
-            plan)]
-       (is
-        (command/update?
-         model-command))
+            model-command
+            (plan-command
+             plan)]
+        (is
+         (command/update?
+          model-command))
 
-       (is
-        (=
-         :revoke
-         (command/operation
-          model-command)))
+        (is
+         (=
+          :revoke
+          (command/operation
+           model-command)))
 
-       (is
-        (membership/role-assignment-revoked?
-         (after
-          model-command)))))))
+        (is
+         (membership/role-assignment-revoked?
+          (after
+           model-command)))))))
 
 ;; =============================================================================
 ;; Positive atomic authorization proof
@@ -3069,14 +3069,14 @@
       (scope-dependency-value
        non-operational-location-context))]
 
-   (is
-    (=
-     :membership/scope-not-operational
-     (error-type
-      #(membership/helper-dependency
-        {}
-        user-id
-        location-scope))))))
+    (is
+     (=
+      :membership/scope-not-operational
+      (error-type
+       #(membership/helper-dependency
+         {}
+         user-id
+         location-scope))))))
 
 ;; =============================================================================
 ;; Planner context failures
@@ -3085,51 +3085,51 @@
 (deftest planner-context-test
   (testing "creation requires framework seed"
     (with-active-cross-model-dependencies
-     (is
-      (=
-       :membership.fx/missing-seed
-       (error-type
-        #(membership/plan-create-membership
-          {:biff.fx/now
-           t1}
-          {:user-id
-           user-id
+      (is
+       (=
+        :membership.fx/missing-seed
+        (error-type
+         #(membership/plan-create-membership
+           {:biff.fx/now
+            t1}
+           {:user-id
+            user-id
 
-           :organization-id
-           organization-id}))))))
+            :organization-id
+            organization-id}))))))
 
   (testing "updates require framework time"
     (with-model-documents
-     [(membership-document)]
+      [(membership-document)]
 
-     (is
-      (=
-       :membership.fx/missing-now
-       (error-type
-        #(membership/plan-add-skill
-          {}
-          {:membership-id
-           membership-id
+      (is
+       (=
+        :membership.fx/missing-now
+        (error-type
+         #(membership/plan-add-skill
+           {}
+           {:membership-id
+            membership-id
 
-           :skill
-           "paint"}))))))
+            :skill
+            "paint"}))))))
 
   (testing "missing Membership is distinct"
     (with-model-documents
-     []
+      []
 
-     (is
-      (=
-       :membership/not-found
-       (error-type
-        #(membership/plan-add-skill
-          {:biff.fx/now
-           t1}
-          {:membership-id
-           missing-id
+      (is
+       (=
+        :membership/not-found
+        (error-type
+         #(membership/plan-add-skill
+           {:biff.fx/now
+            t1}
+           {:membership-id
+            missing-id
 
-           :skill
-           "paint"})))))))
+            :skill
+            "paint"})))))))
 
 ;; =============================================================================
 ;; Gesso plan compatibility
@@ -3137,52 +3137,52 @@
 
 (deftest membership-plans-normalize-test
   (with-model-documents
-   [(membership-document
-     {:skills
-      #{"paint"}})]
+    [(membership-document
+      {:skills
+       #{"paint"}})]
 
-   (doseq [plan
-           [(membership/plan-add-skill
-             {:biff.fx/now
-              t1}
-             {:membership-id
-              membership-id
+    (doseq [plan
+            [(membership/plan-add-skill
+              {:biff.fx/now
+               t1}
+              {:membership-id
+               membership-id
 
-              :skill
-              "customer service"})
+               :skill
+               "customer service"})
 
-            (membership/plan-remove-skill
-             {:biff.fx/now
-              t1}
-             {:membership-id
-              membership-id
+             (membership/plan-remove-skill
+              {:biff.fx/now
+               t1}
+              {:membership-id
+               membership-id
 
-              :skill
-              "paint"})
+               :skill
+               "paint"})
 
-            (membership/plan-suspend-membership
-             {:biff.fx/now
-              t1}
-             {:membership-id
-              membership-id})]]
-     (let [normalized
-           (normalized-plan
-            plan)]
-       (is
-        (=
-         1
-         (count
-          (:commands
-           normalized))))
+             (membership/plan-suspend-membership
+              {:biff.fx/now
+               t1}
+              {:membership-id
+               membership-id})]]
+      (let [normalized
+            (normalized-plan
+             plan)]
+        (is
+         (=
+          1
+          (count
+           (:commands
+            normalized))))
 
-       (is
-        (=
-         1
-         (count
-          (:changes
-           normalized))))
+        (is
+         (=
+          1
+          (count
+           (:changes
+            normalized))))
 
-       (is
-        (ifn?
-         (:entry-fn
-          normalized)))))))
+        (is
+         (ifn?
+          (:entry-fn
+           normalized)))))))

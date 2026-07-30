@@ -463,16 +463,16 @@
    (path request-toolbar-fragment-route))
   ([view-state]
    (with-query
-    (request-toolbar-fragment-url)
-    (view-state-query view-state))))
+     (request-toolbar-fragment-url)
+     (view-state-query view-state))))
 
 (defn request-list-fragment-url
   ([]
    (path request-list-fragment-route))
   ([view-state]
    (with-query
-    (request-list-fragment-url)
-    (view-state-query view-state))))
+     (request-list-fragment-url)
+     (view-state-query view-state))))
 
 (defn create-request-dialog-fragment-url
   []
@@ -487,16 +487,16 @@
    (path request-toolbar-stream-route))
   ([view-state]
    (with-query
-    (request-toolbar-stream-url)
-    (view-state-query view-state))))
+     (request-toolbar-stream-url)
+     (view-state-query view-state))))
 
 (defn request-list-stream-url
   ([]
    (path request-list-stream-route))
   ([view-state]
    (with-query
-    (request-list-stream-url)
-    (view-state-query view-state))))
+     (request-list-stream-url)
+     (view-state-query view-state))))
 
 ;; -----------------------------------------------------------------------------
 ;; Request creation / list controls
@@ -511,16 +511,16 @@
    (path refresh-requests-route))
   ([view-state]
    (with-query
-    (refresh-requests-url)
-    (view-state-query view-state))))
+     (refresh-requests-url)
+     (view-state-query view-state))))
 
 (defn search-requests-url
   ([]
    (path search-requests-route))
   ([view-state]
    (with-query
-    (search-requests-url)
-    (view-state-query view-state))))
+     (search-requests-url)
+     (view-state-query view-state))))
 
 (defn apply-board-options-url
   []

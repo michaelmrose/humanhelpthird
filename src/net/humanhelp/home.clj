@@ -160,7 +160,7 @@
             {:phone (:phone result phone)
              :length 6
              :code-error (:error signin-result
-                                  "Could not finish signing in. Try again.")}))))
+                                 "Could not finish signing in. Try again.")}))))
 
       (g/html-response
        (phone-auth-code-panel

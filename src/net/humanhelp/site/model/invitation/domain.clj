@@ -287,15 +287,15 @@
    (recipient-type
     invitation)
 
-   :phone
-   (:invitation/phone
-    invitation)
+    :phone
+    (:invitation/phone
+     invitation)
 
-   :email
-   (:invitation/email
-    invitation)
+    :email
+    (:invitation/email
+     invitation)
 
-   nil))
+    nil))
 
 (defn addressed-to?
   "Returns true when supplied contact values canonically match the Invitation.
@@ -309,21 +309,21 @@
    (recipient-type
     invitation)
 
-   :phone
-   (=
-    (:invitation/phone
-     invitation)
-    (user/normalize-phone
-     phone))
+    :phone
+    (=
+     (:invitation/phone
+      invitation)
+     (user/normalize-phone
+      phone))
 
-   :email
-   (=
-    (:invitation/email
-     invitation)
-    (user/normalize-email
-     email))
+    :email
+    (=
+     (:invitation/email
+      invitation)
+     (user/normalize-email
+      email))
 
-   false))
+    false))
 
 (defn addressed-to-user?
   "Returns true when Invitation addresses a currently verified contact on User.
@@ -335,29 +335,29 @@
    (recipient-type
     invitation)
 
-   :phone
-   (and
-    (user/phone-verified?
-     user-document)
+    :phone
+    (and
+     (user/phone-verified?
+      user-document)
 
-    (=
-     (:invitation/phone
-      invitation)
-     (user/user-phone
-      user-document)))
+     (=
+      (:invitation/phone
+       invitation)
+      (user/user-phone
+       user-document)))
 
-   :email
-   (and
-    (user/email-verified?
-     user-document)
+    :email
+    (and
+     (user/email-verified?
+      user-document)
 
-    (=
-     (:invitation/email
-      invitation)
-     (user/user-email
-      user-document)))
+     (=
+      (:invitation/email
+       invitation)
+      (user/user-email
+       user-document)))
 
-   false))
+    false))
 
 ;; =============================================================================
 ;; Expiration
@@ -764,27 +764,27 @@
    (invitation-status
     invitation)
 
-   :pending
-   (pending-consistent?
-    invitation)
+    :pending
+    (pending-consistent?
+     invitation)
 
-   :accepted
-   (accepted-consistent?
-    invitation)
+    :accepted
+    (accepted-consistent?
+     invitation)
 
-   :declined
-   (declined-consistent?
-    invitation)
+    :declined
+    (declined-consistent?
+     invitation)
 
-   :revoked
-   (revoked-consistent?
-    invitation)
+    :revoked
+    (revoked-consistent?
+     invitation)
 
-   :expired
-   (expired-consistent?
-    invitation)
+    :expired
+    (expired-consistent?
+     invitation)
 
-   false))
+    false))
 
 (defn document-consistent?
   "Returns true when Invitation satisfies every local persisted invariant.
@@ -887,7 +887,7 @@
 
       :context
       (context
-       invitation)}})))
+        invitation)}})))
 
 (defn- ensure!
   [test error-type message errors invitation]
@@ -934,19 +934,19 @@
    (invitation-status
     invitation)
 
-   :accepted
-   :invitation/accepted
+    :accepted
+    :invitation/accepted
 
-   :declined
-   :invitation/declined
+    :declined
+    :invitation/declined
 
-   :revoked
-   :invitation/revoked
+    :revoked
+    :invitation/revoked
 
-   :expired
-   :invitation/expired
+    :expired
+    :invitation/expired
 
-   :invitation/not-pending))
+    :invitation/not-pending))
 
 (defn- ensure-pending!
   [invitation]
@@ -1603,10 +1603,10 @@
       :invitation/declined-at
       now)
 
-     actor-id
-     (assoc
-      :invitation/declined-by
-      actor-id))))
+      actor-id
+      (assoc
+       :invitation/declined-by
+       actor-id))))
 
 ;; =============================================================================
 ;; Revocation
@@ -1641,15 +1641,15 @@
       :invitation/revoked-at
       now)
 
-     actor-id
-     (assoc
-      :invitation/revoked-by
-      actor-id)
+      actor-id
+      (assoc
+       :invitation/revoked-by
+       actor-id)
 
-     reason
-     (assoc
-      :invitation/revocation-reason
-      reason))))
+      reason
+      (assoc
+       :invitation/revocation-reason
+       reason))))
 
 ;; =============================================================================
 ;; Expiration

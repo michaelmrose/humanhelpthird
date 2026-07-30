@@ -251,26 +251,26 @@
        (count
         matches)
 
-       0
-       nil
+        0
+        nil
 
-       1
-       (first
-        matches)
+        1
+        (first
+         matches)
 
-       (fail!
-        :request.graph/non-unique-active-helper-assignment
-        "More than one active RequestAssignment exists for the helper."
-        {:request/id
-         request-id
+        (fail!
+         :request.graph/non-unique-active-helper-assignment
+         "More than one active RequestAssignment exists for the helper."
+         {:request/id
+          request-id
 
-         :request-assignment/helper
-         helper-id
+          :request-assignment/helper
+          helper-id
 
-         :request-assignment/ids
-         (mapv
-          request/assignment-id
-          matches)})))
+          :request-assignment/ids
+          (mapv
+           request/assignment-id
+           matches)})))
     nil))
 
 (defn active-primary-assignment-for-request
@@ -305,23 +305,23 @@
        (count
         matches)
 
-       0
-       nil
+        0
+        nil
 
-       1
-       (first
-        matches)
+        1
+        (first
+         matches)
 
-       (fail!
-        :request.graph/non-unique-active-primary
-        "More than one active primary RequestAssignment exists."
-        {:request/id
-         request-id
+        (fail!
+         :request.graph/non-unique-active-primary
+         "More than one active primary RequestAssignment exists."
+         {:request/id
+          request-id
 
-         :request-assignment/ids
-         (mapv
-          request/assignment-id
-          matches)})))
+          :request-assignment/ids
+          (mapv
+           request/assignment-id
+           matches)})))
     nil))
 
 ;; =============================================================================

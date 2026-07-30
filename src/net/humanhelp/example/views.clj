@@ -402,7 +402,7 @@
 (defn board-options-dialog-body
   [ctx opts]
   [:div {:id board-options-dialog-body-id
-        :class "pt-4"}
+         :class "pt-4"}
    (board-options-form ctx opts)])
 
 (defn board-options-dialog

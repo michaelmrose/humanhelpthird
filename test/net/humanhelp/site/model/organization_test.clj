@@ -247,9 +247,9 @@
 (defmacro with-store
   [documents & body]
   `(with-store*
-    ~documents
-    (fn []
-      ~@body)))
+     ~documents
+     (fn []
+       ~@body)))
 
 ;; =============================================================================
 ;; Test helpers
@@ -807,55 +807,55 @@
         (ordinary-hierarchy)]
 
     (with-store
-     documents
+      documents
 
-     (testing "nullable and required reads use the expected entity"
-       (is
-        (=
-         organization-id
-         (organization/organization-id
-          (organization/require-organization
-           {}
-           organization-id))))
-
-       (is
-        (=
-         root-group-id
-         (organization/organization-group-id
-          (organization/require-organization-group
-           {}
-           root-group-id))))
-
-       (is
-        (=
-         location-id
-         (organization/location-id
-          (organization/require-location
-           {}
-           location-id))))
-
-       (is
-        (nil?
-         (organization/location
-          {}
-          missing-id))))
-
-     (testing "public reads reject malformed ids and distinguish missing ids"
-       (is
-        (=
-         :organization.core/invalid-location-id
-         (error-type
-          #(organization/location
+      (testing "nullable and required reads use the expected entity"
+        (is
+         (=
+          organization-id
+          (organization/organization-id
+           (organization/require-organization
             {}
-            :not-a-uuid))))
+            organization-id))))
 
-       (is
-        (=
-         :location/not-found
-         (error-type
-          #(organization/require-location
+        (is
+         (=
+          root-group-id
+          (organization/organization-group-id
+           (organization/require-organization-group
             {}
-            missing-id))))))))
+            root-group-id))))
+
+        (is
+         (=
+          location-id
+          (organization/location-id
+           (organization/require-location
+            {}
+            location-id))))
+
+        (is
+         (nil?
+          (organization/location
+           {}
+           missing-id))))
+
+      (testing "public reads reject malformed ids and distinguish missing ids"
+        (is
+         (=
+          :organization.core/invalid-location-id
+          (error-type
+           #(organization/location
+             {}
+             :not-a-uuid))))
+
+        (is
+         (=
+          :location/not-found
+          (error-type
+           #(organization/require-location
+             {}
+             missing-id))))))))
 
 ;; =============================================================================
 ;; Hierarchy traversal and operational state
@@ -863,61 +863,61 @@
 
 (deftest hierarchy-scope-context-test
   (with-store
-   (ordinary-hierarchy)
+    (ordinary-hierarchy)
 
-   (let [root-context
-         (organization/require-scope-context
-          {}
-          organization-scope)
+    (let [root-context
+          (organization/require-scope-context
+           {}
+           organization-scope)
 
-         group-context
-         (organization/require-scope-context
-          {}
-          child-group-scope)
+          group-context
+          (organization/require-scope-context
+           {}
+           child-group-scope)
 
-         location-context
-         (organization/require-scope-context
-          {}
-          location-scope)]
+          location-context
+          (organization/require-scope-context
+           {}
+           location-scope)]
 
-     (testing "root context contains only the root scope"
-       (is
-        (=
-         [organization-scope]
-         (:scope/applicable
+      (testing "root context contains only the root scope"
+        (is
+         (=
+          [organization-scope]
+          (:scope/applicable
+           root-context)))
+
+        (is
+         (organization/scope-context-operational?
           root-context)))
 
-       (is
-        (organization/scope-context-operational?
-         root-context)))
+      (testing "group context is target-first through its parent chain"
+        (is
+         (=
+          [child-group-scope
+           root-group-scope
+           organization-scope]
+          (:scope/applicable
+           group-context))))
 
-     (testing "group context is target-first through its parent chain"
-       (is
-        (=
-         [child-group-scope
-          root-group-scope
-          organization-scope]
-         (:scope/applicable
-          group-context))))
+      (testing "Location context includes every structural ancestor"
+        (is
+         (=
+          [location-scope
+           child-group-scope
+           root-group-scope
+           organization-scope]
+          (:scope/applicable
+           location-context)))
 
-     (testing "Location context includes every structural ancestor"
-       (is
-        (=
-         [location-scope
-          child-group-scope
-          root-group-scope
-          organization-scope]
-         (:scope/applicable
-          location-context)))
+        (is
+         (organization/scope-applies?
+          location-context
+          root-group-scope))
 
-       (is
-        (organization/scope-applies?
-         location-context
-         root-group-scope))
-
-       (is
-        (organization/scope-context-operational?
-         location-context))))))
+        (is
+         (organization/scope-context-operational?
+          location-context))))))
 
 (deftest local-active-versus-effective-operational-test
   (let [organization-document
@@ -945,24 +945,24 @@
          child-group-scope)]
 
     (with-store
-     [organization-document
-      suspended-root
-      child
-      location]
+      [organization-document
+       suspended-root
+       child
+       location]
 
-     (let [location-context
-           (organization/require-scope-context
-            {}
-            location-scope)]
+      (let [location-context
+            (organization/require-scope-context
+             {}
+             location-scope)]
 
-       (is
-        (organization/location-active?
-         location))
+        (is
+         (organization/location-active?
+          location))
 
-       (is
-        (false?
-         (organization/scope-context-operational?
-          location-context)))))))
+        (is
+         (false?
+          (organization/scope-context-operational?
+           location-context)))))))
 
 (deftest hierarchy-corruption-test
   (let [organization-document
@@ -983,18 +983,18 @@
          "Cycle B")]
 
     (with-store
-     [organization-document
-      cycle-a
-      cycle-b]
+      [organization-document
+       cycle-a
+       cycle-b]
 
-     (is
-      (=
-       :organization.graph/hierarchy-cycle
-       (error-type
-        #(organization/require-scope-context
-          {}
-          (organization/organization-group-scope
-           cycle-a-id)))))))
+      (is
+       (=
+        :organization.graph/hierarchy-cycle
+        (error-type
+         #(organization/require-scope-context
+           {}
+           (organization/organization-group-scope
+            cycle-a-id)))))))
 
   (let [current-organization
         (organization-document)
@@ -1019,38 +1019,38 @@
          "Wrong Parent Organization")]
 
     (with-store
-     [current-organization
-      other-organization
-      foreign-parent
-      child]
+      [current-organization
+       other-organization
+       foreign-parent
+       child]
 
-     (is
-      (=
-       :organization.graph/cross-organization-parent
-       (error-type
-        #(organization/require-scope-context
-          {}
-          child-group-scope)))))))
+      (is
+       (=
+        :organization.graph/cross-organization-parent
+        (error-type
+         #(organization/require-scope-context
+           {}
+           child-group-scope)))))))
 
 (deftest missing-scope-test
   (with-store
-   []
+    []
 
-   (is
-    (nil?
-     (organization/scope-context
-      {}
-      (organization/location-scope
-       missing-id))))
+    (is
+     (nil?
+      (organization/scope-context
+       {}
+       (organization/location-scope
+        missing-id))))
 
-   (is
-    (=
-     :organization/scope-not-found
-     (error-type
-      #(organization/require-scope-context
-        {}
-        (organization/location-scope
-         missing-id)))))))
+    (is
+     (=
+      :organization/scope-not-found
+      (error-type
+       #(organization/require-scope-context
+         {}
+         (organization/location-scope
+          missing-id)))))))
 
 ;; =============================================================================
 ;; Guarded scope dependencies
@@ -1058,67 +1058,67 @@
 
 (deftest scope-dependency-test
   (with-store
-   (ordinary-hierarchy)
+    (ordinary-hierarchy)
 
-   (let [{:keys
-          [scope-context
-           transaction-fragment]}
-         (organization/require-scope-dependency
-          {}
-          location-scope)]
+    (let [{:keys
+           [scope-context
+            transaction-fragment]}
+          (organization/require-scope-dependency
+           {}
+           location-scope)]
 
-     (testing "dependency returns the same semantic context as the ordinary read"
-       (is
-        (=
-         (organization/require-scope-context
-          {}
-          location-scope)
-         scope-context)))
+      (testing "dependency returns the same semantic context as the ordinary read"
+        (is
+         (=
+          (organization/require-scope-context
+           {}
+           location-scope)
+          scope-context)))
 
-     (testing "every persisted document used by the hierarchy is guarded"
-       (is
-        (=
-         [[:location location-id]
-          [:organization-group child-group-id]
-          [:organization-group root-group-id]
-          [:organization organization-id]]
-         (guard-targets
-          transaction-fragment)))
+      (testing "every persisted document used by the hierarchy is guarded"
+        (is
+         (=
+          [[:location location-id]
+           [:organization-group child-group-id]
+           [:organization-group root-group-id]
+           [:organization organization-id]]
+          (guard-targets
+           transaction-fragment)))
 
-       (is
-        (every?
-         command/guard?
-         (:guards
-          transaction-fragment)))
+        (is
+         (every?
+          command/guard?
+          (:guards
+           transaction-fragment)))
 
-       (is
-        (empty?
-         (:commands
-          transaction-fragment)))
+        (is
+         (empty?
+          (:commands
+           transaction-fragment)))
 
-       (is
-        (empty?
-         (:changes
-          transaction-fragment))))))
+        (is
+         (empty?
+          (:changes
+           transaction-fragment))))))
 
   (with-store
-   []
+    []
 
-   (is
-    (nil?
-     (organization/scope-dependency
-      {}
-      (organization/location-scope
-       missing-id))))
+    (is
+     (nil?
+      (organization/scope-dependency
+       {}
+       (organization/location-scope
+        missing-id))))
 
-   (is
-    (=
-     :organization/scope-not-found
-     (error-type
-      #(organization/require-scope-dependency
-        {}
-        (organization/location-scope
-         missing-id)))))))
+    (is
+     (=
+      :organization/scope-not-found
+      (error-type
+       #(organization/require-scope-dependency
+         {}
+         (organization/location-scope
+          missing-id)))))))
 
 ;; =============================================================================
 ;; Mutation planning
@@ -1177,191 +1177,191 @@
 
 (deftest create-child-plan-test
   (with-store
-   [(organization-document)]
+    [(organization-document)]
 
-   (with-redefs
-    [fx/uuid7
-     (fn [_seed _now]
-       [new-group-id])]
+    (with-redefs
+     [fx/uuid7
+      (fn [_seed _now]
+        [new-group-id])]
 
-     (let [plan
-           (organization/plan-create-organization-group
-            {:biff.fx/seed 2
-             :biff.fx/now t1}
-            {:parent-scope
-             organization-scope
+      (let [plan
+            (organization/plan-create-organization-group
+             {:biff.fx/seed 2
+              :biff.fx/now t1}
+             {:parent-scope
+              organization-scope
 
-             :name
-             "  Receiving  "})
+              :name
+              "  Receiving  "})
 
-           model-command
-           (plan-command plan)
+            model-command
+            (plan-command plan)
 
-           document
-           (command/after
-            model-command)]
+            document
+            (command/after
+             model-command)]
 
-       (is
-        (command/create?
-         model-command))
+        (is
+         (command/create?
+          model-command))
 
-       (is
-        (=
-         organization-id
-         (:organization-group/organization
-          document)))
+        (is
+         (=
+          organization-id
+          (:organization-group/organization
+           document)))
 
-       (is
-        (=
-         organization-scope
-         (organization/organization-group-parent-scope
-          document)))
+        (is
+         (=
+          organization-scope
+          (organization/organization-group-parent-scope
+           document)))
 
-       (is
-        (=
-         [[:organization organization-id]]
-         (guard-targets
-          (plan-fragment plan))))
+        (is
+         (=
+          [[:organization organization-id]]
+          (guard-targets
+           (plan-fragment plan))))
 
-       (is
-        (=
-         [[:organization organization-id]]
-         (guard-targets
-          (normalized-plan plan))))))))
+        (is
+         (=
+          [[:organization organization-id]]
+          (guard-targets
+           (normalized-plan plan))))))))
 
 (deftest update-plan-test
   (with-store
-   (ordinary-hierarchy)
+    (ordinary-hierarchy)
 
-   (let [plan
-         (organization/plan-rename-location
-          {:biff.fx/now t1}
-          {:location-id location-id
-           :name "  Downtown Store  "
-           :actor-id actor-id})
+    (let [plan
+          (organization/plan-rename-location
+           {:biff.fx/now t1}
+           {:location-id location-id
+            :name "  Downtown Store  "
+            :actor-id actor-id})
 
-         model-command
-         (plan-command plan)
+          model-command
+          (plan-command plan)
 
-         raw-fragment
-         (plan-fragment plan)
-
-         normalized
-         (normalized-plan plan)]
-
-     (testing "planner returns one canonical update command and semantic change"
-       (is
-        (command/update?
-         model-command))
-
-       (is
-        (=
-         :rename
-         (command/operation
-          model-command)))
-
-       (is
-        (=
-         "Downtown Store"
-         (:location/name
-          (command/after
-           model-command))))
-
-       (is
-        (=
-         :location
-         (:topic
-          (plan-change plan))))
-
-       (is
-        (=
-         location-id
-         (:id
-          (plan-change plan)))))
-
-     (testing "raw planning guards every Organization read dependency"
-       (is
-        (=
-         [[:location location-id]
-          [:organization-group child-group-id]
-          [:organization-group root-group-id]
-          [:organization organization-id]]
-         (guard-targets
-          raw-fragment))))
-
-     (testing "normalization validates and canonicalizes guards without applying command redundancy"
-       (is
-        (=
-         [[:location location-id]
-          [:organization-group child-group-id]
-          [:organization-group root-group-id]
-          [:organization organization-id]]
-         (guard-targets
-          normalized))))
-
-     (testing "effective guards remove the dependency already enforced by the update command"
-       (is
-        (=
-         [[:organization-group child-group-id]
-          [:organization-group root-group-id]
-          [:organization organization-id]]
-         (effective-guard-targets
-          plan))))
-
-     (testing "transaction-wide dispatch metadata stays outside the fragment"
-       (is
-        (not
-         (contains?
           raw-fragment
-          :entry-fn)))
+          (plan-fragment plan)
 
-       (is
-        (=
-         {:coalesce-key
-          [:location location-id]}
-         ((:entry-fn
-           (:transaction-options plan))
-          (plan-change plan))))))))
+          normalized
+          (normalized-plan plan)]
+
+      (testing "planner returns one canonical update command and semantic change"
+        (is
+         (command/update?
+          model-command))
+
+        (is
+         (=
+          :rename
+          (command/operation
+           model-command)))
+
+        (is
+         (=
+          "Downtown Store"
+          (:location/name
+           (command/after
+            model-command))))
+
+        (is
+         (=
+          :location
+          (:topic
+           (plan-change plan))))
+
+        (is
+         (=
+          location-id
+          (:id
+           (plan-change plan)))))
+
+      (testing "raw planning guards every Organization read dependency"
+        (is
+         (=
+          [[:location location-id]
+           [:organization-group child-group-id]
+           [:organization-group root-group-id]
+           [:organization organization-id]]
+          (guard-targets
+           raw-fragment))))
+
+      (testing "normalization validates and canonicalizes guards without applying command redundancy"
+        (is
+         (=
+          [[:location location-id]
+           [:organization-group child-group-id]
+           [:organization-group root-group-id]
+           [:organization organization-id]]
+          (guard-targets
+           normalized))))
+
+      (testing "effective guards remove the dependency already enforced by the update command"
+        (is
+         (=
+          [[:organization-group child-group-id]
+           [:organization-group root-group-id]
+           [:organization organization-id]]
+          (effective-guard-targets
+           plan))))
+
+      (testing "transaction-wide dispatch metadata stays outside the fragment"
+        (is
+         (not
+          (contains?
+           raw-fragment
+           :entry-fn)))
+
+        (is
+         (=
+          {:coalesce-key
+           [:location location-id]}
+          ((:entry-fn
+            (:transaction-options plan))
+           (plan-change plan))))))))
 
 (deftest close-plans-exist-test
   (with-store
-   (ordinary-hierarchy)
+    (ordinary-hierarchy)
 
-   (doseq [[planner input entity-type]
-           [[organization/plan-close-organization
-             {:organization-id organization-id
-              :actor-id actor-id}
-             :organization]
+    (doseq [[planner input entity-type]
+            [[organization/plan-close-organization
+              {:organization-id organization-id
+               :actor-id actor-id}
+              :organization]
 
-            [organization/plan-close-organization-group
-             {:organization-group-id child-group-id
-              :actor-id actor-id}
-             :organization-group]
+             [organization/plan-close-organization-group
+              {:organization-group-id child-group-id
+               :actor-id actor-id}
+              :organization-group]
 
-            [organization/plan-close-location
-             {:location-id location-id
-              :actor-id actor-id}
-             :location]]]
+             [organization/plan-close-location
+              {:location-id location-id
+               :actor-id actor-id}
+              :location]]]
 
-     (let [plan
-           (planner
-            {:biff.fx/now t1}
-            input)
+      (let [plan
+            (planner
+             {:biff.fx/now t1}
+             input)
 
-           model-command
-           (plan-command plan)]
+            model-command
+            (plan-command plan)]
 
-       (is
-        (=
-         :close
-         (command/operation
-          model-command)))
+        (is
+         (=
+          :close
+          (command/operation
+           model-command)))
 
-       (is
-        (=
-         entity-type
-         (:model/entity-type
-          model-command)))))))
+        (is
+         (=
+          entity-type
+          (:model/entity-type
+           model-command)))))))
 
 ;; =============================================================================
 ;; Move planning and hierarchy safety
@@ -1369,82 +1369,82 @@
 
 (deftest move-plan-test
   (with-store
-   (ordinary-hierarchy)
+    (ordinary-hierarchy)
 
-   (let [plan
-         (organization/plan-move-location
-          {:biff.fx/now t1}
-          {:location-id
-           location-id
+    (let [plan
+          (organization/plan-move-location
+           {:biff.fx/now t1}
+           {:location-id
+            location-id
 
-           :parent-scope
-           destination-group-scope
+            :parent-scope
+            destination-group-scope
 
-           :actor-id
-           actor-id
+            :actor-id
+            actor-id
 
-           :reason
-           :test/reorganization})
+            :reason
+            :test/reorganization})
 
-         model-command
-         (plan-command plan)
+          model-command
+          (plan-command plan)
 
-         moved
-         (command/after
-          model-command)
+          moved
+          (command/after
+           model-command)
 
-         raw-targets
-         (guard-targets
-          (plan-fragment plan))
+          raw-targets
+          (guard-targets
+           (plan-fragment plan))
 
-         normalized-targets
-         (guard-targets
-          (normalized-plan plan))
+          normalized-targets
+          (guard-targets
+           (normalized-plan plan))
 
-         effective-targets
-         (effective-guard-targets
-          plan)]
+          effective-targets
+          (effective-guard-targets
+           plan)]
 
-     (is
-      (=
-       destination-group-scope
-       (organization/location-parent-scope
-        moved)))
+      (is
+       (=
+        destination-group-scope
+        (organization/location-parent-scope
+         moved)))
 
-     (testing "move depends on both current and destination hierarchy snapshots"
-       (is
-        (=
-         #{[:location location-id]
-           [:organization-group child-group-id]
-           [:organization-group root-group-id]
-           [:organization-group destination-group-id]
-           [:organization organization-id]}
-         (set raw-targets))))
+      (testing "move depends on both current and destination hierarchy snapshots"
+        (is
+         (=
+          #{[:location location-id]
+            [:organization-group child-group-id]
+            [:organization-group root-group-id]
+            [:organization-group destination-group-id]
+            [:organization organization-id]}
+          (set raw-targets))))
 
-     (testing "normalization collapses repeated shared guards but retains the command target guard"
-       (is
-        (=
-         #{[:location location-id]
-           [:organization-group child-group-id]
-           [:organization-group root-group-id]
-           [:organization-group destination-group-id]
-           [:organization organization-id]}
-         (set normalized-targets)))
+      (testing "normalization collapses repeated shared guards but retains the command target guard"
+        (is
+         (=
+          #{[:location location-id]
+            [:organization-group child-group-id]
+            [:organization-group root-group-id]
+            [:organization-group destination-group-id]
+            [:organization organization-id]}
+          (set normalized-targets)))
 
-       (is
-        (=
-         (count normalized-targets)
-         (count
-          (set normalized-targets)))))
+        (is
+         (=
+          (count normalized-targets)
+          (count
+           (set normalized-targets)))))
 
-     (testing "effective guards remove the dependency already enforced by the move command"
-       (is
-        (=
-         #{[:organization-group child-group-id]
-           [:organization-group root-group-id]
-           [:organization-group destination-group-id]
-           [:organization organization-id]}
-         (set effective-targets)))))))
+      (testing "effective guards remove the dependency already enforced by the move command"
+        (is
+         (=
+          #{[:organization-group child-group-id]
+            [:organization-group root-group-id]
+            [:organization-group destination-group-id]
+            [:organization organization-id]}
+          (set effective-targets)))))))
 
 (deftest move-rejects-descendant-cycle-test
   (let [organization-document
@@ -1463,21 +1463,21 @@
          "Child")]
 
     (with-store
-     [organization-document
-      root
-      child]
+      [organization-document
+       root
+       child]
 
-     (is
-      (=
-       :organization-group/cycle
-       (error-type
-        #(organization/plan-move-organization-group
-          {:biff.fx/now t1}
-          {:organization-group-id
-           root-group-id
+      (is
+       (=
+        :organization-group/cycle
+        (error-type
+         #(organization/plan-move-organization-group
+           {:biff.fx/now t1}
+           {:organization-group-id
+            root-group-id
 
-           :parent-scope
-           child-group-scope})))))))
+            :parent-scope
+            child-group-scope})))))))
 
 (deftest move-rejects-other-organization-test
   (let [current-organization
@@ -1502,23 +1502,23 @@
          "Other Group")]
 
     (with-store
-     [current-organization
-      other-organization
-      group
-      other-group]
+      [current-organization
+       other-organization
+       group
+       other-group]
 
-     (is
-      (=
-       :organization/ownership-mismatch
-       (error-type
-        #(organization/plan-move-organization-group
-          {:biff.fx/now t1}
-          {:organization-group-id
-           root-group-id
+      (is
+       (=
+        :organization/ownership-mismatch
+        (error-type
+         #(organization/plan-move-organization-group
+           {:biff.fx/now t1}
+           {:organization-group-id
+            root-group-id
 
-           :parent-scope
-           (organization/organization-group-scope
-            other-group-id)})))))))
+            :parent-scope
+            (organization/organization-group-scope
+             other-group-id)})))))))
 
 (deftest create-and-move-require-operational-destination-test
   (let [organization-document
@@ -1533,26 +1533,26 @@
          {:now t1})]
 
     (with-store
-     [organization-document
-      suspended]
+      [organization-document
+       suspended]
 
-     (with-redefs
-      [fx/uuid7
-       (fn [_seed _now]
-         [new-location-id])]
+      (with-redefs
+       [fx/uuid7
+        (fn [_seed _now]
+          [new-location-id])]
 
-       (is
-        (=
-         :organization/scope-not-operational
-         (error-type
-          #(organization/plan-create-location
-            {:biff.fx/seed 3
-             :biff.fx/now t2}
-            {:parent-scope
-             root-group-scope
+        (is
+         (=
+          :organization/scope-not-operational
+          (error-type
+           #(organization/plan-create-location
+             {:biff.fx/seed 3
+              :biff.fx/now t2}
+             {:parent-scope
+              root-group-scope
 
-             :name
-             "Blocked"}))))))))
+              :name
+              "Blocked"}))))))))
 
 ;; =============================================================================
 ;; Planner validation
@@ -1560,30 +1560,30 @@
 
 (deftest planner-requires-existing-targets-test
   (with-store
-   []
+    []
 
-   (is
-    (=
-     :organization/scope-not-found
-     (error-type
-      #(organization/plan-rename-location
-        {:biff.fx/now t1}
-        {:location-id missing-id
-         :name "Missing"}))))
+    (is
+     (=
+      :organization/scope-not-found
+      (error-type
+       #(organization/plan-rename-location
+         {:biff.fx/now t1}
+         {:location-id missing-id
+          :name "Missing"}))))
 
-   (is
-    (=
-     :organization/scope-not-found
-     (error-type
-      #(organization/plan-create-location
-        {:biff.fx/seed 4
-         :biff.fx/now t1}
-        {:parent-scope
-         (organization/organization-group-scope
-          missing-id)
+    (is
+     (=
+      :organization/scope-not-found
+      (error-type
+       #(organization/plan-create-location
+         {:biff.fx/seed 4
+          :biff.fx/now t1}
+         {:parent-scope
+          (organization/organization-group-scope
+           missing-id)
 
-         :name
-         "Missing Parent"}))))))
+          :name
+          "Missing Parent"}))))))
 
 (deftest planner-requires-time-and-seed-test
   (is

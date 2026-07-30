@@ -442,7 +442,7 @@
   [ctx {:keys [request revision view-state]}]
   (let [user        (current-user ctx)
         view-state' (assoc view-state
-                            :visible-revision revision)
+                           :visible-revision revision)
         fragments   (board-fragments ctx view-state')]
     (html
      (with-board-state-oob
