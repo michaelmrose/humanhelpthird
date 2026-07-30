@@ -674,9 +674,6 @@
 (def active-collaborator-assignments
   domain/active-collaborator-assignments)
 
-(def active-assignment-for-helper
-  domain/active-assignment-for-helper)
-
 (def active-primary-assignment
   domain/active-primary-assignment)
 
