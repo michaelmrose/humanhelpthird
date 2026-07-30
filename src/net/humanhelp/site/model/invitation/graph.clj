@@ -77,18 +77,6 @@
      (:biff.xtdb/node ctx)))
     ctx
 
-<<<<<<< HEAD
-   (fail!
-    :invitation.graph/missing-biff-connection
-    "Invitation reads require :biff/conn."
-    {:ctx-keys
-     (when
-      (map?
-       ctx)
-       (set
-        (keys
-         ctx)))})))
-=======
     (fail!
      :invitation.graph/missing-biff-connection
      "Invitation reads require Biff 2 XTDB context with :biff.xtdb/connection-pool or :biff.xtdb/node."
@@ -97,7 +85,6 @@
        (map? ctx)
         (set
          (keys ctx)))})))
->>>>>>> biff2-migration
 
 (defn- malli-options
   [ctx]
