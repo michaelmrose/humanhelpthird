@@ -8,9 +8,10 @@
    Views receive already-resolved values and perform no persistence work."
   (:require
    [gesso.core :as g]
+   [gesso.fx :as fx]
+   [gesso.model.tx :as model.tx]
    [net.humanhelp.middleware :as mid]
    [net.humanhelp.site.mock-data :as mock-data]
-   [net.humanhelp.site.model.fx :as model.fx]
    [net.humanhelp.site.model.organization.core :as organization]
    [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.model.user.core :as user]
@@ -151,7 +152,7 @@
             :site.app/missing-user-id})))]
     (user/require-user
      ctx
-     {:user-id user-id})))
+     user-id)))
 
 ;; =============================================================================
 ;; Temporary development Location source
@@ -169,6 +170,58 @@
     request-document)
    mock-location
    :location/name))
+
+;; =============================================================================
+;; Request mutation execution
+;; =============================================================================
+
+(defn- planned-transaction
+  [{:keys
+    [transaction-fragment
+     transaction-options]}]
+  (merge
+   transaction-fragment
+   transaction-options))
+
+(fx/defmachine create-request-machine
+  :start
+  (fn [{::keys
+        [create-request-input]
+        :as ctx}]
+    (let [{:keys
+           [result]
+           :as planned}
+          (request/plan-create-request
+           ctx
+           create-request-input)]
+      {::create-request-result
+       result
+
+       ::create-request-transaction
+       [model.tx/transact-effect
+        (planned-transaction
+         planned)]
+
+       :biff.fx/next
+       :finish}))
+
+  :finish
+  (fn [{::keys
+        [create-request-result
+         create-request-transaction]}]
+    {:biff.fx/return
+     (assoc
+      create-request-result
+      :transaction
+      create-request-transaction)}))
+
+(defn- commit-create-request
+  [ctx input]
+  (create-request-machine
+   (assoc
+    ctx
+    ::create-request-input
+    input)))
 
 ;; =============================================================================
 ;; Get Help entrypoint
@@ -292,7 +345,7 @@
 
         :else
         (let [result
-              (request/create-request
+              (commit-create-request
                (assoc
                 ctx
                 :current-user/id
@@ -333,7 +386,7 @@
         request-document
         (when
          request-id
-          (request/request-document
+          (request/request
            ctx
            request-id))]
 
@@ -395,14 +448,9 @@
   "Graph resolvers required by the current customer Get Help vertical slice."
   (vec
    (concat
-    (:biff.graph/resolvers
-     user/module)
-
-    (:biff.graph/resolvers
-     organization/module)
-
-    (:biff.graph/resolvers
-     request/module))))
+    user/resolvers
+    organization/resolvers
+    request/resolvers)))
 
 (def module
   {:routes
@@ -411,18 +459,14 @@
     {:middleware
      [mid/wrap-signed-in]})
 
-   ;; net.humanhelp.schema already contributes User and Request schemas.
-   ;; Organization was not part of that existing application registry, so this
-   ;; flow contributes only the Organization schema it newly requires. This
-   ;; avoids changing the application-wide schema namespace and avoids
-   ;; duplicate User/Request schema registrations.
-   :schema
-   (:schema
-    organization/module)
-
+   ;; All five top-level model schemas are assembled once by
+   ;; net.humanhelp.schema. This site module contributes only the resolvers
+   ;; required by the current Get Help vertical slice.
    :biff.graph/resolvers
    resolvers
 
+   ;; gesso.model.tx is the one application-wide transaction effect. The old
+   ;; HumanHelp model.fx bridge has been removed.
    :biff.fx/handlers
    (:biff.fx/handlers
-    model.fx/module)})
+    (model.tx/module))})

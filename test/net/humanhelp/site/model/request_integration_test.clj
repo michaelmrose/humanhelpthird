@@ -1,33 +1,36 @@
 (ns net.humanhelp.site.model.request-integration-test
-  "Real XTDB integration coverage for the Request create/read boundary.
+  "Real XTDB integration coverage for the rewritten Request create/read boundary.
 
-   This namespace intentionally does not stub Graph, model.fx, Gesso Live
-   transaction execution, HoneySQL formatting, or XTDB. It seeds only the
-   prerequisite Organization, Location, and User documents, then exercises the
-   public Request API end to end:
+   This suite deliberately keeps one end-to-end test seam that does not stub
+   Request Graph reads, gesso.model transaction execution, Gesso Live, or XTDB.
 
-     request/create-request
-       -> shared model.fx
-       -> Gesso Live transaction execution
+   Prerequisite Organization, Location, and User documents are seeded with
+   canonical model commands through gesso.model.tx. Request creation then
+   exercises the current architecture:
+
+     request/plan-create-request
+       -> gesso.model.tx/transact!
+       -> Gesso Live
        -> XTDB
-       -> request/request-document
+       -> request/request
 
-   The raw XTDB assertion distinguishes persistence failure from a Request
-   Graph/read failure."
+   The second test carries the committed Request through the actual site
+   request-page handler so route parameter parsing and the public Request/User
+   read boundaries remain covered."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [gesso.graph :as graph]
    [gesso.live.core :as live]
+   [gesso.model.tx :as model.tx]
    [malli.core :as m]
    [malli.registry :as mr]
-   [net.humanhelp.schema :as schema]
-   [net.humanhelp.site.model.common :as model.common]
-   [net.humanhelp.site.model.fx :as model.fx]
+   [net.humanhelp.site.app :as site.app]
    [net.humanhelp.site.model.organization.core :as organization]
    [net.humanhelp.site.model.organization.domain :as organization.domain]
    [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.model.user.core :as user]
-   [net.humanhelp.site.model.user.domain.identity :as identity]
+   [net.humanhelp.site.model.user.domain :as user.domain]
+   [net.humanhelp.site.views.get-help.await-help :as await-help]
+   [net.humanhelp.site.views.get-help.request-finished :as request-finished]
    [xtdb.api :as xt]
    [xtdb.node :as xtn])
   (:import
@@ -54,10 +57,19 @@
   (Instant/parse
    "2026-07-24T12:00:00Z"))
 
+(def request-time
+  (Instant/parse
+   "2026-07-24T12:01:00Z"))
+
 (def request-content
-  {:title "Integration test request"
-   :details "Created through the real Request transaction path."
-   :location-detail "Integration test location"})
+  {:title
+   "Integration test request"
+
+   :details
+   "Created through the real Request transaction path."
+
+   :location-detail
+   "Integration test location"})
 
 ;; =============================================================================
 ;; Real test runtime
@@ -70,53 +82,61 @@
   []
   (or
    @!runtime
+
    (throw
     (ex-info
      "Request integration-test runtime is not initialized."
      {}))))
 
-(def model-modules
-  [user/module
-   organization/module
-   request/module])
+(def model-schema
+  (merge
+   user/schema
+   organization/schema
+   request/schema))
 
 (def malli-opts
   {:registry
    (mr/composite-registry
     m/default-registry
-    schema/schema)})
+    model-schema)})
 
 (defn- live-rules
   []
-  [{:when-topic :request
+  [{:when-topic
+    :request
+
     :expand
     (fn [_ctx change]
       [change])}])
 
 (defn- with-runtime
   [f]
-  (with-open [node (xtn/start-node {})]
+  (with-open
+   [node
+    (xtn/start-node
+     {})]
+
     (let [live-system
           (live/create
            {:rules
             (live-rules)
 
             :dispatch-options
-            {:threads 1
-             :queue-size 32}})
+            {:threads
+             1
+
+             :queue-size
+             32}})
 
           ctx
-          {:biff/node node
-           :biff/conn node
-           :xtdb/node node
+          {:biff/node
+           node
 
-           :biff/modules
-           model-modules
+           :biff/conn
+           node
 
-           :biff.fx/handlers
-           (merge
-            graph/fx-handlers
-            model.fx/handlers)
+           :xtdb/node
+           node
 
            :biff/malli-opts
            malli-opts
@@ -126,75 +146,157 @@
 
       (reset!
        !runtime
-       {:node node
-        :live-system live-system
-        :ctx ctx})
+       {:node
+        node
+
+        :live-system
+        live-system
+
+        :ctx
+        ctx})
 
       (try
         (f)
+
         (finally
-          (reset! !runtime nil)
-          (live/close! live-system))))))
+          (reset!
+           !runtime
+           nil)
+
+          (live/close!
+           live-system))))))
 
 (use-fixtures
  :each
  with-runtime)
 
 ;; =============================================================================
-;; Prerequisite persisted documents
+;; Prerequisite model commands
 ;; =============================================================================
 
-(defn- command-document
-  [command]
-  (model.common/command-document
-   command))
-
-(defn- organization-document
+(defn- organization-command
   []
-  (command-document
-   (organization.domain/create-organization-command
-    {:id organization-id
-     :name "Request Integration Test Organization"
-     :now fixture-time})))
+  (organization.domain/create-organization-command
+   {:id
+    organization-id
 
-(defn- location-document
-  []
-  (command-document
-   (organization.domain/create-location-command
-    {:id location-id
-     :organization-id organization-id
-     :parent-scope
-     (organization/organization-scope
-      organization-id)
-     :name "Request Integration Test Location"
-     :now fixture-time})))
+    :name
+    "Request Integration Test Organization"
 
-(defn- user-document
+    :now
+    fixture-time}))
+
+(defn- location-command
   []
-  (identity/new-user
-   {:id user-id
-    :email "request-integration@example.com"
-    :email-verified? true
-    :display-name "Request Integration User"
-    :now fixture-time}))
+  (organization.domain/create-location-command
+   {:id
+    location-id
+
+    :organization-id
+    organization-id
+
+    :parent-scope
+    (organization/organization-scope
+     organization-id)
+
+    :name
+    "Request Integration Test Location"
+
+    :now
+    fixture-time}))
+
+(defn- user-command
+  []
+  (user.domain/create-user-command
+   {:id
+    user-id
+
+    :email
+    "request-integration@example.com"
+
+    :email-verified?
+    true
+
+    :display-name
+    "Request Integration User"
+
+    :now
+    fixture-time}))
 
 (defn- seed-prerequisites!
   []
-  (let [{:keys [node]}
+  (let [{:keys
+         [ctx]}
         (runtime)]
-    (xt/execute-tx
-     node
-     [[:put-docs
-       :organization
-       (organization-document)]
+    (model.tx/transact!
+     ctx
+     {:commands
+      [(organization-command)
+       (location-command)
+       (user-command)]
 
-      [:put-docs
-       :location
-       (location-document)]
+      :emit
+      false})))
 
-      [:put-docs
-       :user
-       (user-document)]])))
+;; =============================================================================
+;; Request create/commit helper
+;; =============================================================================
+
+(defn- transaction-plan
+  [{:keys
+    [transaction-fragment
+     transaction-options]}]
+  (merge
+   transaction-fragment
+   transaction-options))
+
+(defn- create-request!
+  [ctx]
+  (let [ctx
+        (assoc
+         ctx
+
+         :current-user/id
+         user-id
+
+         :biff.fx/now
+         request-time
+
+         :biff.fx/seed
+         7)
+
+        planned
+        (request/plan-create-request
+         ctx
+         {:organization-id
+          organization-id
+
+          :location-id
+          location-id
+
+          :content
+          request-content})
+
+        transaction
+        (model.tx/transact!
+         ctx
+         (transaction-plan
+          planned))]
+
+    (assoc
+     (:result
+      planned)
+
+     :transaction
+     transaction)))
+
+(defn- consistency-ctx
+  [fallback transaction]
+  (or
+   (:ctx
+    transaction)
+
+   fallback))
 
 ;; =============================================================================
 ;; Diagnostics
@@ -202,7 +304,8 @@
 
 (defn- raw-request-rows
   [request-id]
-  (let [{:keys [node]}
+  (let [{:keys
+         [node]}
         (runtime)]
     (xt/q
      node
@@ -216,68 +319,78 @@
 (deftest created-request-is-persisted-and-readable-test
   (seed-prerequisites!)
 
-  (let [{:keys [ctx]}
+  (let [{:keys
+         [ctx]}
         (runtime)
 
         create-result
-        (request/create-request
-         (assoc
-          ctx
-          :current-user/id
-          user-id)
-         {:organization-id organization-id
-          :location-id location-id
-          :content request-content})
+        (create-request!
+         ctx)
 
         created
-        (:request create-result)
+        (:request
+         create-result)
+
+        transaction
+        (:transaction
+         create-result)
 
         request-id
         (request/request-id
-         created)]
+         created)
 
-    (testing "the public create workflow commits successfully"
+        read-ctx
+        (consistency-ctx
+         ctx
+         transaction)]
+
+    (testing
+     "the current Request plan commits successfully"
       (is
        (=
         :committed
-        (get-in
-         create-result
-         [:transaction
-          :commit/status])))
+        (:commit/status
+         transaction)))
 
       (is
        (uuid?
         request-id)))
 
-    (testing "the committed Request physically exists in XTDB"
+    (testing
+     "the committed Request physically exists in XTDB"
       (let [rows
             (raw-request-rows
              request-id)]
         (is
          (=
           1
-          (count rows))
+          (count
+           rows))
          (str
-          "Request create reported success, but XTDB did not contain exactly "
+          "Request create committed, but XTDB did not contain exactly "
           "one current Request row. request-id="
           request-id
           " rows="
-          (pr-str rows)))))
+          (pr-str
+           rows)))))
 
-    (testing "the normal public Request read can immediately find it"
+    (testing
+     "the public Request read immediately finds the committed document"
       (let [loaded
-            (request/request-document
-             ctx
+            (request/request
+             read-ctx
              request-id)]
+
         (is
          (some?
           loaded)
          (str
           "XTDB contains the newly-created Request, but "
-          "request/request-document returned nil. request-id="
+          "request/request returned nil. request-id="
           request-id))
 
-        (when loaded
+        (when
+         loaded
           (is
            (=
             request-id
@@ -300,3 +413,121 @@
             location-id
             (request/location-id
              loaded))))))))
+
+(deftest created-request-is-reachable-through-site-request-page-test
+  (seed-prerequisites!)
+
+  (let [{:keys
+         [ctx]}
+        (runtime)
+
+        create-result
+        (create-request!
+         ctx)
+
+        created
+        (:request
+         create-result)
+
+        request-id
+        (request/request-id
+         created)
+
+        read-ctx
+        (consistency-ctx
+         ctx
+         (:transaction
+          create-result))
+
+        rendered
+        (fn [_ctx props]
+          {:status
+           200
+
+           :body
+           props})]
+
+    (testing
+     "the site Request handler accepts Reitit keyword path params"
+      (with-redefs
+       [await-help/page
+        rendered
+
+        request-finished/page
+        rendered]
+
+        (let [response
+              (site.app/request-page
+               (assoc
+                read-ctx
+
+                :session
+                {:uid
+                 user-id}
+
+                :path-params
+                {:request-id
+                 (str
+                  request-id)}))]
+
+          (is
+           (=
+            200
+            (:status
+             response))
+           (str
+            "A persisted Request owned by the signed-in User should render, "
+            "not redirect. request-id="
+            request-id
+            " response="
+            (pr-str
+             response)))
+
+          (when
+           (=
+            200
+            (:status
+             response))
+            (is
+             (=
+              request-id
+              (some->
+               response
+               :body
+               :request-document
+               request/request-id)))))))
+
+    (testing
+     "the handler also accepts string-keyed path params"
+      (with-redefs
+       [await-help/page
+        rendered
+
+        request-finished/page
+        rendered]
+
+        (let [response
+              (site.app/request-page
+               (assoc
+                read-ctx
+
+                :session
+                {:uid
+                 user-id}
+
+                :path-params
+                {"request-id"
+                 (str
+                  request-id)}))]
+
+          (is
+           (=
+            200
+            (:status
+             response))
+           (str
+            "String-keyed request-id should also render. request-id="
+            request-id
+            " response="
+            (pr-str
+             response))))))))

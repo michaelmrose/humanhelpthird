@@ -1,20 +1,25 @@
 (ns net.humanhelp.schema
   "Application-wide Malli schema registry.
 
-   Shared primitives and model-owned schema registries are assembled here and
-   contributed to Biff through module.
+   Shared application primitives and the public schema contributions of every
+   top-level HumanHelp model are assembled here and contributed to Biff.
 
-   Model schema namespaces may require net.humanhelp.schema.common, but must not
-   require this namespace. That preserves the dependency direction:
+   Model internals must not require this namespace. Model schema namespaces may
+   depend on net.humanhelp.schema.common for shared primitive schemas, while
+   application assembly depends only on each model's public core boundary:
 
      schema.common
-       -> model schemas
-         -> application schema assembly"
+       -> model schema
+         -> model core
+           -> application schema assembly"
   (:require
    [com.biffweb :as biff]
    [net.humanhelp.schema.common :as common]
-   [net.humanhelp.site.model.request.schema :as request.schema]
-   [net.humanhelp.site.model.user.schema :as user.schema]))
+   [net.humanhelp.site.model.invitation.core :as invitation]
+   [net.humanhelp.site.model.membership.core :as membership]
+   [net.humanhelp.site.model.organization.core :as organization]
+   [net.humanhelp.site.model.request.core :as request]
+   [net.humanhelp.site.model.user.core :as user]))
 
 ;; =============================================================================
 ;; Application-owned schemas
@@ -32,7 +37,9 @@
      ::common/id]
 
     [:msg/content
-     [:string {:max 10000}]]
+     [:string
+      {:max
+       10000}]]
 
     [:msg/sent-at
      ::common/zdt]]})
@@ -42,10 +49,18 @@
 ;; =============================================================================
 
 (def schema
+  "Complete HumanHelp Malli registry.
+
+   Each top-level model owns and exposes its schema contribution through its
+   public core namespace. This assembly layer does not reach into model schema
+   implementation namespaces."
   (biff/safe-merge
    common/schema
-   user.schema/schema
-   request.schema/schema
+   user/schema
+   organization/schema
+   membership/schema
+   invitation/schema
+   request/schema
    app-schema))
 
 ;; =============================================================================
@@ -53,4 +68,5 @@
 ;; =============================================================================
 
 (def module
-  {:schema schema})
+  {:schema
+   schema})
