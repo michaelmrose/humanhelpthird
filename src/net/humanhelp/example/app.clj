@@ -15,8 +15,8 @@
    It should not own Hiccup/OOB response shape beyond choosing which view helper
    to return. Board-state OOB rendering is delegated to views.clj."
   (:require
-   [com.biffweb.experimental :as biffx]
    [clojure.string :as str]
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.core :as g]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.example.live :as app-live]
@@ -173,24 +173,41 @@
 
 (defn- user-record-from-db
   [ctx]
-  (let [node (:biff/node ctx)
-        uid  (->uuid (session-uid ctx))]
-    (when (and node uid)
+  (let [uid
+        (->uuid
+         (session-uid ctx))]
+    (when
+     (and
+      uid
+      (or
+       (:biff.xtdb/connection-pool ctx)
+       (:biff.xtdb/node ctx)))
       (try
         (first
-         (biffx/q node
-                  {:select [:xt/id
-                            :user/email
-                            :user/phone
-                            :user/phone-display
-                            :user/phone-verified-at
-                            :user/joined-at]
-                   :from :user
-                   :where [:= :xt/id uid]}))
-        (catch Exception e
-          (println "[humanhelp] current-user lookup failed"
-                   {:message (.getMessage e)
-                    :uid uid})
+         (biff.xtdb/q
+          ctx
+          {:select
+           [:xt/id
+            :user/email
+            :user/phone
+            :user/phone-display
+            :user/phone-verified-at
+            :user/joined-at]
+
+           :from
+           [:user]
+
+           :where
+           [:= :xt/id uid]}))
+        (catch
+         Exception e
+          (println
+           "[humanhelp] current-user lookup failed"
+           {:message
+            (.getMessage e)
+
+            :uid
+            uid})
           nil)))))
 
 (defn- current-user-id

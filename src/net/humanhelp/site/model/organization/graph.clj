@@ -5,7 +5,7 @@
    resolvers. This namespace adds only hierarchy-derived values: scopes,
    ancestry, effective operational state, and authoritative scope contexts."
   (:require
-   [gesso.graph :as graph]
+   [com.biffweb.graph :as graph]
    [gesso.model.core :as model]
    [net.humanhelp.site.model.organization.domain :as organization]
    [net.humanhelp.site.model.organization.schema :as organization.schema]))

@@ -129,13 +129,7 @@
              32}})
 
           ctx
-          {:biff/node
-           node
-
-           :biff/conn
-           node
-
-           :xtdb/node
+          {:biff.xtdb/node
            node
 
            :biff/malli-opts

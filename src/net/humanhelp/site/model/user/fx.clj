@@ -13,7 +13,7 @@
    It does not own User transition semantics, authorization, Memberships,
    Organizations, Invitations, authentication policy, or transaction commit."
   (:require
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.command :as command]
    [gesso.model.core :as model]
    [gesso.model.tx :as model.tx]

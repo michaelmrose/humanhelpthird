@@ -1,10 +1,12 @@
 (ns net.humanhelp.middleware
   (:require
+   [clojure.pprint :as pprint]
    [clojure.string :as str]
-   [com.biffweb :as biff]
+   [com.biffweb.ring :as biff.ring]
    [muuntaja.middleware :as muuntaja]
    [ring.middleware.anti-forgery :as csrf]
-   [ring.middleware.defaults :as rd]))
+   [ring.middleware.defaults :as rd]
+   [rum.core :as rum]))
 
 (defn wrap-redirect-signed-in [handler]
   (fn [{:keys [session] :as ctx}]
@@ -80,19 +82,49 @@
   (fn [ctx]
     (let [response (handler ctx)]
       (println "REQUEST")
-      (biff/pprint ctx)
+      (pprint/pprint ctx)
       (def ctx* ctx)
       (println "RESPONSE")
-      (biff/pprint response)
+      (pprint/pprint response)
       (def response* response)
       response)))
 
+;; -----------------------------------------------------------------------------
+;; Rum response compatibility
+;; -----------------------------------------------------------------------------
+
+(defn wrap-render-rum
+  "Preserve the Biff 1 route contract for handlers that return Rum/Hiccup vectors.
+
+   Biff 2 renders Hiccup automatically for biff.ring/defroute handlers, but
+   HumanHelp still uses ordinary Reitit handlers. Keep this boundary local until
+   those routes are intentionally migrated."
+  [handler]
+  (fn [ctx]
+    (let [response
+          (handler ctx)]
+      (if
+       (vector? response)
+        {:status
+         200
+
+         :headers
+         {"content-type"
+          "text/html"}
+
+         :body
+         (str
+          "<!DOCTYPE html>\n"
+          (rum/render-static-markup
+           response))}
+        response))))
+
 (defn wrap-site-defaults [handler]
   (-> handler
-      biff/wrap-render-rum
-      biff/wrap-anti-forgery-websockets
+      wrap-render-rum
+      biff.ring/wrap-anti-forgery-websockets
       csrf/wrap-anti-forgery
-      biff/wrap-session
+      biff.ring/wrap-session
       muuntaja/wrap-params
       muuntaja/wrap-format
       (rd/wrap-defaults (-> rd/site-defaults
@@ -109,8 +141,8 @@
 
 (defn wrap-base-defaults [handler]
   (-> handler
-      biff/wrap-https-scheme
-      biff/wrap-resource
-      biff/wrap-internal-error
-      biff/wrap-ssl
-      biff/wrap-log-requests))
+      biff.ring/wrap-https-scheme
+      biff.ring/wrap-resource
+      biff.ring/wrap-internal-error
+      biff.ring/wrap-ssl
+      biff.ring/wrap-log-requests))

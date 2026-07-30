@@ -11,7 +11,7 @@
    core boundary."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.command :as command]
    [gesso.model.core :as model]
    [gesso.model.tx :as model.tx]

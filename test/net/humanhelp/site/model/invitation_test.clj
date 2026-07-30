@@ -15,8 +15,8 @@
    domain/schema/graph/fx namespaces."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [com.biffweb.experimental :as biffx]
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.command :as command]
    [gesso.model.core :as model]
    [gesso.model.tx :as model.tx]
@@ -1560,11 +1560,12 @@
          documents)]
 
     (with-redefs
-     [biffx/q
-      (fn [_connection query]
+     [biff.xtdb/q
+      (fn [_ctx query]
         (let [entity-type
-              (:from
-               query)
+              (first
+               (:from
+                query))
 
               where
               (:where
@@ -1599,8 +1600,8 @@
        ~@body)))
 
 (def graph-ctx
-  {:biff/conn
-   ::test-connection})
+  {:biff.xtdb/node
+   ::test-node})
 
 ;; =============================================================================
 ;; Graph reads

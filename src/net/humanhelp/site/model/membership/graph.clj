@@ -17,7 +17,7 @@
    remains in organization.core. Transaction guards and mutation planning remain
    in membership.fx."
   (:require
-   [com.biffweb.experimental :as biffx]
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.membership.domain :as membership]
@@ -58,18 +58,24 @@
      {:value value}))
   value)
 
-(defn- connection!
+(defn- query-context!
   [ctx]
-  (or
-   (:biff/conn ctx)
-   (fail!
-    :membership.graph/missing-biff-connection
-    "Membership reads require :biff/conn."
-    {:ctx-keys
-     (when
-      (map? ctx)
-       (set
-        (keys ctx)))})))
+  (if
+   (and
+    (map? ctx)
+    (or
+     (:biff.xtdb/connection-pool ctx)
+     (:biff.xtdb/node ctx)))
+    ctx
+
+    (fail!
+     :membership.graph/missing-biff-connection
+     "Membership reads require Biff 2 XTDB context with :biff.xtdb/connection-pool or :biff.xtdb/node."
+     {:ctx-keys
+      (when
+       (map? ctx)
+        (set
+         (keys ctx)))})))
 
 (defn- deref-if-needed
   [value]
@@ -88,8 +94,8 @@
 
 (defn- q
   [ctx query]
-  (biffx/q
-   (connection! ctx)
+  (biff.xtdb/q
+   (query-context! ctx)
    query))
 
 (defn- normalize-row
@@ -120,7 +126,7 @@
       descriptor)
 
      :from
-     (:entity-type descriptor)
+     [(:entity-type descriptor)]
 
      :where
      where})))

@@ -1,35 +1,26 @@
 (ns repl
   (:require
-   [com.biffweb :as biff]
-   [com.biffweb.experimental :as biffx]
-   [net.humanhelp :as main]
-   [xtdb.api :as xt])
+   [com.biffweb.background :as biff.background]
+   [com.biffweb.config :as biff.config]
+   [com.biffweb.xtdb :as biff.xtdb]
+   [net.humanhelp :as main])
   (:import
    [java.time Instant]))
 
 ;; REPL-driven development
 ;; ----------------------------------------------------------------------------------------
-;; If you're new to REPL-driven development, Biff makes it easy to get started: whenever
-;; you save a file, your changes will be evaluated. Biff is structured so that in most
-;; cases, that's all you'll need to do for your changes to take effect. (See main/refresh
-;; below for more details.)
-;;
-;; The `clj -M:dev dev` command also starts an nREPL server on port 7888, so if you're
-;; already familiar with REPL-driven development, you can connect to that with your editor.
-;;
-;; If you're used to jacking in with your editor first and then starting your app via the
-;; REPL, you will need to instead connect your editor to the nREPL server that `clj -M:dev
-;; dev` starts. e.g. if you use emacs, instead of running `cider-jack-in`, you would run
-;; `cider-connect`. See "Connecting to a Running nREPL Server:"
-;; https://docs.cider.mx/cider/basics/up_and_running.html#connect-to-a-running-nrepl-server
+;; The Biff 2 dev task starts the application, watches source files, and starts an nREPL
+;; server. Connect your editor to that running nREPL server rather than starting a second
+;; application process from the editor.
 ;; ----------------------------------------------------------------------------------------
 
-;; This function should only be used from the REPL. Regular application code
-;; should receive the system map from the parent Biff component. For example,
-;; the use-jetty component merges the system map into incoming Ring requests.
-(defn get-context []
-  (biff/merge-context @main/system))
+;; This function should only be used from the REPL. Regular application code should receive
+;; the system map from its parent component or from the Ring request context.
+(defn get-context
+  []
+  @main/system)
 
+<<<<<<< HEAD
 (defn add-fixtures []
   (let [user-id (random-uuid)]
     (biffx/submit-tx (get-context)
@@ -41,41 +32,129 @@
                                        :user user-id
                                        :text "hello there"
                                        :sent-at (Instant/now)}]])))
+=======
+(defn add-fixtures
+  []
+  (let [user-id
+        (random-uuid)]
+    (biff.xtdb/submit-tx
+     (get-context)
+     [[:put-docs
+       :user
+       {:xt/id
+        user-id
+>>>>>>> biff2-migration
 
-(defn check-config []
-  (let [prod-config (biff/use-aero-config {:biff.config/profile "prod"})
-        dev-config  (biff/use-aero-config {:biff.config/profile "dev"})
-        ;; Add keys for any other secrets you've added to resources/config.edn
-        secret-keys [:biff.middleware/cookie-secret
-                     :biff/jwt-secret
-                     :mailersend/api-key
-                     :recaptcha/secret-key
-                     ; ...
-                     ]
-        get-secrets (fn [{:keys [biff/secret] :as config}]
-                      (into {}
-                            (map (fn [k]
-                                   [k (secret k)]))
-                            secret-keys))]
-    {:prod-config prod-config
-     :dev-config dev-config
-     :prod-secrets (get-secrets prod-config)
-     :dev-secrets (get-secrets dev-config)}))
+        :email
+        "a@example.com"
+
+        :foo
+        "Some Value"
+
+        :joined-at
+        (Instant/now)}]
+
+      [:put-docs
+       :msg
+       {:xt/id
+        (random-uuid)
+
+        :user
+        user-id
+
+        :text
+        "hello there"
+
+        :sent-at
+        (Instant/now)}]])))
+
+(defn secret-value
+  [config k]
+  (some->
+   (get config k)
+   force))
+
+(defn check-config
+  []
+  (let [prod-config
+        (biff.config/use-aero-config
+         {:biff.config/profile
+          :prod})
+
+        dev-config
+        (biff.config/use-aero-config
+         {:biff.config/profile
+          :dev})
+
+        ;; Add keys for any other secrets you've added to resources/config.edn.
+        secret-keys
+        [:biff.ring/cookie-secret
+         :mailersend/api-key
+         :recaptcha/secret-key]
+
+        get-secrets
+        (fn [config]
+          (into
+           {}
+           (map
+            (fn [k]
+              [k
+               (secret-value
+                config
+                k)]))
+           secret-keys))]
+    {:prod-config
+     prod-config
+
+     :dev-config
+     dev-config
+
+     :prod-secrets
+     (get-secrets
+      prod-config)
+
+     :dev-secrets
+     (get-secrets
+      dev-config)}))
+
+(defn submit-job
+  [queue-id job]
+  (first
+   (biff.background/submit-jobs
+    (get-context)
+    queue-id
+    [job])))
+
+(defn submit-job-for-result
+  [queue-id job]
+  (let [result
+        (promise)]
+    (biff.background/submit-jobs
+     (get-context)
+     queue-id
+     [(assoc
+       job
+       :biff/callback
+       #(deliver
+         result
+         %))])
+    result))
 
 (comment
-  ;; Call this function if you make a change to main/initial-system,
-  ;; main/components, :tasks, :queues, config.env, or deps.edn.
+  ;; Call this function after changing runtime components, module assembly,
+  ;; config.env, config.edn, or deps.edn.
   (main/refresh)
 
-  ;; Call this in dev if you'd like to add some seed data to your database. If you edit the seed
-  ;; data, you can reset the database by running `rm -r storage/xtdb2` (DON'T run that in prod),
-  ;; restarting your app, and calling add-fixtures again.
+  ;; Add starter fixture data. To reset a local XTDB database, stop the app,
+  ;; remove the configured local XTDB storage directory, and restart it.
   (add-fixtures)
 
-  ;; Query the database
-  (let [{:keys [biff/node]} (get-context)]
-    (xt/q node "select * from user"))
+  ;; Query the database.
+  (biff.xtdb/q
+   (get-context)
+   "select * from user")
 
+<<<<<<< HEAD
   ;; Update an existing user's email address
   (let [{:keys [biff/node] :as ctx} (get-context)
         [{user-id :xt/id}] (xt/q node ["select _id from user where email = ?"
@@ -83,9 +162,40 @@
     (biffx/submit-tx ctx
                      [[:patch-docs :user {:xt/id user-id
                                           :email "new.address@example.com"}]]))
+=======
+  ;; Update an existing user's email address.
+  (let [ctx
+        (get-context)
+>>>>>>> biff2-migration
 
-  (sort (keys (get-context)))
+        [{user-id
+          :xt/id}]
+        (biff.xtdb/q
+         ctx
+         ["select _id from user where email = ?"
+          "hello@example.com"])]
+    (biff.xtdb/submit-tx
+     ctx
+     [[:patch-docs
+       :user
+       {:xt/id
+        user-id
+
+        :email
+        "new.address@example.com"}]]))
+
+  (sort
+   (keys
+    (get-context)))
 
   ;; Check the terminal for output.
-  (biff/submit-job (get-context) :echo {:foo "bar"})
-  (deref (biff/submit-job-for-result (get-context) :echo {:foo "bar"})))
+  (submit-job
+   :echo
+   {:foo
+    "bar"})
+
+  (deref
+   (submit-job-for-result
+    :echo
+    {:foo
+     "bar"})))

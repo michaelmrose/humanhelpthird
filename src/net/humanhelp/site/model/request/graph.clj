@@ -18,8 +18,8 @@
    Organization documents. Those models remain available only through their
    public cores to Request FX."
   (:require
-   [com.biffweb.experimental :as biffx]
-   [gesso.graph :as graph]
+   [com.biffweb.graph :as graph]
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.request.domain :as request]
@@ -92,11 +92,29 @@
       (malli-options
        ctx)})))
 
+(defn- query-context!
+  [ctx]
+  (if
+   (and
+    (map? ctx)
+    (or
+     (:biff.xtdb/connection-pool ctx)
+     (:biff.xtdb/node ctx)))
+    ctx
+
+    (fail!
+     :request.graph/missing-biff-connection
+     "Request reads require Biff 2 XTDB context with :biff.xtdb/connection-pool or :biff.xtdb/node."
+     {:ctx-keys
+      (when
+       (map? ctx)
+        (set
+         (keys ctx)))})))
+
 (defn- q
   [ctx query]
-  (biffx/q
-   (:biff/conn
-    ctx)
+  (biff.xtdb/q
+   (query-context! ctx)
    query))
 
 (defn- rows
@@ -182,7 +200,7 @@
        request-assignment-document-columns
 
        :from
-       request/assignment-entity-type
+       [request/assignment-entity-type]
 
        :where
        (assignments-for-request-where
@@ -206,7 +224,7 @@
        request-assignment-document-columns
 
        :from
-       request/assignment-entity-type
+       [request/assignment-entity-type]
 
        :where
        (assignments-for-request-where
@@ -235,7 +253,7 @@
             request-assignment-document-columns
 
             :from
-            request/assignment-entity-type
+            [request/assignment-entity-type]
 
             :where
             [:and
@@ -289,7 +307,7 @@
             request-assignment-document-columns
 
             :from
-            request/assignment-entity-type
+            [request/assignment-entity-type]
 
             :where
             [:and
@@ -410,7 +428,7 @@
        request-document-columns
 
        :from
-       request/request-entity-type
+       [request/request-entity-type]
 
        :where
        (requests-for-location-where

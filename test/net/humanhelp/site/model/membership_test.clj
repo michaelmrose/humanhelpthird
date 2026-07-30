@@ -37,8 +37,8 @@
      require-admin-dependency."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [com.biffweb.experimental :as biffx]
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.command :as command]
    [gesso.model.core :as model]
    [gesso.model.tx :as model.tx]
@@ -1675,11 +1675,11 @@
         captured
         (atom nil)]
     (with-redefs
-     [biffx/q
-      (fn [connection query]
+     [biff.xtdb/q
+      (fn [ctx query]
         (reset!
          captured
-         [connection
+         [ctx
           query])
 
         [second-membership
@@ -1690,20 +1690,21 @@
         [first-membership
          second-membership]
         (membership.graph/memberships-for-user
-         {:biff/conn
-          :connection}
+         {:biff.xtdb/node
+          :node}
          user-id))))
 
-    (let [[connection query]
+    (let [[ctx query]
           @captured]
       (is
        (=
-        :connection
-        connection))
+        {:biff.xtdb/node
+         :node}
+        ctx))
 
       (is
        (=
-        :membership
+        [:membership]
         (:from
          query)))
 
@@ -1733,7 +1734,7 @@
         (revoked-membership)]
     (testing "active Membership is current"
       (with-redefs
-       [biffx/q
+       [biff.xtdb/q
         (fn [& _]
           [active])]
 
@@ -1741,14 +1742,14 @@
          (=
           active
           (membership.graph/current-membership
-           {:biff/conn
-            :connection}
+           {:biff.xtdb/node
+            :node}
            user-id
            organization-id)))))
 
     (testing "suspended Membership remains the current relationship"
       (with-redefs
-       [biffx/q
+       [biff.xtdb/q
         (fn [& _]
           [suspended])]
 
@@ -1756,28 +1757,28 @@
          (=
           suspended
           (membership.graph/current-membership
-           {:biff/conn
-            :connection}
+           {:biff.xtdb/node
+            :node}
            user-id
            organization-id)))))
 
     (testing "revoked Membership is historical"
       (with-redefs
-       [biffx/q
+       [biff.xtdb/q
         (fn [& _]
           [revoked])]
 
         (is
          (nil?
           (membership.graph/current-membership
-           {:biff/conn
-            :connection}
+           {:biff.xtdb/node
+            :node}
            user-id
            organization-id)))))
 
     (testing "multiple non-revoked Memberships are persisted corruption"
       (with-redefs
-       [biffx/q
+       [biff.xtdb/q
         (fn [& _]
           [active
            (membership-document
@@ -1789,8 +1790,8 @@
           :membership.graph/non-unique-current-membership
           (error-type
            #(membership.graph/current-membership
-             {:biff/conn
-              :connection}
+             {:biff.xtdb/node
+              :node}
              user-id
              organization-id))))))))
 
@@ -1819,11 +1820,11 @@
         captured
         (atom nil)]
     (with-redefs
-     [biffx/q
-      (fn [connection query]
+     [biff.xtdb/q
+      (fn [ctx query]
         (reset!
          captured
-         [connection
+         [ctx
           query])
 
         [supervisor
@@ -1834,8 +1835,8 @@
         [helper
          supervisor]
         (membership.graph/role-assignments-for-membership
-         {:biff/conn
-          :connection}
+         {:biff.xtdb/node
+          :node}
          membership-id))))
 
     (is

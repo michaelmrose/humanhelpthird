@@ -1,13 +1,76 @@
 {:paths ["src" "resources" "target/resources"]
 
  :deps
- {com.biffweb/biff
+ {org.clojure/clojure
+  {:mvn/version "1.12.5"}
+
+  ;; ---------------------------------------------------------------------------
+  ;; Biff 2
+  ;;
+  ;; Biff 2 is a monorepo whose internal libraries use sibling :local/root
+  ;; dependencies. HumanHelp declares the libraries it needs explicitly and
+  ;; excludes those sibling Biff dependencies so tools.deps does not create
+  ;; competing gitlib checkout paths for the same library.
+  ;; ---------------------------------------------------------------------------
+
+  com.biffweb/core
   {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "0e1e207df27acb1758ec3604eb56af50b7bb47ea"
-   :exclusions [com.xtdb/xtdb-core
-                com.xtdb/xtdb-jdbc
-                com.xtdb/xtdb-rocksdb
-                org.postgresql/postgresql]}
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/core"}
+
+  com.biffweb/fx
+  {:git/url "https://github.com/jacobobryant/biff"
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/fx"
+   :exclusions [com.biffweb/core]}
+
+  com.biffweb/graph
+  {:git/url "https://github.com/jacobobryant/biff"
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/graph"
+   :exclusions [com.biffweb/core
+                com.biffweb/fx]}
+
+  com.biffweb/xtdb
+  {:git/url "https://github.com/jacobobryant/biff"
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/xtdb"
+   :exclusions [com.biffweb/core
+                com.biffweb/fx
+                com.biffweb/graph]}
+
+  com.biffweb/config
+  {:git/url "https://github.com/jacobobryant/biff"
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/config"
+   :exclusions [com.biffweb/core]}
+
+  com.biffweb/background
+  {:git/url "https://github.com/jacobobryant/biff"
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/background"
+   :exclusions [com.biffweb/core
+                com.biffweb/fx]}
+
+  com.biffweb/ring
+  {:git/url "https://github.com/jacobobryant/biff"
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/ring"
+   :exclusions [com.biffweb/core
+                com.biffweb/fx]}
+
+  com.biffweb/authenticate
+  {:git/url "https://github.com/jacobobryant/biff"
+   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root "libs/authenticate"
+   :exclusions [com.biffweb/fx]}
+
+  ;; ---------------------------------------------------------------------------
+  ;; XTDB 2.2
+  ;;
+  ;; Biff 2 currently declares XTDB 2.1.0. HumanHelp deliberately overrides
+  ;; the XTDB libraries to the 2.2 line used by the application and Gesso.
+  ;; ---------------------------------------------------------------------------
 
   com.xtdb/xtdb-api
   {:mvn/version "2.2.0-beta1"}
@@ -20,6 +83,33 @@
 
   com.zaxxer/HikariCP
   {:mvn/version "7.0.2"}
+
+  ;; ---------------------------------------------------------------------------
+  ;; HumanHelp direct dependencies
+  ;; ---------------------------------------------------------------------------
+
+  metosin/malli
+  {:mvn/version "0.20.1"}
+
+  rum/rum
+  {:mvn/version "0.12.11"
+   :exclusions [cljsjs/react
+                cljsjs/react-dom]}
+
+  clj-http/clj-http
+  {:mvn/version "3.13.1"}
+
+  tick/tick
+  {:mvn/version "1.0.1"}
+
+  org.clojure/tools.logging
+  {:mvn/version "1.3.1"}
+
+  org.clojure/tools.namespace
+  {:mvn/version "1.5.1"}
+
+  nrepl/nrepl
+  {:mvn/version "1.7.0"}
 
   cheshire/cheshire
   {:mvn/version "6.1.0"}
@@ -39,7 +129,8 @@
   {:mvn/version "1.7.36"}
 
   ;; Released Gesso is the default.
-  ;; Use the :local-gesso alias to override this with ../gesso.
+  ;; During the Biff 2 migration, use :local-gesso so HumanHelp and Gesso use
+  ;; the same Biff 2 module coordinates above.
   michaelmrose/gesso
   {:git/url "https://github.com/michaelmrose/gesso.git"
    :git/tag "v0.2.1"
@@ -56,10 +147,18 @@
 
   :dev
   {:extra-deps
-   {com.biffweb/tasks
+   {com.biffweb/run
     {:git/url "https://github.com/jacobobryant/biff"
-     :git/sha "0e1e207df27acb1758ec3604eb56af50b7bb47ea"
-     :deps/root "libs/tasks"}}
+     :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+     :deps/root "libs/run"}
+
+    com.biffweb/tasks
+    {:git/url "https://github.com/jacobobryant/biff"
+     :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+     :deps/root "libs/tasks"
+     :exclusions [com.biffweb/core
+                  com.biffweb/config
+                  com.biffweb/run]}}
 
    :extra-paths ["dev" "test"]
 
@@ -73,7 +172,7 @@
     "-Dbiff.env.BIFF_PROFILE=dev"]
 
    :main-opts
-   ["-m" "com.biffweb.task-runner" "tasks/tasks"]}
+   ["-m" "com.biffweb.tasks"]}
 
   :prod
   {:jvm-opts

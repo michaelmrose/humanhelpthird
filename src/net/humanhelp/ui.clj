@@ -1,9 +1,9 @@
 (ns net.humanhelp.ui
   (:require
    [clojure.java.io :as io]
-   [com.biffweb :as biff]
    [gesso.core :as g]
    [net.humanhelp.settings :as settings]
+   [ring.middleware.anti-forgery :as anti-forgery]
    [ring.util.response :as ring-response]
    [rum.core :as rum]))
 
@@ -40,6 +40,235 @@
     :attr "data-shape"
     :label "Shape"
     :description "Adjust border radius and component softness."}])
+
+;; -----------------------------------------------------------------------------
+;; HTML helpers
+;; -----------------------------------------------------------------------------
+
+(defn- google-fonts
+  [families]
+  [:link
+   {:href
+    (apply
+     str
+     "https://fonts.googleapis.com/css2?display=swap"
+     (for [family
+           families]
+       (str
+        "&family="
+        family)))
+
+    :rel
+    "stylesheet"}])
+
+(defn base-html
+  "Wrap contents in the HTML document structure formerly supplied by Biff's
+   Rum helpers."
+  [{:base/keys
+    [title
+     description
+     lang
+     image
+     icon
+     url
+     canonical
+     font-families
+     head]}
+   & contents]
+  [:html
+   {:lang
+    lang
+
+    :style
+    {:min-height
+     "100%"
+
+     :height
+     "auto"}}
+
+   [:head
+    [:title
+     title]
+
+    [:meta
+     {:name
+      "description"
+
+      :content
+      description}]
+
+    [:meta
+     {:content
+      title
+
+      :property
+      "og:title"}]
+
+    [:meta
+     {:content
+      description
+
+      :property
+      "og:description"}]
+
+    (when
+     image
+      [:<>
+       [:meta
+        {:content
+         image
+
+         :property
+         "og:image"}]
+
+       [:meta
+        {:content
+         "summary_large_image"
+
+         :name
+         "twitter:card"}]])
+
+    (when-some [open-graph-url
+                (or
+                 url
+                 canonical)]
+      [:meta
+       {:content
+        open-graph-url
+
+        :property
+        "og:url"}])
+
+    (when-some [canonical-url
+                (or
+                 canonical
+                 url)]
+      [:link
+       {:ref
+        "canonical"
+
+        :href
+        canonical-url}])
+
+    [:meta
+     {:name
+      "viewport"
+
+      :content
+      "width=device-width, initial-scale=1"}]
+
+    (when
+     icon
+      [:link
+       {:rel
+        "icon"
+
+        :type
+        "image/png"
+
+        :sizes
+        "16x16"
+
+        :href
+        icon}])
+
+    [:meta
+     {:charset
+      "utf-8"}]
+
+    (when
+     (not-empty
+      font-families)
+      [:<>
+       [:link
+        {:href
+         "https://fonts.googleapis.com"
+
+         :rel
+         "preconnect"}]
+
+       [:link
+        {:crossorigin
+         "crossorigin"
+
+         :href
+         "https://fonts.gstatic.com"
+
+         :rel
+         "preconnect"}]
+
+       (google-fonts
+        font-families)])
+
+    (into
+     [:<>]
+     head)]
+
+   [:body
+    {:style
+     {:position
+      "absolute"
+
+      :width
+      "100%"
+
+      :min-height
+      "100%"
+
+      :display
+      "flex"
+
+      :flex-direction
+      "column"}}
+
+    contents]])
+
+(defn form
+  "Return a POST form with the current Ring anti-forgery token.
+
+   :hidden may contain additional hidden field names and values."
+  [{:keys
+    [hidden]
+    :as
+    opts}
+   & body]
+  (let [hidden-fields
+        (cond->
+         (or
+          hidden
+          {})
+          (some?
+           anti-forgery/*anti-forgery-token*)
+          (assoc
+           "__anti-forgery-token"
+           anti-forgery/*anti-forgery-token*))]
+    [:form
+     (->
+      (merge
+       {:method
+        "post"}
+       opts)
+      (dissoc
+       :hidden)
+      (assoc-in
+       [:style
+        :margin-bottom]
+       0))
+
+     (for [[field-name
+            field-value]
+           hidden-fields]
+       [:input
+        {:type
+         "hidden"
+
+         :name
+         field-name
+
+         :value
+         field-value}])
+
+     body]))
 
 ;; -----------------------------------------------------------------------------
 ;; Static assets
@@ -375,7 +604,7 @@
 
 (defn logout-form
   []
-  (biff/form
+  (form
    {:action "/auth/signout"}
    (g/button
     {:variant :ghost
@@ -495,7 +724,7 @@
   [{:keys [::recaptcha] :as ctx} & body]
   (let [{:keys [color-theme density typography shape mode]} (theme-state ctx)]
     (apply
-     biff/base-html
+     base-html
      (-> ctx
          (merge
           (g/theme {:color-theme color-theme

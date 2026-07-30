@@ -32,7 +32,7 @@
    through gesso.model.tx and then re-read before advancing a multi-transaction
    acceptance workflow."
   (:require
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.command :as command]
    [gesso.model.core :as model]
    [gesso.model.tx :as model.tx]

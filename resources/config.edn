@@ -1,65 +1,136 @@
-;; See https://github.com/juxt/aero and https://biffweb.com/docs/api/utilities/#use-aero-config.
-;; #biff/env and #biff/secret will load values from the environment and from config.env.
-{:biff/base-url #profile {:prod #join ["https://" #biff/env DOMAIN]
-                          :default #join ["http://localhost:" #ref [:biff/port]]}
- :biff/host     #or [#biff/env "HOST"
-                     #profile {:dev "0.0.0.0"
-                               :default "localhost"}]
- :biff/port     #long #or [#biff/env "PORT" 8080]
+;; See https://github.com/juxt/aero.
+;; #biff/env and #biff/secret load values from the process environment and
+;; from the root config.env file.
 
- :biff.xtdb2/storage            #keyword #or [#profile {:prod #biff/env PROD_XTDB_STORAGE}
-                                              "local"]
- :biff.xtdb2.storage/bucket     #biff/env XTDB_STORAGE_BUCKET
- :biff.xtdb2.storage/endpoint   #biff/env XTDB_STORAGE_ENDPOINT
- :biff.xtdb2.storage/access-key #biff/env XTDB_STORAGE_ACCESS_KEY
- :biff.xtdb2.storage/secret-key #biff/secret XTDB_STORAGE_SECRET_KEY
+{:biff.config/system-properties
+ {"clojure.main.report"
+  "stderr"
 
- :biff.beholder/enabled         #profile {:dev true :default false}
- :biff.beholder/paths           ["src" "resources" "test"]
- :biff.add-libs/aliases         #profile {:dev [:dev] :prod [:prod]}
- :biff/eval-paths               ["src" "test"]
- :biff.middleware/secure        #profile {:dev false :default true}
- :biff.middleware/cookie-secret #biff/secret COOKIE_SECRET
- :biff/jwt-secret               #biff/secret JWT_SECRET
- :biff.refresh/enabled          #profile {:dev true :default false}
+  "clojure.tools.logging.factory"
+  "clojure.tools.logging.impl/slf4j-factory"}
 
- :mailersend/api-key  #biff/secret MAILERSEND_API_KEY
- :mailersend/from     #biff/env MAILERSEND_FROM
- :mailersend/reply-to #biff/env MAILERSEND_REPLY_TO
+ ;; =============================================================================
+ ;; HTTP / Ring
+ ;; =============================================================================
 
- :recaptcha/secret-key #biff/secret RECAPTCHA_SECRET_KEY
- :recaptcha/site-key   #biff/env RECAPTCHA_SITE_KEY
+ :biff.ring/base-url
+ #or [#biff/env BASE_URL
+      #profile
+       {:prod
+        #join ["https://"
+               #biff/env DOMAIN]
 
- :biff.nrepl/port #or [#biff/env NREPL_PORT "7888"]
- :biff.nrepl/args ["--port" #ref [:biff.nrepl/port]
-                   "--middleware" "[cider.nrepl/cider-middleware,refactor-nrepl.middleware/wrap-refactor]"]
+        :default
+        #join ["http://localhost:"
+               #ref [:biff.ring/port]]}]
 
- :biff.system-properties/clojure.tools.logging.factory "clojure.tools.logging.impl/slf4j-factory"
+ :biff.ring/host
+ #or [#biff/env HOST
+      #profile
+       {:dev
+        "0.0.0.0"
 
- :biff.tasks/server                 #biff/env DOMAIN
- :biff.tasks/main-ns                net.humanhelp
- :biff.tasks/on-soft-deploy         "\"(net.humanhelp/on-save @net.humanhelp/system)\""
- :biff.tasks/generate-assets-fn     net.humanhelp/generate-assets!
- :biff.tasks/css-output             "target/resources/public/css/main.css"
- :biff.tasks/deploy-untracked-files [#ref [:biff.tasks/css-output]
-                                     "config.env"]
+        :default
+        "localhost"}]
 
- ;; `clj -M:dev prod-dev` will run the soft-deploy task whenever files in these directories are changed.
- :biff.tasks/watch-dirs             ["src" "dev" "resources" "test"]
+ :biff.ring/port
+ #long #or [#biff/env PORT
+            "8080"]
 
- ;; The version of the Taliwind standalone bin to install. See `clj -M:dev css -h`. If you change
- ;; this, run `rm bin/tailwindcss; clj -M:dev install-tailwind`.
- :biff.tasks/tailwind-version       "v3.4.17"
+ :biff.ring/secure
+ #boolean #or [#biff/env SECURE
+               #profile
+                {:dev
+                 "false"
 
- ;; :rsync is the default if rsync is on the path; otherwise :git is the default. Set this to :git
- ;; if you have rsync on the path but still want to deploy with git.
- ;; :biff.tasks/deploy-with :rsync
+                 :default
+                 "true"}]
 
- ;; Uncomment this line if you're deploying with git and your local branch is called main instead of
- ;; master:
- ;; :biff.tasks/git-deploy-cmd ["git" "push" "prod" "main:master"]
- :biff.tasks/git-deploy-cmd ["git" "push" "prod" "master"]
+ :biff.ring/cookie-secret
+ #biff/secret COOKIE_SECRET
 
- ;; Uncomment this line if you have any ssh-related problems:
- ;; :biff.tasks/skip-ssh-agent true
- }
+ ;; HumanHelp currently terminates TLS outside the Aleph process.
+ :biff.ring/ssl-redirect
+ false
+
+ ;; =============================================================================
+ ;; XTDB
+ ;; =============================================================================
+
+ :biff.xtdb/storage
+ #keyword #or [#biff/env PROD_XTDB_STORAGE
+               "local"]
+
+ :biff.xtdb/storage-bucket
+ #biff/env XTDB_STORAGE_BUCKET
+
+ :biff.xtdb/storage-endpoint
+ #biff/env XTDB_STORAGE_ENDPOINT
+
+ :biff.xtdb/storage-access-key
+ #biff/env XTDB_STORAGE_ACCESS_KEY
+
+ :biff.xtdb/storage-secret-key
+ #biff/secret XTDB_STORAGE_SECRET_KEY
+
+ ;; =============================================================================
+ ;; HumanHelp integrations
+ ;; =============================================================================
+
+ ;; Retained during migration. Remove this key and JWT_SECRET after confirming
+ ;; that no HumanHelp-owned authentication flow still consumes it.
+ :biff/jwt-secret
+ #biff/secret JWT_SECRET
+
+ :mailersend/api-key
+ #biff/secret MAILERSEND_API_KEY
+
+ :mailersend/from
+ #biff/env MAILERSEND_FROM
+
+ :mailersend/reply-to
+ #biff/env MAILERSEND_REPLY_TO
+
+ :recaptcha/secret-key
+ #biff/secret RECAPTCHA_SECRET_KEY
+
+ :recaptcha/site-key
+ #biff/env RECAPTCHA_SITE_KEY
+
+ ;; This remains a plain string because wrap-dev-load-token currently compares
+ ;; it directly rather than forcing a Biff secret delay.
+ :net.humanhelp.load/dev-token
+ #biff/env GESSOTEST_LOAD_TOKEN
+
+ ;; =============================================================================
+ ;; Biff development and deployment tasks
+ ;; =============================================================================
+
+ :biff.tasks/main-ns
+ net.humanhelp
+
+ :biff.tasks/nrepl-port
+ #long #or [#biff/env NREPL_PORT
+            "7888"]
+
+ :biff.tasks/domain
+ #or [#biff/env SERVER
+      #biff/env DOMAIN]
+
+ :biff.tasks/deployment-name
+ "humanhelp"
+
+ :biff.tasks/css-output
+ "target/resources/public/css/main.css"
+
+ :biff.tasks/deploy-untracked-files
+ [#ref [:biff.tasks/css-output]
+
+  {:src
+   "config.prod.env"
+
+   :dest
+   "config.env"}]
+
+ :biff.tasks/tailwind-version
+ "4.3.0"}

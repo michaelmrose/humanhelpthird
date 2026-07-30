@@ -31,7 +31,7 @@
    the Request document instead of attempting to encode the entire active
    assignment set as independent persistence assertions."
   (:require
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.command :as command]
    [gesso.model.tx :as model.tx]
    [net.humanhelp.site.model.membership.core :as membership]

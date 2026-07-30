@@ -27,7 +27,7 @@
    are carried there."
   (:require
    [clojure.string :as str]
-   [com.biffweb.experimental :as biffx]
+   [com.biffweb.xtdb :as biff.xtdb]
    [malli.core :as m]
    [malli.error :as me]
    [xtdb.api :as xt]))
@@ -1143,37 +1143,54 @@
 ;; Context / XTDB helpers
 ;; -----------------------------------------------------------------------------
 
-(defn queryable-from-ctx
+(defn query-context!
   [ctx]
-  (or (:biff/conn ctx)
-      (:biff/db ctx)
-      (:biff/node ctx)
-      (:xtdb/node ctx)
-      (throw
-       (ex-info "Human Help model requires :biff/conn, :biff/db, :biff/node, or :xtdb/node for reads."
-                {:ctx-keys (when (map? ctx)
-                             (set (keys ctx)))}))))
+  (if
+   (and
+    (map? ctx)
+    (or
+     (:biff.xtdb/connection-pool ctx)
+     (:biff.xtdb/node ctx)))
+    ctx
+    (throw
+     (ex-info
+      "Human Help example reads require Biff 2 XTDB context with :biff.xtdb/connection-pool or :biff.xtdb/node."
+      {:ctx-keys
+       (when
+        (map? ctx)
+         (set
+          (keys ctx)))}))))
 
-(defn tx-connectable-from-ctx
+(defn tx-node!
   [ctx]
-  (or (:biff/node ctx)
-      (:xtdb/node ctx)
-      (:biff/conn ctx)
-      (throw
-       (ex-info "Human Help model requires :biff/node, :xtdb/node, or :biff/conn for writes."
-                {:ctx-keys (when (map? ctx)
-                             (set (keys ctx)))}))))
+  (or
+   (:biff.xtdb/node ctx)
+   (throw
+    (ex-info
+     "Human Help example writes require :biff.xtdb/node."
+     {:ctx-keys
+      (when
+       (map? ctx)
+        (set
+         (keys ctx)))}))))
 
 (defn q
   [ctx query]
-  (biffx/q (queryable-from-ctx ctx) query))
+  (biff.xtdb/q
+   (query-context! ctx)
+   query))
 
 (defn execute-tx!
   [ctx tx-ops]
-  (let [tx-ops (vec (remove nil? tx-ops))]
-    (when (seq tx-ops)
+  (let [tx-ops
+        (vec
+         (remove
+          nil?
+          tx-ops))]
+    (when
+     (seq tx-ops)
       (xt/execute-tx
-       (tx-connectable-from-ctx ctx)
+       (tx-node! ctx)
        tx-ops))))
 
 ;; -----------------------------------------------------------------------------
@@ -1269,7 +1286,7 @@
   [ctx]
   (q ctx
      {:select store-fields
-      :from store-table
+      :from [store-table]
       :where [:= :store/id store-id]}))
 
 (defn store-meta-doc
@@ -1280,14 +1297,14 @@
   [ctx]
   (q ctx
      {:select request-fields
-      :from request-table
+      :from [request-table]
       :where [:= :request/store-id store-id]}))
 
 (defn event-docs
   [ctx]
   (q ctx
      {:select event-fields
-      :from event-table
+      :from [event-table]
       :where [:= :event/store-id store-id]}))
 
 ;; -----------------------------------------------------------------------------

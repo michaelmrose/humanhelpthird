@@ -9,7 +9,7 @@
    compose the returned fragments with other model fragments, then commit the
    complete atomic plan through gesso.model.tx."
   (:require
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.command :as command]
    [gesso.model.tx :as model.tx]
    [net.humanhelp.site.model.organization.domain :as organization]

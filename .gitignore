@@ -16,3 +16,5 @@
 .shadow-cljs/
 target/resources/public/css/main.css
 bin/tailwindcss
+/.biff-dev-status.edn
+/config.prod.env

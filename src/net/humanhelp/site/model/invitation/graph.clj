@@ -26,7 +26,7 @@
    No mutation, authorization, token generation, token hashing, or transaction
    composition belongs here."
   (:require
-   [com.biffweb.experimental :as biffx]
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.invitation.domain :as invitation]
@@ -67,12 +67,17 @@
 ;; Persistence boundary
 ;; =============================================================================
 
-(defn- connection!
+(defn- query-context!
   [ctx]
-  (or
-   (:biff/conn
-    ctx)
+  (if
+   (and
+    (map? ctx)
+    (or
+     (:biff.xtdb/connection-pool ctx)
+     (:biff.xtdb/node ctx)))
+    ctx
 
+<<<<<<< HEAD
    (fail!
     :invitation.graph/missing-biff-connection
     "Invitation reads require :biff/conn."
@@ -83,6 +88,16 @@
        (set
         (keys
          ctx)))})))
+=======
+    (fail!
+     :invitation.graph/missing-biff-connection
+     "Invitation reads require Biff 2 XTDB context with :biff.xtdb/connection-pool or :biff.xtdb/node."
+     {:ctx-keys
+      (when
+       (map? ctx)
+        (set
+         (keys ctx)))})))
+>>>>>>> biff2-migration
 
 (defn- malli-options
   [ctx]
@@ -113,9 +128,8 @@
 
 (defn- q
   [ctx query]
-  (biffx/q
-   (connection!
-    ctx)
+  (biff.xtdb/q
+   (query-context! ctx)
    query))
 
 (defn- rows
@@ -130,7 +144,7 @@
      invitation-document-columns
 
      :from
-     invitation/entity-type
+     [invitation/entity-type]
 
      :where
      where})))

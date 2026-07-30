@@ -18,7 +18,7 @@
    It does not commit transactions. Callers compose returned fragments and
    commit the complete plan through gesso.model.tx."
   (:require
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.command :as command]
    [gesso.model.core :as model]
    [gesso.model.tx :as model.tx]
