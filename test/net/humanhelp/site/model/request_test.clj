@@ -1784,12 +1784,8 @@
          (map
           request/request-id
           (request/requests-for-location
-<<<<<<< HEAD
-           {}
-=======
            {:biff.xtdb/node
             ::test-node}
->>>>>>> biff2-migration
            {:organization-id
             organization-id
 
@@ -1852,12 +1848,8 @@
         (mapv
          request/assignment-id
          (request/assignments-for-request
-<<<<<<< HEAD
-          {}
-=======
           {:biff.xtdb/node
            ::test-node}
->>>>>>> biff2-migration
           request-id))))
 
       (is
@@ -1867,24 +1859,16 @@
         (mapv
          request/assignment-id
          (request/active-assignments-for-request
-<<<<<<< HEAD
-          {}
-=======
           {:biff.xtdb/node
            ::test-node}
->>>>>>> biff2-migration
           request-id))))
 
       (is
        (=
         collaborator
         (request/active-assignment-for-helper
-<<<<<<< HEAD
-         {}
-=======
          {:biff.xtdb/node
           ::test-node}
->>>>>>> biff2-migration
          request-id
          helper-b-id)))
 
@@ -1892,12 +1876,8 @@
        (=
         primary
         (request/active-primary-assignment-for-request
-<<<<<<< HEAD
-         {}
-=======
          {:biff.xtdb/node
           ::test-node}
->>>>>>> biff2-migration
          request-id))))))
 
 ;; =============================================================================
@@ -1931,12 +1911,8 @@
 
       (let [snapshot
             (request/require-request-snapshot
-<<<<<<< HEAD
-             {}
-=======
              {:biff.xtdb/node
               ::test-node}
->>>>>>> biff2-migration
              request-id)]
 
         (is
@@ -1977,12 +1953,8 @@
         :request.graph/missing-active-primary
         (error-type
          #(request/require-request-snapshot
-<<<<<<< HEAD
-           {}
-=======
            {:biff.xtdb/node
             ::test-node}
->>>>>>> biff2-migration
            request-id))))))
 
   (testing
@@ -1996,12 +1968,8 @@
         :request.graph/open-request-has-active-assignments
         (error-type
          #(request/require-request-snapshot
-<<<<<<< HEAD
-           {}
-=======
            {:biff.xtdb/node
             ::test-node}
->>>>>>> biff2-migration
            request-id))))))
 
   (testing
@@ -2017,12 +1985,8 @@
         :request.graph/terminal-request-has-active-assignments
         (error-type
          #(request/require-request-snapshot
-<<<<<<< HEAD
-           {}
-=======
            {:biff.xtdb/node
             ::test-node}
->>>>>>> biff2-migration
            request-id)))))))
 
 (deftest request-snapshot-assignment-corruption-test
@@ -2068,12 +2032,8 @@
           :request.graph/duplicate-active-helper
           (error-type
            #(request/require-request-snapshot
-<<<<<<< HEAD
-             {}
-=======
              {:biff.xtdb/node
               ::test-node}
->>>>>>> biff2-migration
              request-id))))))
 
     (testing
@@ -2088,12 +2048,8 @@
           :request.graph/non-unique-active-primary
           (error-type
            #(request/active-primary-assignment-for-request
-<<<<<<< HEAD
-             {}
-=======
              {:biff.xtdb/node
               ::test-node}
->>>>>>> biff2-migration
              request-id))))))))
 
 ;; =============================================================================
@@ -2179,12 +2135,8 @@
 
       (let [dependency
             (request/require-request-snapshot-dependency
-<<<<<<< HEAD
-             {}
-=======
              {:biff.xtdb/node
               ::test-node}
->>>>>>> biff2-migration
              request-id)]
 
         (is
@@ -2590,58 +2542,6 @@
 
         (let [plan
               (request/plan-claim-request
-<<<<<<< HEAD
-               {:current-user/id
-                helper-a-id
-
-                :biff.fx/seed
-                1
-
-                :biff.fx/now
-                t1}
-
-               {:request-id
-                request-id})
-
-              [request-command
-               assignment-command]
-              (plan-commands
-               plan)
-
-              claimed
-              (after
-               request-command)
-
-              primary
-              (after
-               assignment-command)]
-
-          (is
-           (=
-            2
-            (count
-             (plan-commands
-              plan))))
-
-          (is
-           (request/claimed?
-            claimed))
-
-          (is
-           (request/active-primary-assignment?
-            primary))
-
-          (is
-           (=
-            helper-a-id
-            (request/assignment-helper-id
-             primary)))
-
-          (is
-           (=
-            :request/claim
-            (request/assignment-source
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -2689,37 +2589,16 @@
            (=
             helper-a-id
             (request/assignment-helper-id
->>>>>>> biff2-migration
              primary)))
 
           (is
            (=
-<<<<<<< HEAD
-            helper-a-id
-            (request/assignment-assigned-by
-=======
             :request/claim
             (request/assignment-source
->>>>>>> biff2-migration
              primary)))
 
           (is
            (=
-<<<<<<< HEAD
-            [(model.tx/assert-none
-              :request-assignment
-              [:and
-               [:=
-                :request-assignment/request
-                request-id]
-
-               [:=
-                :request-assignment/status
-                :active]])]
-            (plan-assertions
-             plan)))
-
-=======
             helper-a-id
             (request/assignment-assigned-by
              primary)))
@@ -2739,7 +2618,6 @@
             (plan-assertions
              plan)))
 
->>>>>>> biff2-migration
           (is
            (=
             [:claim
@@ -2768,14 +2646,10 @@
 
         (let [plan
               (request/plan-claim-request
-<<<<<<< HEAD
-               {:current-user/id
-=======
                {:biff.xtdb/node
                 ::test-node
 
                 :current-user/id
->>>>>>> biff2-migration
                 manager-id
 
                 :biff.fx/seed
@@ -2836,14 +2710,10 @@
           :request/not-authorized
           (error-type
            #(request/plan-claim-request
-<<<<<<< HEAD
-             {:current-user/id
-=======
              {:biff.xtdb/node
               ::test-node
 
               :current-user/id
->>>>>>> biff2-migration
               manager-id
 
               :biff.fx/seed
@@ -2893,38 +2763,6 @@
 
         (let [plan
               (request/plan-unclaim-request
-<<<<<<< HEAD
-               {:current-user/id
-                helper-a-id
-
-                :biff.fx/now
-                t2}
-
-               {:request-id
-                request-id})
-
-              [request-command
-               & assignment-commands]
-              (plan-commands
-               plan)]
-
-          (is
-           (request/open?
-            (after
-             request-command)))
-
-          (is
-           (=
-            2
-            (count
-             assignment-commands)))
-
-          (is
-           (every?
-            request/assignment-ended?
-            (map
-             after
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -2951,13 +2789,10 @@
            (=
             2
             (count
->>>>>>> biff2-migration
              assignment-commands)))
 
           (is
            (every?
-<<<<<<< HEAD
-=======
             request/assignment-ended?
             (map
              after
@@ -2965,7 +2800,6 @@
 
           (is
            (every?
->>>>>>> biff2-migration
             #(=
               :request/unclaimed
               (request/assignment-end-reason
@@ -2993,25 +2827,6 @@
 
         (let [plan
               (request/plan-mark-request-on-the-way
-<<<<<<< HEAD
-               {:current-user/id
-                helper-a-id
-
-                :biff.fx/now
-                t2}
-
-               {:request-id
-                request-id})]
-
-          (is
-           (request/on-the-way?
-            (get-in
-             plan
-             [:result
-              :request])))
-
-          (is
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3032,7 +2847,6 @@
               :request])))
 
           (is
->>>>>>> biff2-migration
            (=
             1
             (count
@@ -3070,32 +2884,6 @@
 
         (let [plan
               (request/plan-complete-request
-<<<<<<< HEAD
-               {:current-user/id
-                helper-a-id
-
-                :biff.fx/now
-                t3}
-
-               {:request-id
-                request-id})]
-
-          (is
-           (request/done?
-            (get-in
-             plan
-             [:result
-              :request])))
-
-          (is
-           (=
-            3
-            (count
-             (plan-commands
-              plan))))
-
-          (is
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3123,7 +2911,6 @@
               plan))))
 
           (is
->>>>>>> biff2-migration
            (every?
             #(=
               :request/completed
@@ -3157,20 +2944,6 @@
 
         (let [plan
               (request/plan-cancel-request
-<<<<<<< HEAD
-               {:current-user/id
-                requestor-id
-
-                :biff.fx/now
-                t2}
-
-               {:request-id
-                request-id
-
-                :reason
-                :test/customer-cancelled})]
-
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3186,7 +2959,6 @@
                 :reason
                 :test/customer-cancelled})]
 
->>>>>>> biff2-migration
           (is
            (request/cancelled?
             (get-in
@@ -3240,36 +3012,6 @@
 
         (let [plan
               (request/plan-add-collaborator
-<<<<<<< HEAD
-               {:current-user/id
-                helper-a-id
-
-                :biff.fx/seed
-                3
-
-                :biff.fx/now
-                t2}
-
-               {:request-id
-                request-id
-
-                :helper-id
-                helper-b-id})
-
-              [request-command
-               collaborator-command]
-              (plan-commands
-               plan)
-
-              touched
-              (after
-               request-command)
-
-              collaborator
-              (after
-               collaborator-command)]
-
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3301,7 +3043,6 @@
               (after
                collaborator-command)]
 
->>>>>>> biff2-migration
           (testing
            "assignment-only mutation serializes through Request revision"
             (is
@@ -3378,14 +3119,10 @@
 
         (let [plan
               (request/plan-add-collaborator
-<<<<<<< HEAD
-               {:current-user/id
-=======
                {:biff.xtdb/node
                 ::test-node
 
                 :current-user/id
->>>>>>> biff2-migration
                 helper-a-id
 
                 :biff.fx/seed
@@ -3431,14 +3168,10 @@
           :request/helper-missing-skill
           (error-type
            #(request/plan-add-collaborator
-<<<<<<< HEAD
-             {:current-user/id
-=======
              {:biff.xtdb/node
               ::test-node
 
               :current-user/id
->>>>>>> biff2-migration
               helper-a-id
 
               :biff.fx/seed
@@ -3491,38 +3224,6 @@
 
         (let [plan
               (request/plan-remove-collaborator
-<<<<<<< HEAD
-               {:current-user/id
-                helper-a-id
-
-                :biff.fx/now
-                t2}
-
-               {:request-id
-                request-id
-
-                :helper-id
-                helper-b-id})
-
-              ended
-              (get-in
-               plan
-               [:result
-                :collaborator-assignment])]
-
-          (is
-           (request/assignment-ended?
-            ended))
-
-          (is
-           (=
-            :request/collaborator-removed
-            (request/assignment-end-reason
-             ended)))
-
-          (is
-           (=
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3556,7 +3257,6 @@
 
           (is
            (=
->>>>>>> biff2-migration
             2
             (request/revision
              (get-in
@@ -3605,27 +3305,6 @@
 
         (let [plan
               (request/plan-reassign-request
-<<<<<<< HEAD
-               {:current-user/id
-                manager-id
-
-                :biff.fx/seed
-                4
-
-                :biff.fx/now
-                t2}
-
-               {:request-id
-                request-id
-
-                :helper-id
-                helper-b-id})
-
-              commands
-              (plan-commands
-               plan)
-
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3648,7 +3327,6 @@
               (plan-commands
                plan)
 
->>>>>>> biff2-migration
               new-primary
               (get-in
                plan
@@ -3730,20 +3408,6 @@
             :request/not-reassignable
             (error-type
              #(request/plan-reassign-request
-<<<<<<< HEAD
-               {:current-user/id
-                manager-id
-
-                :biff.fx/seed
-                4
-
-                :biff.fx/now
-                t3}
-
-               {:request-id
-                request-id
-
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3759,7 +3423,6 @@
                {:request-id
                 request-id
 
->>>>>>> biff2-migration
                 :helper-id
                 helper-b-id}))))))))
 
@@ -3792,20 +3455,6 @@
             :request/helper-already-primary
             (error-type
              #(request/plan-reassign-request
-<<<<<<< HEAD
-               {:current-user/id
-                manager-id
-
-                :biff.fx/seed
-                4
-
-                :biff.fx/now
-                t2}
-
-               {:request-id
-                request-id
-
-=======
                {:biff.xtdb/node
                 ::test-node
 
@@ -3821,7 +3470,6 @@
                {:request-id
                 request-id
 
->>>>>>> biff2-migration
                 :helper-id
                 helper-a-id})))))))))
 
