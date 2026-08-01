@@ -30,8 +30,8 @@
        "interactive-row-theme radius-xl border-theme flex cursor-pointer items-center gap-inline bg-card text-card-foreground"}
 
       (g/radio
-       {:name routes/location-id-param
-        :value (str location-id)
+       {:name    routes/location-id-param
+        :value   (str location-id)
         :checked selected?})
 
       [:span
@@ -50,12 +50,12 @@
         (when
          likely?
           (g/badge
-           {:text "Most likely"
+           {:text    "Most likely"
             :variant :secondary}))]
 
        (g/muted-text
-        {:as :span
-         :text (:location/distance location)
+        {:as    :span
+         :text  (:location/distance location)
          :class "block text-sm-theme"})]])))
 
 (defn page
@@ -78,7 +78,7 @@
          locations)]
     (ui/page-shell
      ctx
-     {:user user
+     {:user       user
       :main-class "flex-grow"}
 
      [:section
@@ -101,7 +101,7 @@
       [:form
        {:method "get"
         :action routes/base-path
-        :class "form-theme"}
+        :class  "form-theme"}
 
        (apply
         g/radio-group
@@ -117,7 +117,7 @@
 
         (g/button
          {:variant :primary
-          :text "Continue"
+          :text    "Continue"
           :attrs
           {:type "submit"}})]]])))
 

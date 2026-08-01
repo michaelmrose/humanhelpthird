@@ -9,28 +9,28 @@
   (case status
     :open
     {:pill-status :waiting
-     :pill-text "Waiting"
-     :title "We're finding someone nearby"
+     :pill-text   "Waiting"
+     :title       "We're finding someone nearby"
      :description
      "Keep this page open. Your request is waiting for someone at this location."}
 
     :claimed
     {:pill-status :claimed
-     :pill-text "Claimed"
-     :title "Someone is helping you"
+     :pill-text   "Claimed"
+     :title       "Someone is helping you"
      :description
      "A helper has claimed your request."}
 
     :on-the-way
     {:pill-status :active
-     :pill-text "On the way"
-     :title "Help is on the way"
+     :pill-text   "On the way"
+     :title       "Help is on the way"
      :description
      "Your helper is on the way to you."}
 
     {:pill-status :active
-     :pill-text "Active"
-     :title "Your request is active"
+     :pill-text   "Active"
+     :title       "Your request is active"
      :description
      "Keep this page open for updates."}))
 
@@ -46,7 +46,7 @@
       {:text label})
 
      (g/text
-      {:as :p
+      {:as   :p
        :text value})]))
 
 (defn page
@@ -69,7 +69,7 @@
          request-document)]
     (ui/page-shell
      ctx
-     {:user user
+     {:user       user
       :main-class "flex-grow"}
 
      [:section
@@ -86,14 +86,14 @@
 
         (g/status-pill
          {:status pill-status
-          :text pill-text
-          :dot? true})]
+          :text   pill-text
+          :dot?   true})]
 
        (g/page-title
         {:text title})
 
        (g/muted-text
-        {:text description
+        {:text  description
          :class "mx-auto max-w-md"})]
 
       (g/card

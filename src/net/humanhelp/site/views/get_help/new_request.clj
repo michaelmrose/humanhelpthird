@@ -9,8 +9,8 @@
   [:map
    [:title
     [:string
-     {:min 1
-      :max request/title-max
+     {:min                  1
+      :max                  request/title-max
       :gesso.error/required "Tell us what you need."
       :gesso.error/maxlength
       (str
@@ -64,7 +64,7 @@
      errors {}}}]
   (ui/page-shell
    ctx
-   {:user user
+   {:user       user
     :main-class "flex-grow"}
 
    [:section
@@ -103,7 +103,7 @@
          (:location/name location)})
 
        [:a
-        {:href routes/base-path
+        {:href  routes/base-path
          :class "btn-link"}
         "Change"]))]
 
@@ -133,14 +133,14 @@
       form-error
        (g/alert
         {:variant :destructive
-         :title "We couldn't create this request"
+         :title   "We couldn't create this request"
          :content form-error}))
 
      (when
       (seq errors)
        (g/alert
         {:variant :destructive
-         :title "Please check your request"
+         :title   "Please check your request"
          :content
          "Correct the highlighted fields and try again."}))
 
@@ -149,10 +149,10 @@
        "flex flex-col gap-section"}
 
       (g/field
-       {:for "title"
-        :field-key :title
-        :schema request-form-schema
-        :class "gap-content"
+       {:for        "title"
+        :field-key  :title
+        :schema     request-form-schema
+        :class      "gap-content"
         :label-text "What do you need?"
         :error
         (field-error
@@ -161,7 +161,7 @@
 
         :control
         (g/input
-         {:id "title"
+         {:id   "title"
           :name "title"
           :value
           (field-value
@@ -171,10 +171,10 @@
           "For example: Help finding an item"})})
 
       (g/field
-       {:for "details"
-        :field-key :details
-        :schema request-form-schema
-        :class "gap-content"
+       {:for         "details"
+        :field-key   :details
+        :schema      request-form-schema
+        :class       "gap-content"
         :label-text
         "Anything else we should know?"
         :description "Optional"
@@ -185,22 +185,22 @@
 
         :control
         (g/textarea
-         {:id "details"
-          :name "details"
+         {:id    "details"
+          :name  "details"
           :value
           (field-value
            values
            :details)
-          :rows 5
+          :rows  5
           :placeholder
           "Add any details that would help someone understand what you need."
           :class "resize-y"})})
 
       (g/field
-       {:for "location-detail"
+       {:for       "location-detail"
         :field-key :location-detail
-        :schema request-form-schema
-        :class "gap-content"
+        :schema    request-form-schema
+        :class     "gap-content"
         :label-text
         "Where should we find you?"
         :error
@@ -210,7 +210,7 @@
 
         :control
         (g/input
-         {:id "location-detail"
+         {:id   "location-detail"
           :name "location-detail"
           :value
           (field-value
@@ -223,7 +223,7 @@
       {:align :end}
       (g/button
        {:variant :primary
-        :text "Get help"
+        :text    "Get help"
         :attrs
         {:type "submit"}})))
 

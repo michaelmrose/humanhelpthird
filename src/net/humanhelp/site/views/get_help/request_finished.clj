@@ -10,19 +10,19 @@
   (case status
     :done
     {:pill-status :complete
-     :pill-text "Complete"
-     :title "Request complete"
+     :pill-text   "Complete"
+     :title       "Request complete"
      :description "Your help request has been completed."}
 
     :cancelled
     {:pill-status :cancelled
-     :pill-text "Cancelled"
-     :title "Request cancelled"
+     :pill-text   "Cancelled"
+     :title       "Request cancelled"
      :description "This help request is no longer active."}
 
     {:pill-status :muted
-     :pill-text "Finished"
-     :title "Request finished"
+     :pill-text   "Finished"
+     :title       "Request finished"
      :description "This help request is no longer active."}))
 
 (defn page
@@ -45,7 +45,7 @@
          request-document)]
     (ui/page-shell
      ctx
-     {:user user
+     {:user       user
       :main-class "flex-grow"}
 
      [:section
@@ -62,13 +62,13 @@
 
         (g/status-pill
          {:status pill-status
-          :text pill-text})]
+          :text   pill-text})]
 
        (g/page-title
         {:text title})
 
        (g/muted-text
-        {:text description
+        {:text  description
          :class "mx-auto max-w-md"})]
 
       (g/card
@@ -81,7 +81,7 @@
         (when
          location-name
           (g/muted-text
-           {:as :p
+           {:as   :p
             :text location-name}))
 
         (g/card-title
@@ -91,14 +91,14 @@
         (when-let [details
                    (:details content)]
           (g/text
-           {:as :p
+           {:as   :p
             :text details}))])
 
       (g/group
        {:align :end}
 
        [:a
-        {:href routes/base-path
+        {:href  routes/base-path
          :class "btn"}
         "Get help again"])
 
