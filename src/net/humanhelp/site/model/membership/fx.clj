@@ -247,7 +247,7 @@
   [ctx scope]
   (let [{:keys
          [scope-context]
-         :as dependency}
+         :as   dependency}
         (organization/require-scope-dependency
          ctx
          scope)]
@@ -636,7 +636,7 @@
 (defn plan-add-skill
   [ctx {:keys
         [membership-id]
-        :as input}]
+        :as   input}]
   (plan-membership-update
    ctx
    membership-id
@@ -647,7 +647,7 @@
 (defn plan-remove-skill
   [ctx {:keys
         [membership-id]
-        :as input}]
+        :as   input}]
   (plan-membership-update
    ctx
    membership-id
@@ -658,7 +658,7 @@
 (defn plan-suspend-membership
   [ctx {:keys
         [membership-id]
-        :as input}]
+        :as   input}]
   (plan-membership-update
    ctx
    membership-id
@@ -679,7 +679,7 @@
    that a query-derived cascade can protect against concurrent phantom inserts."
   [ctx {:keys
         [membership-id]
-        :as input}]
+        :as   input}]
   (plan-membership-update
    ctx
    membership-id

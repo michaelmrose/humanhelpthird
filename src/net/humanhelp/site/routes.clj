@@ -39,21 +39,21 @@
   "/requests/:request-id")
 
 (def route-specs
-  [{:id page-id
+  [{:id     page-id
     :method :get
-    :route page-route}
+    :route  page-route}
 
-   {:id validate-request-id
+   {:id     validate-request-id
     :method :post
-    :route validate-request-route}
+    :route  validate-request-route}
 
-   {:id create-request-id
+   {:id     create-request-id
     :method :post
-    :route create-request-route}
+    :route  create-request-route}
 
-   {:id request-page-id
+   {:id     request-page-id
     :method :get
-    :route request-page-route}])
+    :route  request-page-route}])
 
 (def route-spec-by-id
   (into
@@ -87,9 +87,9 @@
     (ex-info
      "Missing HumanHelp site route handler."
      {:route-id id
-      :method method
-      :route route
-      :spec spec
+      :method   method
+      :route    route
+      :spec     spec
       :handler-ids
       (set
        (keys

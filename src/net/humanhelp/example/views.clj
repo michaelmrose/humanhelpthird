@@ -97,15 +97,15 @@
 (defn muted
   [text]
   (g/muted-text
-   {:as :p
+   {:as    :p
     :class "text-sm-theme leading-body"
-    :text text}))
+    :text  text}))
 
 (defn hidden-input
   [name value]
   (when (some? value)
-    [:input {:type "hidden"
-             :name name
+    [:input {:type  "hidden"
+             :name  name
              :value value}]))
 
 (defn boolean-param-value
@@ -171,7 +171,7 @@
   []
   [:div {:class "title-stack-theme text-center"}
    (g/page-title
-    {:text "Human Help Fast."
+    {:text  "Human Help Fast."
      :class "text-3xl-theme py-6"})])
 
 ;; -----------------------------------------------------------------------------
@@ -181,28 +181,28 @@
 (defn create-field
   [{:keys [id label name value placeholder errors error-key]}]
   (g/field
-   {:for id
+   {:for        id
     :label-text label
-    :error (get errors error-key)
+    :error      (get errors error-key)
     :control
     (g/input
-     {:id id
-      :name name
-      :value value
+     {:id          id
+      :name        name
+      :value       value
       :placeholder placeholder})}))
 
 (defn create-textarea-field
   [{:keys [id label name value placeholder errors error-key]}]
   (g/field
-   {:for id
+   {:for        id
     :label-text label
-    :error (get errors error-key)
+    :error      (get errors error-key)
     :control
     (g/textarea
-     {:id id
-      :name name
-      :rows 4
-      :value value
+     {:id          id
+      :name        name
+      :rows        4
+      :value       value
       :placeholder placeholder})}))
 
 (defn create-request-form
@@ -211,46 +211,46 @@
         errors (or errors {})]
     (g/form
      ctx
-     {:post (routes/create-request-url)
-      :swap "none"
+     {:post  (routes/create-request-url)
+      :swap  "none"
       :attrs {:hx-include (board-state-selector)}}
      (create-field
-      {:id "humanhelp-create-customer-name"
-       :label "Your name"
-       :name "customer-name"
-       :value (or (:customer-name values)
-                  (account-email user)
-                  "")
-       :errors errors
+      {:id        "humanhelp-create-customer-name"
+       :label     "Your name"
+       :name      "customer-name"
+       :value     (or (:customer-name values)
+                      (account-email user)
+                      "")
+       :errors    errors
        :error-key :customer-name})
 
      (create-field
-      {:id "humanhelp-create-area"
-       :label "Area"
-       :name "area"
-       :value (or (:area values) "")
+      {:id          "humanhelp-create-area"
+       :label       "Area"
+       :name        "area"
+       :value       (or (:area values) "")
        :placeholder "Garden"
-       :errors errors
-       :error-key :area})
+       :errors      errors
+       :error-key   :area})
 
      (create-field
-      {:id "humanhelp-create-title"
-       :label "Request"
-       :name "title"
-       :value (or (:title values) "")
+      {:id          "humanhelp-create-title"
+       :label       "Request"
+       :name        "title"
+       :value       (or (:title values) "")
        :placeholder "Need help finding a rake"
-       :errors errors
-       :error-key :title})
+       :errors      errors
+       :error-key   :title})
 
      (create-textarea-field
-      {:id "humanhelp-create-details"
-       :label "Details"
-       :name "details"
-       :rows 4
-       :value (or (:details values) "")
+      {:id          "humanhelp-create-details"
+       :label       "Details"
+       :name        "details"
+       :rows        4
+       :value       (or (:details values) "")
        :placeholder "Add item, aisle, or context."
-       :errors errors
-       :error-key :details})
+       :errors      errors
+       :error-key   :details})
 
      (g/group
       {:align :end}
@@ -258,8 +258,8 @@
        {:text "Cancel"})
       (g/button
        {:variant :primary
-        :text "Create"
-        :attrs {:type "submit"}})))))
+        :text    "Create"
+        :attrs   {:type "submit"}})))))
 
 (defn create-request-dialog-body
   [ctx opts]
@@ -282,19 +282,19 @@
    (g/dialog-overlay
     {:open? open?})
    (g/dialog-content
-    {:open? open?
-     :title "Create request"
+    {:open?       open?
+     :title       "Create request"
      :description "Everyone can make and service requests in this Human Help analogue."
-     :body [(create-request-dialog-body ctx opts)]})))
+     :body        [(create-request-dialog-body ctx opts)]})))
 
 (defn create-request-dialog-fragment
   [ctx {:keys [user values errors open?]}]
   (create-request-dialog
    ctx
-   {:user user
+   {:user   user
     :values values
     :errors errors
-    :open? open?}))
+    :open?  open?}))
 
 ;; -----------------------------------------------------------------------------
 ;; Board options dialog
@@ -312,8 +312,8 @@
   []
   (g/dialog-trigger
    {:class "btn-icon-secondary"
-    :attrs {:aria-label "Board options"
-            :title "Board options"
+    :attrs {:aria-label                           "Board options"
+            :title                                "Board options"
             :data-humanhelp-board-options-trigger true}}
    (g/icon "settings" {:size :sm})))
 
@@ -324,69 +324,69 @@
                             created-order-options)
                       model/default-created-order)]
     (g/field
-     {:for "humanhelp-created-order"
+     {:for        "humanhelp-created-order"
       :label-text "Sort order"
-      :class "content-stack-theme gap-1"
+      :class      "content-stack-theme gap-1"
       :control
       (g/select
-       {:id "humanhelp-created-order"
-        :name routes/created-order-param
-        :value (name active-id)
+       {:id      "humanhelp-created-order"
+        :name    routes/created-order-param
+        :value   (name active-id)
         :options (mapv (fn [{:keys [id label]}]
                          {:value (name id)
                           :label label})
                        created-order-options)
-        :class "w-full"
-        :attrs {:data-humanhelp-created-order-select true}})})))
+        :class   "w-full"
+        :attrs   {:data-humanhelp-created-order-select true}})})))
 
 (defn checkbox-option
   [{:keys [id label enabled-key checked?]}]
   (let [input-id (str "humanhelp-board-option-" (name id))]
-    [:label {:for input-id
-             :class "flex items-center gap-inline rounded-md py-1"
-             :data-humanhelp-board-option true
+    [:label {:for                            input-id
+             :class                          "flex items-center gap-inline rounded-md py-1"
+             :data-humanhelp-board-option    true
              :data-humanhelp-board-option-id (name id)}
      (g/checkbox
-      {:id input-id
-       :name (option-param-name enabled-key)
-       :value "true"
+      {:id      input-id
+       :name    (option-param-name enabled-key)
+       :value   "true"
        :checked (boolean checked?)})
      (g/text
-      {:as :span
+      {:as      :span
        :variant :small
-       :class "weight-medium-theme"
-       :text label})]))
+       :class   "weight-medium-theme"
+       :text    label})]))
 
 (defn board-options-form
   [ctx {:keys [view-state
                created-order-options
                priority-sort-options
                terminal-visibility-option]}]
-  (let [metadata (model/board-option-metadata (or view-state {}))
-        created-order-options (or created-order-options
-                                  (:created-order-options metadata))
-        priority-sort-options (or priority-sort-options
-                                  (:priority-sort-options metadata))
+  (let [metadata                   (model/board-option-metadata (or view-state {}))
+        created-order-options      (or created-order-options
+                                       (:created-order-options metadata))
+        priority-sort-options      (or priority-sort-options
+                                       (:priority-sort-options metadata))
         terminal-visibility-option (or terminal-visibility-option
                                        (:terminal-visibility-option metadata))]
     (g/form
      ctx
-     {:post (routes/apply-board-options-url)
-      :swap "none"
+     {:post  (routes/apply-board-options-url)
+      :swap  "none"
       :class "form-theme content-stack-theme gap-form"
       :attrs {:data-humanhelp-board-options-form true
-              :hx-include (board-options-preserved-state-selector)}}
+              :hx-include                        (board-options-preserved-state-selector)}}
 
      (created-order-select
       {:created-order-options created-order-options})
 
      (into
-      [:div {:class "content-stack-theme gap-field"
+      [:div {:class                           "content-stack-theme gap-field"
              :data-humanhelp-priority-options true}]
       (map checkbox-option)
       priority-sort-options)
 
-     [:div {:class "content-stack-theme gap-field"
+     [:div {:class                             "content-stack-theme gap-field"
             :data-humanhelp-visibility-options true}
       (checkbox-option terminal-visibility-option)]
 
@@ -396,12 +396,12 @@
        {:text "Cancel"})
       (g/button
        {:variant :primary
-        :text "Done"
-        :attrs {:type "submit"}})))))
+        :text    "Done"
+        :attrs   {:type "submit"}})))))
 
 (defn board-options-dialog-body
   [ctx opts]
-  [:div {:id board-options-dialog-body-id
+  [:div {:id    board-options-dialog-body-id
          :class "pt-4"}
    (board-options-form ctx opts)])
 
@@ -416,7 +416,7 @@
    (g/dialog-content
     {:open? open?
      :title "Board options"
-     :body [(board-options-dialog-body ctx opts)]})))
+     :body  [(board-options-dialog-body ctx opts)]})))
 
 ;; -----------------------------------------------------------------------------
 ;; Request toolbar
@@ -426,35 +426,35 @@
   [ctx view-state stale?]
   (g/form
    ctx
-   {:post (routes/refresh-requests-url)
-    :swap "none"
+   {:post    (routes/refresh-requests-url)
+    :swap    "none"
     :inline? true
-    :attrs {:hx-include (board-state-selector)}}
+    :attrs   {:hx-include (board-state-selector)}}
    (refresh-button {:stale? stale?})))
 
 (defn request-toolbar-heading
   [{:keys [open-count pending-open-count]}]
   [:div {:class "content-stack-theme gap-field"}
    (g/section-title
-    {:text "Requests"
+    {:text  "Requests"
      :class "text-lg-theme weight-semibold-theme"})
 
    (g/group
     {}
     (g/status-pill
      {:status (if (pos? (or open-count 0)) :active :muted)
-      :dot? true
-      :text "Open"})
+      :dot?   true
+      :text   "Open"})
 
     (g/muted-text
-     {:as :span
+     {:as    :span
       :class "text-sm-theme leading-body"
-      :text (str (or open-count 0) " open")})
+      :text  (str (or open-count 0) " open")})
 
     (when (pos? (or pending-open-count 0))
       (g/badge
        {:variant :secondary
-        :text (str "+" pending-open-count " new")})))])
+        :text    (str "+" pending-open-count " new")})))])
 
 (defn request-toolbar-fragment
   [{:keys [ctx
@@ -469,33 +469,33 @@
            terminal-visibility-option]}]
   (let [view-state (or view-state {})
         stale?     (boolean stale?)]
-    [:div {:id request-toolbar-dom-id
+    [:div {:id                      request-toolbar-dom-id
            :data-humanhelp-fragment "request-toolbar"
-           :data-latest-revision latest-revision
-           :class "content-stack-theme"}
+           :data-latest-revision    latest-revision
+           :class                   "content-stack-theme"}
      (g/toolbar
       {:start [(request-toolbar-heading
-                {:open-count open-count
+                {:open-count         open-count
                  :pending-open-count pending-open-count})]
-       :end [(g/group
-              {:orientation :vertical
-               :wrap? false
-               :class "gap-field"
-               :attrs {:style {:align-items "flex-end"}}}
-              (refresh-form ctx view-state stale?)
-              (create-request-dialog
-               ctx
-               {:user user
-                :values {}
-                :errors {}
-                :open? false})
-              (board-options-dialog
-               ctx
-               {:view-state view-state
-                :created-order-options created-order-options
-                :priority-sort-options priority-sort-options
-                :terminal-visibility-option terminal-visibility-option
-                :open? false}))]})
+       :end   [(g/group
+                {:orientation :vertical
+                 :wrap?       false
+                 :class       "gap-field"
+                 :attrs       {:style {:align-items "flex-end"}}}
+                (refresh-form ctx view-state stale?)
+                (create-request-dialog
+                 ctx
+                 {:user   user
+                  :values {}
+                  :errors {}
+                  :open?  false})
+                (board-options-dialog
+                 ctx
+                 {:view-state                 view-state
+                  :created-order-options      created-order-options
+                  :priority-sort-options      priority-sort-options
+                  :terminal-visibility-option terminal-visibility-option
+                  :open?                      false}))]})
 
      (when stale?
        (muted "New request data is available. Refresh when you are ready."))]))
@@ -511,23 +511,23 @@
    (let [view-state (or view-state {})]
      (g/form
       ctx
-      {:get (routes/search-requests-url)
-       :target (str "#" request-list-dom-id)
-       :swap "outerHTML"
+      {:get     (routes/search-requests-url)
+       :target  (str "#" request-list-dom-id)
+       :swap    "outerHTML"
        :trigger (str "keyup changed delay:250ms from:#" search-input-dom-id
                      ", search from:#" search-input-dom-id)
-       :class "content-stack-theme"
-       :attrs {:id board-state-form-id}}
+       :class   "content-stack-theme"
+       :attrs   {:id board-state-form-id}}
       (board-state-hidden-inputs view-state)
       (g/field
-       {:for search-input-dom-id
+       {:for        search-input-dom-id
         :label-text "Search requests"
         :control
         (g/input
-         {:type "search"
-          :id search-input-dom-id
-          :name routes/search-param
-          :value (or (:search view-state) "")
+         {:type        "search"
+          :id          search-input-dom-id
+          :name        routes/search-param
+          :value       (or (:search view-state) "")
           :placeholder "Search by person, request, area, or status"})})))))
 
 ;; -----------------------------------------------------------------------------
@@ -537,28 +537,28 @@
 (defn empty-request-list
   [{:keys [view-state]}]
   (g/empty-state
-   {:title (if (model/present? (:search view-state))
-             "No matching requests"
-             "No requests yet")
+   {:title       (if (model/present? (:search view-state))
+                   "No matching requests"
+                   "No requests yet")
     :description (if (model/present? (:search view-state))
                    "Try fewer words or a different person, area, request, or status."
                    "Create a request with the plus button to start the demo.")
-    :icon (g/empty-state-icon)}))
+    :icon        (g/empty-state-icon)}))
 
 (defn request-accordion
   [{:keys [ctx user view-state requests]}]
   (apply
    g/accordion
-   {:type :single
+   {:type         :single
     :collapsible? true
-    :class "content-stack-theme shadow-none"
-    :attrs {:data-humanhelp-request-accordion true}}
+    :class        "content-stack-theme shadow-none"
+    :attrs        {:data-humanhelp-request-accordion true}}
    (map
     (fn [request]
       (request-card
        ctx
-       {:request request
-        :user user
+       {:request    request
+        :user       user
         :view-state view-state}))
     requests)))
 
@@ -566,26 +566,26 @@
   [next-prune-ms]
   (when (and (integer? next-prune-ms)
              (pos? next-prune-ms))
-    {:hx-get (routes/request-list-fragment-url)
-     :hx-trigger (str "load delay:" next-prune-ms "ms")
-     :hx-swap "outerHTML"
-     :hx-include (board-state-selector)
+    {:hx-get                       (routes/request-list-fragment-url)
+     :hx-trigger                   (str "load delay:" next-prune-ms "ms")
+     :hx-swap                      "outerHTML"
+     :hx-include                   (board-state-selector)
      :data-humanhelp-next-prune-ms next-prune-ms}))
 
 (defn request-list-fragment
   [{:keys [ctx user view-state requests latest-revision next-prune-ms]}]
   [:div (merge
-         {:id request-list-dom-id
+         {:id                      request-list-dom-id
           :data-humanhelp-fragment "request-list"
-          :data-latest-revision latest-revision
-          :class "content-stack-theme"}
+          :data-latest-revision    latest-revision
+          :class                   "content-stack-theme"}
          (request-list-prune-attrs next-prune-ms))
    (if (seq requests)
      (request-accordion
-      {:ctx ctx
-       :user user
+      {:ctx        ctx
+       :user       user
        :view-state view-state
-       :requests requests})
+       :requests   requests})
      (empty-request-list {:view-state view-state}))])
 
 ;; -----------------------------------------------------------------------------
@@ -628,9 +628,9 @@
 
      (board-card
       ctx
-      {:view-state view-state
+      {:view-state            view-state
        :request-toolbar-panel request-toolbar-panel
-       :request-list-panel request-list-panel})])))
+       :request-list-panel    request-list-panel})])))
 
 ;; -----------------------------------------------------------------------------
 ;; OOB / response helpers
@@ -683,21 +683,21 @@
   (replace-dialog-oob
    (create-request-dialog
     ctx
-    {:user user
+    {:user   user
      :values values
      :errors errors
-     :open? true})))
+     :open?  true})))
 
 (defn create-request-success
   [ctx {:keys [request toolbar request-list]}]
   (oob-response
    (fragments-oob
-    {:toolbar toolbar
+    {:toolbar      toolbar
      :request-list request-list})
    (g/render-toast-oob
-    {:variant :success
-     :duration 5000
-     :title "Request created"
+    {:variant     :success
+     :duration    5000
+     :title       "Request created"
      :description (if request
                     (str "Request #"
                          (:request/number request)
@@ -707,28 +707,28 @@
 (defn refreshed-request-board-fragments
   [{:keys [toolbar request-list]}]
   (fragments-oob
-   {:toolbar toolbar
+   {:toolbar      toolbar
     :request-list request-list}))
 
 (defn request-lifecycle-result
   [{:keys [action request toolbar request-list]}]
   (oob-response
    (fragments-oob
-    {:toolbar toolbar
+    {:toolbar      toolbar
      :request-list request-list})
    (when (and action request)
      (g/render-toast-oob
-      {:variant :success
-       :duration 2500
-       :title (model/action-label action)
+      {:variant     :success
+       :duration    2500
+       :title       (model/action-label action)
        :description (model/action-result-message action request)}))))
 
 (defn request-action-error
   [{:keys [result]}]
   (g/render-toast-oob
-   {:variant :danger
-    :duration 7000
-    :title "Request not updated"
+   {:variant     :danger
+    :duration    7000
+    :title       "Request not updated"
     :description (or (get-in result [:error :message])
                      (:message result)
                      (:reason result)
@@ -738,10 +738,10 @@
   [{:keys [toolbar request-list]}]
   (oob-response
    (fragments-oob
-    {:toolbar toolbar
+    {:toolbar      toolbar
      :request-list request-list})
    (g/render-toast-oob
-    {:variant :info
-     :duration 5000
-     :title "Demo reset"
+    {:variant     :info
+     :duration    5000
+     :title       "Demo reset"
      :description "The Human Help request board was reset."})))

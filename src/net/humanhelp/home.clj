@@ -38,13 +38,13 @@
   [ctx title & body]
   (ui/page-shell
    ctx
-   {:user (:user ctx)
-    :brand (ui/brand {:href "/"})
+   {:user       (:user ctx)
+    :brand      (ui/brand {:href "/"})
     :main-class "flex-grow py-10"}
    [:section {:class "mx-auto w-full max-w-lg px-4"}
     (g/card
-     {:class "shadow-lg"
-      :title title
+     {:class   "shadow-lg"
+      :title   title
       :content body})]))
 
 (defn- phone-auth-phone-panel
@@ -53,12 +53,12 @@
   ([ctx opts]
    (phone-auth/phone-panel
     (merge
-     {:ctx ctx
-      :id phone-auth-id
-      :title nil
-      :body "Enter your phone number to continue."
+     {:ctx         ctx
+      :id          phone-auth-id
+      :title       nil
+      :body        "Enter your phone number to continue."
       :phone-label "Phone number"
-      :phone-help "Enter a 10-digit US mobile number."
+      :phone-help  "Enter a 10-digit US mobile number."
       :submit-text "Continue"
       :send-action phone-auth-send-action}
      opts))))
@@ -67,22 +67,22 @@
   [ctx opts]
   (phone-auth/code-panel
    (merge
-    {:ctx ctx
-     :id phone-auth-id
-     :title "Enter your code"
-     :submit-text "Continue"
+    {:ctx           ctx
+     :id            phone-auth-id
+     :title         "Enter your code"
+     :submit-text   "Continue"
      :verify-action phone-auth-verify-action
      :resend-action phone-auth-send-action
-     :change-href phone-auth-change-href
-     :change-text "Use a different phone number"}
+     :change-href   phone-auth-change-href
+     :change-text   "Use a different phone number"}
     opts)))
 
 (defn- code-sent-toast
   [{:keys [phone phone-display]}]
   (g/render-toast-oob
-   {:variant :info
-    :duration 4000
-    :title "Code sent"
+   {:variant     :info
+    :duration    4000
+    :title       "Code sent"
     :description (str "We sent a verification code to "
                       (or phone-display phone "your phone")
                       ".")}))
@@ -93,7 +93,7 @@
    [:<>
     (phone-auth-code-panel
      ctx
-     {:phone (:phone result)
+     {:phone  (:phone result)
       :length (:length result 6)})
     (code-sent-toast result)]))
 
@@ -101,12 +101,12 @@
   [ctx {:keys [user-id]}]
   (let [session' (assoc (or (:session ctx) {}) :uid user-id)]
     (if (htmx-request? ctx)
-      {:status 200
+      {:status  200
        :headers {"HX-Redirect" app-path}
        :session session'
-       :body ""}
+       :body    ""}
 
-      {:status 303
+      {:status  303
        :headers {"location" app-path}
        :session session'})))
 
@@ -129,7 +129,7 @@
   [{:keys [params] :as ctx}]
   (let [phone  (submitted-phone params)
         result (phone-auth.sms/start-verification!
-                {:phone phone
+                {:phone  phone
                  :length 6})]
     (if (:ok? result)
       (code-sent-response ctx result)
@@ -137,7 +137,7 @@
       (g/html-response
        (phone-auth-phone-panel
         ctx
-        {:phone phone
+        {:phone       phone
          :phone-error (:error result "Could not send a code.")})))))
 
 (defn verify-phone-code
@@ -146,7 +146,7 @@
         code   (request-param params :code)
         result (phone-auth.sms/check-verification!
                 {:phone phone
-                 :code code})]
+                 :code  code})]
     (if (:ok? result)
       (let [signin-result (auth.phone/complete-phone-signin!
                            ctx
@@ -157,16 +157,16 @@
           (g/html-response
            (phone-auth-code-panel
             ctx
-            {:phone (:phone result phone)
-             :length 6
+            {:phone      (:phone result phone)
+             :length     6
              :code-error (:error signin-result
                                  "Could not finish signing in. Try again.")}))))
 
       (g/html-response
        (phone-auth-code-panel
         ctx
-        {:phone (:phone result phone)
-         :length 6
+        {:phone      (:phone result phone)
+         :length     6
          :code-error (:error result "That code didn’t match.")})))))
 
 (def module

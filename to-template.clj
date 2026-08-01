@@ -217,14 +217,14 @@
         (copy-raw-file! p (fs/path raw-dir rel))
         {:kind :raw
          :from rel
-         :to rel})
+         :to   rel})
 
       (and binary? rename?)
       (do
         (copy-raw-file! p (fs/path raw-rename-dir rel))
         {:kind :raw-rename
          :from rel
-         :to renamed-rel})
+         :to   renamed-rel})
 
       rename?
       (if-let [txt (read-text-safe p)]
@@ -234,12 +234,12 @@
            (parameterize-content txt source-primary-ns))
           {:kind :rename
            :from rel
-           :to renamed-rel})
+           :to   renamed-rel})
         (do
           (copy-raw-file! p (fs/path raw-rename-dir rel))
           {:kind :raw-rename
            :from rel
-           :to renamed-rel}))
+           :to   renamed-rel}))
 
       :else
       (if-let [txt (read-text-safe p)]
@@ -249,12 +249,12 @@
            (parameterize-content txt source-primary-ns))
           {:kind :root
            :from rel
-           :to rel})
+           :to   rel})
         (do
           (copy-raw-file! p (fs/path raw-dir rel))
           {:kind :raw
            :from rel
-           :to rel})))))
+           :to   rel})))))
 
 (defn visible-source-children
   [source-root dir]
@@ -298,17 +298,17 @@
         (write-text-file!
          (fs/path rename-dir marker-rel)
          "")
-        {:kind :rename
-         :from marker-rel
-         :to renamed-rel
+        {:kind       :rename
+         :from       marker-rel
+         :to         renamed-rel
          :synthetic? true})
       (do
         (write-text-file!
          (fs/path root-dir marker-rel)
          "")
-        {:kind :root
-         :from marker-rel
-         :to marker-rel
+        {:kind       :root
+         :from       marker-rel
+         :to         marker-rel
          :synthetic? true}))))
 
 (defn transform-entry
@@ -348,7 +348,7 @@
             raw-rename-map
             [:only :raw])))]
     (cond-> {:description "FIXME: generated project from template."
-             :root "root"}
+             :root        "root"}
       (seq transforms)
       (assoc :transform transforms))))
 
@@ -499,11 +499,11 @@
       (fs/create-dirs raw-rename-dir)
 
       (let [ctx
-            {:source-root source-root
-             :root-dir root-dir
-             :rename-dir rename-dir
-             :raw-dir raw-dir
-             :raw-rename-dir raw-rename-dir
+            {:source-root       source-root
+             :root-dir          root-dir
+             :rename-dir        rename-dir
+             :raw-dir           raw-dir
+             :raw-rename-dir    raw-rename-dir
              :source-primary-ns source-primary-ns}
 
             file-results
@@ -539,7 +539,7 @@
             (into
              (sorted-map)
              (for [{:keys [kind from to]} results
-                   :when (= :rename kind)]
+                   :when                  (= :rename kind)]
                [from to]))
 
             raw?
@@ -551,7 +551,7 @@
             (into
              (sorted-map)
              (for [{:keys [kind from to]} results
-                   :when (= :raw-rename kind)]
+                   :when                  (= :raw-rename kind)]
                [from to]))
 
             preserved-empty-dirs

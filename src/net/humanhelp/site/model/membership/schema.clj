@@ -78,7 +78,7 @@
 (defn- optional-graph-field
   [key schema]
   [key
-   {:optional true
+   {:optional          true
     :gesso.model/graph true}
    schema])
 

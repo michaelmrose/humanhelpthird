@@ -30,7 +30,7 @@
    separately at the application level."
   (model/build-module
    user.schema/descriptors
-   {:schema user.schema/custom-schema
+   {:schema    user.schema/custom-schema
     :resolvers user.graph/custom-resolvers}))
 
 (def schema

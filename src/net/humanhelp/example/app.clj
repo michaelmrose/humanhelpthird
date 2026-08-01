@@ -85,13 +85,13 @@
    values or decide their semantics; model/normalize-view-state fills defaults
    and normalizes option values against current persisted Human Help data."
   [ctx]
-  {:search (or (param ctx routes/search-param) "")
+  {:search           (or (param ctx routes/search-param) "")
    :visible-revision (model/parse-visible-revision
                       (param ctx routes/visible-revision-param))
-   :created-order (param ctx routes/created-order-param)
-   :mine-first? (param ctx routes/mine-first-param)
+   :created-order    (param ctx routes/created-order-param)
+   :mine-first?      (param ctx routes/mine-first-param)
    :unclaimed-first? (param ctx routes/unclaimed-first-param)
-   :show-terminal? (param ctx routes/show-terminal-param)})
+   :show-terminal?   (param ctx routes/show-terminal-param)})
 
 (defn- normalized-view-state
   [ctx view-state]
@@ -104,9 +104,9 @@
    params are normalized before reaching the model parser."
   [ctx]
   (model/parse-create-request-input
-   {:title (param ctx :title)
-    :area (param ctx :area)
-    :details (param ctx :details)
+   {:title         (param ctx :title)
+    :area          (param ctx :area)
+    :details       (param ctx :details)
     :customer-name (param ctx :customer-name)}))
 
 ;; -----------------------------------------------------------------------------
@@ -218,14 +218,14 @@
 
 (defn- current-user
   [ctx]
-  (let [user-record    (user-record-from-db ctx)
-        user-id        (current-user-id ctx user-record)
-        email          (or (user-email-from-ctx ctx)
-                           (:user/email user-record))
-        phone          (or (user-phone-from-ctx ctx)
-                           (:user/phone user-record))
-        phone-display  (or (user-phone-display-from-ctx ctx)
-                           (:user/phone-display user-record))]
+  (let [user-record   (user-record-from-db ctx)
+        user-id       (current-user-id ctx user-record)
+        email         (or (user-email-from-ctx ctx)
+                          (:user/email user-record))
+        phone         (or (user-phone-from-ctx ctx)
+                          (:user/phone user-record))
+        phone-display (or (user-phone-display-from-ctx ctx)
+                          (:user/phone-display user-record))]
     (cond-> {:user/id user-id}
       (:xt/id user-record)
       (assoc :xt/id (:xt/id user-record))
@@ -253,7 +253,7 @@
 
 (defn- board-render-options
   [ctx view-state]
-  {:user (current-user ctx)
+  {:user       (current-user ctx)
    :view-state view-state})
 
 (defn- fragment-render-options
@@ -276,7 +276,7 @@
 
 (defn- board-fragments
   [ctx view-state]
-  {:toolbar (render-toolbar-node ctx view-state)
+  {:toolbar      (render-toolbar-node ctx view-state)
    :request-list (render-list-node ctx view-state)})
 
 (defn- notify!
@@ -311,7 +311,7 @@
                     ctx
                     (request-view-state ctx))]
     (merge
-     {:user (current-user ctx)
+     {:user       (current-user ctx)
       :view-state view-state}
      (app-live/page-panels view-state))))
 
@@ -359,9 +359,9 @@
       (views/oob-response
        (views/replace-toolbar-oob toolbar)
        (g/render-toast-oob
-        {:variant :info
-         :duration 5000
-         :title "New request received"
+        {:variant     :info
+         :duration    5000
+         :title       "New request received"
          :description (app-live/request-toast-description request)})))))
 
 (defn- send-new-request-ui-safely!
@@ -373,7 +373,7 @@
      (new-request-client-oob request revision))
     (catch Exception e
       (println "[humanhelp] send-new-request-ui! failed"
-               {:message (.getMessage e)
+               {:message    (.getMessage e)
                 :request/id (:request/id request)}))))
 
 (defn- send-reset-toast-safely!
@@ -416,10 +416,10 @@
   (html
    (views/create-request-dialog
     ctx
-    {:user (current-user ctx)
+    {:user   (current-user ctx)
      :values {}
      :errors {}
-     :open? true})))
+     :open?  true})))
 
 ;; -----------------------------------------------------------------------------
 ;; Stream handlers
@@ -468,7 +468,7 @@
        (views/create-request-success
         ctx
         (merge
-         {:user user
+         {:user    user
           :request request}
          fragments))))))
 
@@ -498,14 +498,14 @@
       (html
        (views/create-request-validation-error
         ctx
-        {:user user
+        {:user   user
          :values input
          :errors errors}))
 
       (let [{:keys [request revision]}
             (model/create-request!
              ctx
-             {:user user
+             {:user  user
               :input input})]
 
         (send-new-request-ui-safely!
@@ -515,8 +515,8 @@
 
         (create-request-success-response
          ctx
-         {:request request
-          :revision revision
+         {:request    request
+          :revision   revision
           :view-state view-state})))))
 
 ;; -----------------------------------------------------------------------------
@@ -577,17 +577,17 @@
         result     (transition-fn
                     ctx
                     {:request-id id
-                     :user user})]
+                     :user       user})]
     (if (= :ok (:status result))
       (let [{:keys [request revision previous]} result]
         (notify!
          ctx
          (app-live/request-transition-change
-          {:action action
-           :request request
+          {:action   action
+           :request  request
            :previous previous
            :revision revision
-           :actor user}))
+           :actor    user}))
 
         (html
          (with-board-state-oob
@@ -595,20 +595,20 @@
            view-state
            (views/request-lifecycle-result
             (merge
-             {:user user
-              :action action
-              :request request
-              :previous previous
-              :revision revision
+             {:user       user
+              :action     action
+              :request    request
+              :previous   previous
+              :revision   revision
               :view-state view-state}
              (board-fragments ctx view-state))))))
 
       (html
        (views/request-action-error
-        {:user user
+        {:user       user
          :request-id id
-         :action action
-         :result result
+         :action     action
+         :result     result
          :view-state view-state})))))
 
 (defn claim-request!
@@ -661,7 +661,7 @@
      ctx
      (app-live/demo-reset-change
       {:revision (:revision result)
-       :actor user}))
+       :actor    user}))
 
     (send-reset-toast-safely!)
 
@@ -671,8 +671,8 @@
        view-state
        (views/reset-demo-result
         (merge
-         {:user user
-          :result result
+         {:user       user
+          :result     result
           :view-state view-state}
          (board-fragments ctx view-state)))))))
 
@@ -683,23 +683,23 @@
 (def handlers
   {routes/page-id app-page
 
-   routes/request-toolbar-fragment-id request-toolbar-fragment
-   routes/request-list-fragment-id request-list-fragment
+   routes/request-toolbar-fragment-id       request-toolbar-fragment
+   routes/request-list-fragment-id          request-list-fragment
    routes/create-request-dialog-fragment-id create-request-dialog-fragment
 
    routes/request-toolbar-stream-id request-toolbar-stream
-   routes/request-list-stream-id request-list-stream
+   routes/request-list-stream-id    request-list-stream
 
-   routes/create-request-id create-request!
-   routes/refresh-requests-id refresh-requests!
-   routes/search-requests-id search-requests
+   routes/create-request-id      create-request!
+   routes/refresh-requests-id    refresh-requests!
+   routes/search-requests-id     search-requests
    routes/apply-board-options-id apply-board-options
 
-   routes/claim-request-id claim-request!
-   routes/unclaim-request-id unclaim-request!
+   routes/claim-request-id     claim-request!
+   routes/unclaim-request-id   unclaim-request!
    routes/take-over-request-id take-over-request!
-   routes/done-request-id mark-request-done!
-   routes/cancel-request-id cancel-request!
+   routes/done-request-id      mark-request-done!
+   routes/cancel-request-id    cancel-request!
 
    routes/reset-demo-id reset-demo!})
 
@@ -709,6 +709,6 @@
 
 (def module
   {:live-rules app-live/live-rules
-   :routes (routes/route-table
-            handlers
-            {:middleware [mid/wrap-signed-in]})})
+   :routes     (routes/route-table
+                handlers
+                {:middleware [mid/wrap-signed-in]})})

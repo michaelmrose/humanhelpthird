@@ -22,14 +22,14 @@
      (ex-info
       "Glow child must be a Hiccup element."
       {:error/type :humanhelp.glow/invalid-child
-       :child node})))
+       :child      node})))
 
   (let [[tag maybe-attrs & children] node
-        attrs? (map? maybe-attrs)
-        attrs (if attrs? maybe-attrs {})
-        children (if attrs?
-                   children
-                   (cons maybe-attrs children))]
+        attrs?                       (map? maybe-attrs)
+        attrs                        (if attrs? maybe-attrs {})
+        children                     (if attrs?
+                                       children
+                                       (cons maybe-attrs children))]
     (into
      [tag
       (assoc
@@ -50,7 +50,7 @@
    :class    additional wrapper classes
    :attrs    additional wrapper attributes"
   [{:keys [active? as class attrs]
-    :or {as :div}}
+    :or   {as :div}}
    child]
   [as
    (merge

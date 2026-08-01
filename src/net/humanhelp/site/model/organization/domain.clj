@@ -19,27 +19,27 @@
 (def location-entity-type :location)
 
 (def organization-version
-  {:revision-key :organization/revision
+  {:revision-key   :organization/revision
    :created-at-key :organization/created-at
    :updated-at-key :organization/updated-at})
 
 (def organization-group-version
-  {:revision-key :organization-group/revision
+  {:revision-key   :organization-group/revision
    :created-at-key :organization-group/created-at
    :updated-at-key :organization-group/updated-at})
 
 (def location-version
-  {:revision-key :location/revision
+  {:revision-key   :location/revision
    :created-at-key :location/created-at
    :updated-at-key :location/updated-at})
 
 (def name-max 160)
 (def statuses #{:active :suspended :closed})
 (def allowed-transitions
-  {[:active :suspend] :suspended
+  {[:active :suspend]       :suspended
    [:suspended :reactivate] :active
-   [:active :close] :closed
-   [:suspended :close] :closed})
+   [:active :close]         :closed
+   [:suspended :close]      :closed})
 
 (defn- normalize-name [value]
   (when (string? value) (str/trim value)))
@@ -130,8 +130,8 @@
    supplied hierarchy."
   [value]
   (let [organization-id (:organization/id value)
-        target (:scope/target value)
-        applicable (:scope/applicable value)]
+        target          (:scope/target value)
+        applicable      (:scope/applicable value)]
     (boolean
      (and (map? value)
           (uuid? organization-id)
@@ -163,27 +163,27 @@
 
 (def ^:private entity-specs
   {:organization
-   {:entity-type organization-entity-type
-    :version organization-version
-    :label "organization"
+   {:entity-type  organization-entity-type
+    :version      organization-version
+    :label        "organization"
     :document-key :organization
-    :movable? false}
+    :movable?     false}
 
    :organization-group
-   {:entity-type organization-group-entity-type
-    :version organization-group-version
-    :label "organization group"
-    :document-key :organization-group
+   {:entity-type      organization-group-entity-type
+    :version          organization-group-version
+    :label            "organization group"
+    :document-key     :organization-group
     :organization-key :organization-group/organization
-    :movable? true}
+    :movable?         true}
 
    :location
-   {:entity-type location-entity-type
-    :version location-version
-    :label "location"
-    :document-key :location
+   {:entity-type      location-entity-type
+    :version          location-version
+    :label            "location"
+    :document-key     :location
     :organization-key :location/organization
-    :movable? true}})
+    :movable?         true}})
 
 (defn- spec [entity] (get entity-specs entity))
 (defn- version [entity] (:version (spec entity)))
@@ -217,7 +217,7 @@
 (defn organization-group-scope-of [document] (organization-group-scope (:xt/id document)))
 (defn organization-group-parent-scope [document]
   {:scope/type (:organization-group/parent-type document)
-   :scope/id (:organization-group/parent-id document)})
+   :scope/id   (:organization-group/parent-id document)})
 (defn organization-group-for-organization? [document organization-id]
   (= organization-id (:organization-group/organization document)))
 (defn location-id [document] (:xt/id document))
@@ -230,7 +230,7 @@
 (defn location-scope-of [document] (location-scope (:xt/id document)))
 (defn location-parent-scope [document]
   {:scope/type (:location/parent-type document)
-   :scope/id (:location/parent-id document)})
+   :scope/id   (:location/parent-id document)})
 (defn- location-for-organization? [document organization-id]
   (= organization-id (:location/organization document)))
 ;; =============================================================================
@@ -247,8 +247,8 @@
 
 (defn- conventional-version-consistent? [entity document]
   (let [{:keys [created-at-key updated-at-key] :as version} (version entity)
-        created-at (get document created-at-key)
-        updated-at (get document updated-at-key)]
+        created-at                                          (get document created-at-key)
+        updated-at                                          (get document updated-at-key)]
     (and (command/versioned-document? document version)
          (instant? created-at)
          (instant? updated-at)
@@ -259,26 +259,26 @@
       (and (instant? value) (within? created-at value updated-at))))
 
 (defn- audit-consistent? [document entity audit]
-  (let [at (get document (k entity (keyword (str (clojure.core/name audit) "-at"))))
-        by (get document (k entity (keyword (str (clojure.core/name audit) "-by"))))
+  (let [at           (get document (k entity (keyword (str (clojure.core/name audit) "-at"))))
+        by           (get document (k entity (keyword (str (clojure.core/name audit) "-by"))))
         reason-field (case audit
                        :suspended :suspension-reason
                        :closed :closure-reason
                        :moved :move-reason)
-        reason (get document (k entity reason-field))]
+        reason       (get document (k entity reason-field))]
     (and (or (nil? at) (instant? at))
          (optional-uuid? by)
          (optional-reason? reason)
          (or (some? at) (and (nil? by) (nil? reason))))))
 
 (defn- lifecycle-consistent? [entity document]
-  (let [status (entity-status entity document)
+  (let [status    (entity-status entity document)
         suspended [(k entity :suspended-at)
                    (k entity :suspended-by)
                    (k entity :suspension-reason)]
-        closed [(k entity :closed-at)
-                (k entity :closed-by)
-                (k entity :closure-reason)]]
+        closed    [(k entity :closed-at)
+                   (k entity :closed-by)
+                   (k entity :closure-reason)]]
     (case status
       :active (none-present? document (concat suspended closed))
       :suspended (and (some? (get document (first suspended)))
@@ -289,10 +289,10 @@
 
 (defn- timestamps-within-document? [entity document]
   (let [{:keys [created-at-key updated-at-key]} (version entity)
-        created-at (get document created-at-key)
-        updated-at (get document updated-at-key)
-        fields (cond-> [(k entity :suspended-at) (k entity :closed-at)]
-                 (:movable? (spec entity)) (conj (k entity :moved-at)))]
+        created-at                              (get document created-at-key)
+        updated-at                              (get document updated-at-key)
+        fields                                  (cond-> [(k entity :suspended-at) (k entity :closed-at)]
+                                                  (:movable? (spec entity)) (conj (k entity :moved-at)))]
     (and (instant? created-at)
          (instant? updated-at)
          (every? #(optional-time-within? created-at (get document %) updated-at)
@@ -305,8 +305,8 @@
 
 (defn- child-invariants? [entity document]
   (let [organization-id (get document (:organization-key (spec entity)))
-        parent {:scope/type (get document (k entity :parent-type))
-                :scope/id (get document (k entity :parent-id))}]
+        parent          {:scope/type (get document (k entity :parent-type))
+                         :scope/id   (get document (k entity :parent-id))}]
     (and (uuid? organization-id)
          (not= (:xt/id document) organization-id)
          (parent-consistent-with-organization? organization-id parent)
@@ -338,9 +338,9 @@
 
 (defn- normalize-create-input [entity input]
   (let [input (or input {})]
-    (cond-> {:id (:id input)
+    (cond-> {:id   (:id input)
              :name (normalize-name (:name input))
-             :now (:now input)}
+             :now  (:now input)}
       (not= entity :organization)
       (assoc :organization-id (:organization-id input)
              :parent-scope (:parent-scope input)))))
@@ -376,7 +376,7 @@
       (assoc :now (str "A valid " label " creation time is required.")))))
 
 (defn- context [entity document]
-  (cond-> {(k entity :id) (:xt/id document)
+  (cond-> {(k entity :id)     (:xt/id document)
            (k entity :status) (entity-status entity document)}
     (contains? document (k entity :name))
     (assoc (k entity :name) (entity-name entity document))
@@ -384,12 +384,12 @@
     (not= entity :organization)
     (assoc (k entity :organization) (get document (:organization-key (spec entity)))
            (k entity :parent) {:scope/type (get document (k entity :parent-type))
-                               :scope/id (get document (k entity :parent-id))})))
+                               :scope/id   (get document (k entity :parent-id))})))
 
 (defn- fail! [error-type message errors context]
   (throw
    (ex-info message
-            {:error/type error-type
+            {:error/type    error-type
              :error/details {:errors errors :context context}})))
 
 (defn- ensure! [test error-type message errors context]
@@ -407,7 +407,7 @@
 (defn- new-entity [entity input]
   (let [{:keys [id organization-id parent-scope name now] :as normalized}
         (normalize-create-input entity input)
-        errors (create-input-errors entity normalized)]
+        errors                                                            (create-input-errors entity normalized)]
     (when (seq errors)
       (fail! (keyword (clojure.core/name entity) "invalid-create-input")
              (str "A valid " (:label (spec entity)) " could not be created.")
@@ -418,10 +418,10 @@
                       (k entity :parent) parent-scope))))
     (ensure-document!
      entity
-     (cond-> {:xt/id id
-              (k entity :name) name
-              (k entity :status) :active
-              (:revision-key (version entity)) 0
+     (cond-> {:xt/id                             id
+              (k entity :name)                   name
+              (k entity :status)                 :active
+              (:revision-key (version entity))   0
               (:created-at-key (version entity)) now
               (:updated-at-key (version entity)) now}
        (not= entity :organization)
@@ -435,7 +435,7 @@
 
 (defn- ensure-audit-input! [entity document input]
   (let [{:keys [actor-id reason]} input
-        ctx (context entity document)]
+        ctx                       (context entity document)]
     (ensure! (optional-uuid? actor-id)
              (keyword (clojure.core/name entity) "invalid-input")
              (str "The " (:label (spec entity)) " operation is invalid.")
@@ -490,8 +490,8 @@
 (defn rename-location [document input] (rename-entity :location document input))
 
 (defn- audit-assoc [document entity audit now actor-id reason]
-  (let [at-key (k entity (keyword (str (clojure.core/name audit) "-at")))
-        by-key (k entity (keyword (str (clojure.core/name audit) "-by")))
+  (let [at-key     (k entity (keyword (str (clojure.core/name audit) "-at")))
+        by-key     (k entity (keyword (str (clojure.core/name audit) "-by")))
         reason-key (k entity (case audit
                                :suspended :suspension-reason
                                :closed :closure-reason
@@ -518,8 +518,8 @@
            {:status (str "A closed " (:label (spec entity)) " cannot be moved.")}
            (context entity document))
   (let [organization-id (get document (:organization-key (spec entity)))
-        current-parent {:scope/type (get document (k entity :parent-type))
-                        :scope/id (get document (k entity :parent-id))}]
+        current-parent  {:scope/type (get document (k entity :parent-type))
+                         :scope/id   (get document (k entity :parent-id))}]
     (ensure! (parent-consistent-with-organization? organization-id parent-scope)
              (keyword (clojure.core/name entity) "invalid-parent")
              (str "The " (:label (spec entity)) " operation is invalid.")
@@ -622,7 +622,7 @@
 
 (defn- group-chain-consistent? [organization-id initial-parent groups]
   (loop [expected-parent initial-parent
-         remaining (seq groups)]
+         remaining       (seq groups)]
     (if-let [group (first remaining)]
       (and (organization-group-document-consistent? group)
            (organization-group-for-organization? group organization-id)
@@ -631,7 +631,7 @@
       (same-scope? expected-parent (organization-scope organization-id)))))
 
 (defn- organization-group-ancestry-consistent? [organization group ancestors]
-  (let [ancestors (vec ancestors)
+  (let [ancestors       (vec ancestors)
         organization-id (organization-id organization)]
     (and (organization-document-consistent? organization)
          (organization-group-document-consistent? group)
@@ -642,7 +642,7 @@
                                   ancestors))))
 
 (defn- location-ancestry-consistent? [organization location groups]
-  (let [groups (vec groups)
+  (let [groups          (vec groups)
         organization-id (organization-id organization)]
     (and (organization-document-consistent? organization)
          (location-document-consistent? location)
@@ -666,15 +666,15 @@
 
 (defn organization-scope-context [organization]
   (ensure-document! :organization organization)
-  {:organization/id (organization-id organization)
-   :scope/target (organization-scope-of organization)
-   :scope/applicable [(organization-scope-of organization)]
+  {:organization/id    (organization-id organization)
+   :scope/target       (organization-scope-of organization)
+   :scope/applicable   [(organization-scope-of organization)]
    :scope/operational? (organization-active? organization)})
 
 (defn- hierarchy-scope-context [entity organization target ancestors]
-  (let [consistent? (case entity
-                      :organization-group organization-group-ancestry-consistent?
-                      :location location-ancestry-consistent?)
+  (let [consistent?  (case entity
+                       :organization-group organization-group-ancestry-consistent?
+                       :location location-ancestry-consistent?)
         target-scope (case entity
                        :organization-group organization-group-scope-of
                        :location location-scope-of)
@@ -687,8 +687,8 @@
                   (:label (spec entity)) " ancestry.")
              {:ancestry "The target and ancestors must form one same-organization chain."}
              (context entity target)))
-    {:organization/id (organization-id organization)
-     :scope/target (target-scope target)
+    {:organization/id    (organization-id organization)
+     :scope/target       (target-scope target)
      :scope/applicable
      (into [(target-scope target)]
            (concat (map organization-group-scope-of ancestors)

@@ -6,9 +6,9 @@
 (defn refresh-button
   [{:keys [stale?]}]
   [:span {:data-humanhelp-refresh-button-frame true
-          :data-humanhelp-refresh-stale (when stale? "true")}
+          :data-humanhelp-refresh-stale        (when stale? "true")}
    (g/button
     {:variant (if stale? :primary :outline)
-     :text "↻"
-     :class "humanhelp-refresh-button"
-     :attrs (attr/button-attrs stale?)})])
+     :text    "↻"
+     :class   "humanhelp-refresh-button"
+     :attrs   (attr/button-attrs stale?)})])

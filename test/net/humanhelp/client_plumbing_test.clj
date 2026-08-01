@@ -12,13 +12,13 @@
 
 (def base-ctx
   {:anti-forgery-token "test-token"
-   :user/id "user-1"
-   :user/email "user1@example.com"
-   :session {:uid "session-user"
-             :email "session@example.com"}})
+   :user/id            "user-1"
+   :user/email         "user1@example.com"
+   :session            {:uid   "session-user"
+                        :email "session@example.com"}})
 
 (def session-only-ctx
-  {:session {:uid "session-user"
+  {:session {:uid   "session-user"
              :email "session@example.com"}})
 
 (def email-only-session-ctx
@@ -142,11 +142,11 @@
 
 (deftest current-client-test
   (is (= {:client/user-id "user-1"
-          :client/scopes #{[:user "user-1"] [:app/all]}}
+          :client/scopes  #{[:user "user-1"] [:app/all]}}
          (plumbing/current-client base-ctx)))
 
   (is (= {:client/user-id "session-user"
-          :client/scopes #{[:user "session-user"] [:app/all]}}
+          :client/scopes  #{[:user "session-user"] [:app/all]}}
          (plumbing/current-client session-only-ctx))))
 
 ;; -----------------------------------------------------------------------------
@@ -180,10 +180,10 @@
       (is (true? (get-in opts [:attrs :data-client-plumbing-listener]))))))
 
 (deftest listener-options-test
-  (let [calls (atom [])
-        options {:client/id "client-from-options"
-                 :id "custom-listener"
-                 :attrs {:data-extra true}
+  (let [calls   (atom [])
+        options {:client/id     "client-from-options"
+                 :id            "custom-listener"
+                 :attrs         {:data-extra true}
                  :trigger-attrs {:hx-include "#board-state"}}]
     (with-redefs [live-client/listener
                   (recording-fn calls [:listener])]
@@ -213,10 +213,10 @@
       (is (= true (get-in opts [:attrs :data-client-plumbing-listener]))))))
 
 (deftest stream-test
-  (let [calls (atom [])
-        response {:status 200
+  (let [calls    (atom [])
+        response {:status  200
                   :headers {"content-type" "text/event-stream"}
-                  :body ::stream}]
+                  :body    ::stream}]
     (with-redefs [live-client/stream-response
                   (recording-fn calls response)]
       (is (= response (plumbing/stream base-ctx))))
@@ -226,7 +226,7 @@
       (is (= base-ctx ctx)))))
 
 (deftest pending-with-fragment-test
-  (let [calls (atom [])
+  (let [calls    (atom [])
         fragment [:div {:id "toast"} "Toast"]]
     (with-redefs [live-client/drain-fragment!
                   (recording-fn calls fragment)]
@@ -252,7 +252,7 @@
 ;; -----------------------------------------------------------------------------
 
 (deftest send-test
-  (let [calls (atom [])
+  (let [calls  (atom [])
         target [:scope [:demo :scope]]
         result {:sent 2 :woke 2}]
     (with-redefs [live-client/send!
@@ -357,14 +357,14 @@
         {:client/scopes #{[:app/all]}}))))
 
 (deftest target-client-ids-for-scope-except-user-test
-  (let [clients {"client-owner" {:client/user-id "owner"
-                                 :client/scopes #{[:app/all]}}
-                 "client-helper" {:client/user-id "helper"
-                                  :client/scopes #{[:app/all]}}
+  (let [clients {"client-owner"       {:client/user-id "owner"
+                                       :client/scopes  #{[:app/all]}}
+                 "client-helper"      {:client/user-id "helper"
+                                       :client/scopes  #{[:app/all]}}
                  "client-other-scope" {:client/user-id "other"
-                                       :client/scopes #{[:other/scope]}}
-                 "client-alt-shape" {:user-id "helper-2"
-                                     :scopes [[:app/all]]}}]
+                                       :client/scopes  #{[:other/scope]}}
+                 "client-alt-shape"   {:user-id "helper-2"
+                                       :scopes  [[:app/all]]}}]
     (with-redefs [live-client/connected-clients
                   (fn [_channel]
                     clients)]
@@ -374,24 +374,24 @@
               "owner"))))))
 
 (deftest summarize-send-results-test
-  (is (= {:sent 3
-          :woke 1
-          :woke? true
-          :target [:scope-except-user [:app/all] "owner"]
-          :scope [:app/all]
+  (is (= {:sent             3
+          :woke             1
+          :woke?            true
+          :target           [:scope-except-user [:app/all] "owner"]
+          :scope            [:app/all]
           :excluded-user-id "owner"
-          :client-ids ["client-1" "client-2"]
-          :fragment-count 2
-          :results [{:sent 1 :woke 1}
-                    {:sent 2 :woke 0}]}
+          :client-ids       ["client-1" "client-2"]
+          :fragment-count   2
+          :results          [{:sent 1 :woke 1}
+                             {:sent 2 :woke 0}]}
          (plumbing/summarize-send-results
-          {:target [:scope-except-user [:app/all] "owner"]
-           :scope [:app/all]
+          {:target           [:scope-except-user [:app/all] "owner"]
+           :scope            [:app/all]
            :excluded-user-id "owner"
-           :client-ids ["client-1" "client-2"]
-           :fragment-count 2
-           :results [{:sent 1 :woke 1}
-                     {:sent 2 :woke 0}]}))))
+           :client-ids       ["client-1" "client-2"]
+           :fragment-count   2
+           :results          [{:sent 1 :woke 1}
+                              {:sent 2 :woke 0}]}))))
 
 (deftest send-to-scope-except-user-test
   (let [calls (atom [])]
@@ -431,38 +431,38 @@
 ;; -----------------------------------------------------------------------------
 
 (deftest normalize-toast-test
-  (is (= {:variant :info
-          :title "Hello"
+  (is (= {:variant     :info
+          :title       "Hello"
           :description "The page received a live update."
-          :duration 1000}
+          :duration    1000}
          (plumbing/normalize-toast {:title "Hello"})))
 
-  (is (= {:variant :danger
-          :title "Nope"
+  (is (= {:variant     :danger
+          :title       "Nope"
           :description "Bad thing"
-          :duration 2500}
+          :duration    2500}
          (plumbing/normalize-toast
-          {:variant :danger
-           :title "Nope"
+          {:variant     :danger
+           :title       "Nope"
            :description "Bad thing"
-           :duration 2500}))))
+           :duration    2500}))))
 
 (deftest toast-oob-test
   (let [node (plumbing/toast-oob {:title "Hello"})]
     (is (vector? node))))
 
 (deftest toast-send-helper-test
-  (let [calls (atom [])
-        toast {:variant :info
-               :title "Hello"
-               :description "World"}
+  (let [calls      (atom [])
+        toast      {:variant     :info
+                    :title       "Hello"
+                    :description "World"}
         normalized (plumbing/normalize-toast toast)]
     (with-redefs [plumbing/send-to-scope!
                   (fn [scope fragment]
-                    (swap! calls conj {:scope scope
+                    (swap! calls conj {:scope    scope
                                        :fragment fragment})
                     {:sent 1})]
-      (is (= {:sent 1
+      (is (= {:sent  1
               :toast normalized}
              (plumbing/send-toast-to-scope! [:demo :scope] toast))))
 
@@ -471,16 +471,16 @@
       (is (vector? (:fragment call))))))
 
 (deftest toast-send-except-user-helper-test
-  (let [calls (atom [])
-        toast {:title "Hello"}
+  (let [calls      (atom [])
+        toast      {:title "Hello"}
         normalized (plumbing/normalize-toast toast)]
     (with-redefs [plumbing/send-to-scope-except-user!
                   (fn [scope excluded-user-id fragment]
-                    (swap! calls conj {:scope scope
+                    (swap! calls conj {:scope            scope
                                        :excluded-user-id excluded-user-id
-                                       :fragment fragment})
+                                       :fragment         fragment})
                     {:sent 2})]
-      (is (= {:sent 2
+      (is (= {:sent  2
               :toast normalized}
              (plumbing/send-toast-to-scope-except-user!
               [:app/all]
@@ -493,15 +493,15 @@
       (is (vector? (:fragment call))))))
 
 (deftest toast-target-helper-test
-  (let [calls (atom [])
-        toast {:title "Hello"}
+  (let [calls      (atom [])
+        toast      {:title "Hello"}
         normalized (plumbing/normalize-toast toast)]
     (with-redefs [plumbing/send!
                   (fn [target fragment]
-                    (swap! calls conj {:target target
+                    (swap! calls conj {:target   target
                                        :fragment fragment})
                     {:sent 1})]
-      (is (= {:sent 1
+      (is (= {:sent  1
               :toast normalized}
              (plumbing/send-toast! [:client "client-1"] toast))))
 
@@ -510,14 +510,14 @@
       (is (vector? (:fragment call))))))
 
 (deftest broadcast-toast-test
-  (let [calls (atom [])
-        toast {:title "Hello"}
+  (let [calls      (atom [])
+        toast      {:title "Hello"}
         normalized (plumbing/normalize-toast toast)]
     (with-redefs [plumbing/broadcast!
                   (fn [fragment]
                     (swap! calls conj fragment)
                     {:sent 5})]
-      (is (= {:sent 5
+      (is (= {:sent  5
               :toast normalized}
              (plumbing/broadcast-toast! toast))))
 
@@ -580,7 +580,7 @@
            (second root-route)))))
 
 (deftest module-routes-test
-  (let [routes (:routes plumbing/module)
+  (let [routes  (:routes plumbing/module)
         strings (route-strings routes)]
     (is (contains? strings "/stream"))
     (is (contains? strings "/pending"))

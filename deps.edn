@@ -14,55 +14,55 @@
   ;; ---------------------------------------------------------------------------
 
   com.biffweb/core
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+  {:git/url   "https://github.com/jacobobryant/biff"
+   :git/sha   "b3abe5b13824af2f83f89ec31c63a430417ac457"
    :deps/root "libs/core"}
 
   com.biffweb/fx
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-   :deps/root "libs/fx"
+  {:git/url    "https://github.com/jacobobryant/biff"
+   :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root  "libs/fx"
    :exclusions [com.biffweb/core]}
 
   com.biffweb/graph
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-   :deps/root "libs/graph"
+  {:git/url    "https://github.com/jacobobryant/biff"
+   :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root  "libs/graph"
    :exclusions [com.biffweb/core
                 com.biffweb/fx]}
 
   com.biffweb/xtdb
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-   :deps/root "libs/xtdb"
+  {:git/url    "https://github.com/jacobobryant/biff"
+   :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root  "libs/xtdb"
    :exclusions [com.biffweb/core
                 com.biffweb/fx
                 com.biffweb/graph]}
 
   com.biffweb/config
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-   :deps/root "libs/config"
+  {:git/url    "https://github.com/jacobobryant/biff"
+   :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root  "libs/config"
    :exclusions [com.biffweb/core]}
 
   com.biffweb/background
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-   :deps/root "libs/background"
+  {:git/url    "https://github.com/jacobobryant/biff"
+   :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root  "libs/background"
    :exclusions [com.biffweb/core
                 com.biffweb/fx]}
 
   com.biffweb/ring
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-   :deps/root "libs/ring"
+  {:git/url    "https://github.com/jacobobryant/biff"
+   :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root  "libs/ring"
    :exclusions [com.biffweb/core
                 com.biffweb/fx]}
 
   com.biffweb/authenticate
-  {:git/url "https://github.com/jacobobryant/biff"
-   :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-   :deps/root "libs/authenticate"
+  {:git/url    "https://github.com/jacobobryant/biff"
+   :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+   :deps/root  "libs/authenticate"
    :exclusions [com.biffweb/fx]}
 
   ;; ---------------------------------------------------------------------------
@@ -93,8 +93,8 @@
 
   rum/rum
   {:mvn/version "0.12.11"
-   :exclusions [cljsjs/react
-                cljsjs/react-dom]}
+   :exclusions  [cljsjs/react
+                 cljsjs/react-dom]}
 
   clj-http/clj-http
   {:mvn/version "3.13.1"}
@@ -148,14 +148,14 @@
   :dev
   {:extra-deps
    {com.biffweb/run
-    {:git/url "https://github.com/jacobobryant/biff"
-     :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
+    {:git/url   "https://github.com/jacobobryant/biff"
+     :git/sha   "b3abe5b13824af2f83f89ec31c63a430417ac457"
      :deps/root "libs/run"}
 
     com.biffweb/tasks
-    {:git/url "https://github.com/jacobobryant/biff"
-     :git/sha "b3abe5b13824af2f83f89ec31c63a430417ac457"
-     :deps/root "libs/tasks"
+    {:git/url    "https://github.com/jacobobryant/biff"
+     :git/sha    "b3abe5b13824af2f83f89ec31c63a430417ac457"
+     :deps/root  "libs/tasks"
      :exclusions [com.biffweb/core
                   com.biffweb/config
                   com.biffweb/run]}}

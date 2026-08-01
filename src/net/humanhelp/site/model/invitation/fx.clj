@@ -482,7 +482,7 @@
   (let [{:keys
          [phone
           email]
-         :as recipient}
+         :as   recipient}
         (normalized-recipient
          input)]
     (when-not
@@ -834,7 +834,7 @@
 (defn- require-recipient-user-dependency!
   [ctx invitation-document user-id]
   (let [{user-document :user
-         :as dependency}
+         :as           dependency}
         (user/require-user-dependency
          ctx
          (require-user-id!
@@ -1335,7 +1335,7 @@
   [ctx {:keys
         [token
          user-id]
-        :as input}]
+        :as   input}]
   (let [now
         (now!
          ctx)

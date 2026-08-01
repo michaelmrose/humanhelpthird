@@ -80,7 +80,7 @@
    options need the normalized view-state captured from the fragment request
    or stream connection."
   [ctx]
-  {:user (render-user ctx)
+  {:user       (render-user ctx)
    :view-state (normalized-render-view-state ctx)})
 
 ;; -----------------------------------------------------------------------------
@@ -145,11 +145,11 @@
    :container-selector here and mark that viewport in views."
   (continuity/preserve
    {:scroll {:selector "[data-humanhelp-request-card]"}
-    :focus true
-    :boxes [(continuity/details-open
-             {:selector "details[data-humanhelp-request-card][data-accordion-value]"
-              :key-attr "data-accordion-value"
-              :single? true})]}))
+    :focus  true
+    :boxes  [(continuity/details-open
+              {:selector "details[data-humanhelp-request-card][data-accordion-value]"
+               :key-attr "data-accordion-value"
+               :single?  true})]}))
 
 ;; -----------------------------------------------------------------------------
 ;; Live scope authorization
@@ -171,9 +171,9 @@
   (let [{:keys [user view-state] :as board-env} (render-board-env ctx)]
     (merge
      (model/toolbar-data ctx board-env)
-     {:ctx ctx
-      :store/id id
-      :user user
+     {:ctx        ctx
+      :store/id   id
+      :user       user
       :view-state view-state})))
 
 (defn request-list-query
@@ -181,9 +181,9 @@
   (let [{:keys [user view-state] :as board-env} (render-board-env ctx)]
     (merge
      (model/board-data ctx board-env)
-     {:ctx ctx
-      :store/id id
-      :user user
+     {:ctx        ctx
+      :store/id   id
+      :user       user
       :view-state view-state})))
 
 ;; -----------------------------------------------------------------------------
@@ -212,15 +212,15 @@
 
     :scopes
     {:request-toolbar
-     {:topic :humanhelp/request-toolbar
-      :id-key :store/id
-      :label "Request toolbar"
+     {:topic       :humanhelp/request-toolbar
+      :id-key      :store/id
+      :label       "Request toolbar"
       :authorized? allow-demo-store?}
 
      :request-list
-     {:topic :humanhelp/request-list
-      :id-key :store/id
-      :label "Request list"
+     {:topic       :humanhelp/request-list
+      :id-key      :store/id
+      :label       "Request list"
       :authorized? allow-demo-store?}}
 
     :graph
@@ -264,25 +264,25 @@
 
     :fragments
     {:request-toolbar
-     {:scope :request-toolbar
-      :id-fn (fn [_id]
-               (request-toolbar-dom-id))
-      :query request-toolbar-query
-      :render request-toolbar-render
-      :swap :outerHTML
-      :request-policy {:in-flight :one
-                       :queued :last
+     {:scope          :request-toolbar
+      :id-fn          (fn [_id]
+                        (request-toolbar-dom-id))
+      :query          request-toolbar-query
+      :render         request-toolbar-render
+      :swap           :outerHTML
+      :request-policy {:in-flight       :one
+                       :queued          :last
                        :stale-window-ms 750}}
 
      :request-list
-     {:scope :request-list
-      :id-fn (fn [_id]
-               (request-list-dom-id))
-      :query request-list-query
-      :render request-list-render
-      :swap :outerHTML
-      :request-policy {:in-flight :one
-                       :queued :last
+     {:scope          :request-list
+      :id-fn          (fn [_id]
+                        (request-list-dom-id))
+      :query          request-list-query
+      :render         request-list-render
+      :swap           :outerHTML
+      :request-policy {:in-flight       :one
+                       :queued          :last
                        :stale-window-ms 750}}}}))
 
 (def live-rules
@@ -312,21 +312,21 @@
    (case fragment-name
      :request-toolbar
      {:fragment-url (routes/request-toolbar-fragment-url)
-      :stream-url (routes/request-toolbar-stream-url)
-      :trigger "load, pageshow from:window, visibilitychange from:document, online from:window, htmx:sseOpen from:body, gesso:live-connected from:body"
-      :root-attrs {:hx-include (board-state-selector)}}
+      :stream-url   (routes/request-toolbar-stream-url)
+      :trigger      "load, pageshow from:window, visibilitychange from:document, online from:window, htmx:sseOpen from:body, gesso:live-connected from:body"
+      :root-attrs   {:hx-include (board-state-selector)}}
 
      :request-list
-     {:fragment-url (routes/request-list-fragment-url)
-      :stream-url (routes/request-list-stream-url)
-      :trigger "load"
-      :root-attrs {:hx-include (board-state-selector)
-                   :hx-swap "outerHTML show:none focus-scroll:false"}
+     {:fragment-url      (routes/request-list-fragment-url)
+      :stream-url        (routes/request-list-stream-url)
+      :trigger           "load"
+      :root-attrs        {:hx-include (board-state-selector)
+                          :hx-swap    "outerHTML show:none focus-scroll:false"}
       :client-continuity request-list-client-continuity}
 
      (throw
       (ex-info "Unknown Human Help live fragment."
-               {:fragment fragment-name
+               {:fragment        fragment-name
                 :known-fragments [:request-toolbar :request-list]})))))
 
 ;; -----------------------------------------------------------------------------
@@ -360,7 +360,7 @@
   ([] (page-panels nil))
   ([_view-state]
    {:request-toolbar-panel (request-toolbar-panel)
-    :request-list-panel (request-list-panel)}))
+    :request-list-panel    (request-list-panel)}))
 
 ;; -----------------------------------------------------------------------------
 ;; Fragment render / response helpers
@@ -424,19 +424,19 @@
 
    ;; Gesso Live's generic source/invalidation routing is keyed by :topic + :id.
    ;; Keep :store/id as model context, but also provide :id explicitly.
-   :id store-id
+   :id       store-id
    :store/id store-id})
 
 (defn request-created-change
   [{:keys [request revision actor]}]
   (merge
    (store-change-base :request/created)
-   {:request/id (:request/id request)
+   {:request/id     (:request/id request)
     :request/number (:request/number request)
     :request/status (:request/status request)
-    :revision revision
-    :actor/id (:user/id actor)
-    :actor/email (:user/email actor)}))
+    :revision       revision
+    :actor/id       (:user/id actor)
+    :actor/email    (:user/email actor)}))
 
 (defn request-transition-topic
   [action]
@@ -464,17 +464,17 @@
   [{:keys [action request previous revision actor]}]
   (merge
    (store-change-base (request-transition-topic action))
-   {:request/id (:request/id request)
-    :request/number (:request/number request)
-    :request/status (:request/status request)
+   {:request/id               (:request/id request)
+    :request/number           (:request/number request)
+    :request/status           (:request/status request)
     :request/customer-user-id (:request/customer-user-id request)
-    :request/claimed-by (:request/claimed-by request)
+    :request/claimed-by       (:request/claimed-by request)
     :request/claimed-by-email (:request/claimed-by-email request)
-    :previous/status (:request/status previous)
-    :action action
-    :revision revision
-    :actor {:user/id (:user/id actor)
-            :user/email (:user/email actor)}}))
+    :previous/status          (:request/status previous)
+    :action                   action
+    :revision                 revision
+    :actor                    {:user/id    (:user/id actor)
+                               :user/email (:user/email actor)}}))
 
 (defn minute-tick-change
   []
@@ -486,8 +486,8 @@
   [{:keys [revision actor]}]
   (merge
    (store-change-base :humanhelp-demo/reset)
-   {:revision revision
-    :actor/id (:user/id actor)
+   {:revision    revision
+    :actor/id    (:user/id actor)
     :actor/email (:user/email actor)}))
 
 ;; -----------------------------------------------------------------------------
@@ -516,9 +516,9 @@
   ([request {:keys [actor exclude-user-id]}]
    (let [excluded-user-id (or exclude-user-id
                               (:user/id actor))
-         toast {:variant :info
-                :title "New request received"
-                :description (request-toast-description request)}]
+         toast            {:variant     :info
+                           :title       "New request received"
+                           :description (request-toast-description request)}]
      (if excluded-user-id
        (client-plumbing/send-toast-to-scope-except-user!
         notification-scope
@@ -533,8 +533,8 @@
   []
   (client-plumbing/send-toast-to-scope!
    notification-scope
-   {:variant :info
-    :title "Demo reset"
+   {:variant     :info
+    :title       "Demo reset"
     :description "The Human Help request board was reset."}))
 
 (defn send-request-action-error-toast!
@@ -545,8 +545,8 @@
   [message]
   (client-plumbing/send-toast-to-scope!
    notification-scope
-   {:variant :danger
-    :title "Request not updated"
+   {:variant     :danger
+    :title       "Request not updated"
     :description (or message
                      "That request action could not be completed.")}))
 

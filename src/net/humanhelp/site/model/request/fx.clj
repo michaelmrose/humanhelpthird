@@ -509,7 +509,7 @@
         {:keys
          [scope-context
           transaction-fragment]
-         :as dependency}
+         :as   dependency}
         (organization/require-scope-dependency
          ctx
          scope)
@@ -595,7 +595,7 @@
   (let [{:keys
          [user
           transaction-fragment]
-         :as dependency}
+         :as   dependency}
         (user/require-user-dependency
          ctx
          user-id)]
@@ -1205,7 +1205,7 @@
          [request
           assignments
           transaction-fragment]
-         :as snapshot}
+         :as   snapshot}
         (require-request-snapshot-dependency
          ctx
          request-id)
@@ -1371,7 +1371,7 @@
          [request
           assignments
           transaction-fragment]
-         :as snapshot}
+         :as   snapshot}
         (require-request-snapshot-dependency
          ctx
          request-id)
@@ -1464,7 +1464,7 @@
         {:keys
          [request
           transaction-fragment]
-         :as snapshot}
+         :as   snapshot}
         (require-request-snapshot-dependency
          ctx
          request-id)
@@ -1538,7 +1538,7 @@
          [request
           assignments
           transaction-fragment]
-         :as snapshot}
+         :as   snapshot}
         (require-request-snapshot-dependency
          ctx
          request-id)
@@ -1748,7 +1748,7 @@
          [request
           assignments
           transaction-fragment]
-         :as snapshot}
+         :as   snapshot}
         (require-request-snapshot-dependency
          ctx
          request-id)
@@ -1927,7 +1927,7 @@
          [request
           assignments
           transaction-fragment]
-         :as snapshot}
+         :as   snapshot}
         (require-request-snapshot-dependency
          ctx
          request-id)

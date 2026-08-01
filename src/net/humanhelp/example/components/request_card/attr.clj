@@ -60,15 +60,15 @@
    (card-style nil))
   ([request]
    (compact-style
-    {:position "relative"
-     :border-style "solid"
-     :border-width "1px"
-     :border-color "color-mix(in srgb, var(--border) 80%, transparent)"
-     :background (if (terminal-request? request)
-                   (terminal-card-surface)
-                   (card-surface))
-     :color "var(--foreground)"
-     :box-shadow "var(--shadow-sm)"
+    {:position                     "relative"
+     :border-style                 "solid"
+     :border-width                 "1px"
+     :border-color                 "color-mix(in srgb, var(--border) 80%, transparent)"
+     :background                   (if (terminal-request? request)
+                                     (terminal-card-surface)
+                                     (card-surface))
+     :color                        "var(--foreground)"
+     :box-shadow                   "var(--shadow-sm)"
      :--humanhelp-terminal-fade-ms (when-let [remaining-ms (terminal-fade-remaining-ms request)]
                                      (str remaining-ms "ms"))})))
 
@@ -90,26 +90,26 @@
 (defn item-attrs
   [request open?]
   (compact-attrs
-   {:id (str "humanhelp-request-" (:request/id request))
-    :data-humanhelp-request-card true
-    :data-humanhelp-request-selected (when open? "true")
-    :data-humanhelp-request-terminal (when (terminal-request? request) "true")
+   {:id                                     (str "humanhelp-request-" (:request/id request))
+    :data-humanhelp-request-card            true
+    :data-humanhelp-request-selected        (when open? "true")
+    :data-humanhelp-request-terminal        (when (terminal-request? request) "true")
     :data-humanhelp-request-fading-terminal (when (fading-terminal? request) "true")
-    :data-humanhelp-request-pending (when (pending-request? request) "true")
-    :data-humanhelp-request-optimistic (when (optimistic-request? request) "true")
-    :data-humanhelp-request-pending-action (some-> (:ui/pending-action request) name)
-    :data-terminal-fade-remaining-ms (terminal-fade-remaining-ms request)
-    :style (card-style request)}))
+    :data-humanhelp-request-pending         (when (pending-request? request) "true")
+    :data-humanhelp-request-optimistic      (when (optimistic-request? request) "true")
+    :data-humanhelp-request-pending-action  (some-> (:ui/pending-action request) name)
+    :data-terminal-fade-remaining-ms        (terminal-fade-remaining-ms request)
+    :style                                  (card-style request)}))
 
 (defn summary-attrs
   []
-  {:class "cursor-pointer w-full list-none flex items-start justify-between gap-inline outline-none"
+  {:class                          "cursor-pointer w-full list-none flex items-start justify-between gap-inline outline-none"
    :data-humanhelp-request-summary true
-   :style {:padding "1.25rem 1.25rem 0.75rem"
-           :background "transparent"
-           :color "var(--foreground)"
-           :font-weight 500
-           :box-shadow "none"}})
+   :style                          {:padding     "1.25rem 1.25rem 0.75rem"
+                                    :background  "transparent"
+                                    :color       "var(--foreground)"
+                                    :font-weight 500
+                                    :box-shadow  "none"}})
 
 (defn header-stack-attrs
   []
@@ -133,35 +133,35 @@
 (defn chevron-attrs
   [_open?]
   {:data-accordion-chevron true
-   :aria-hidden "true"
-   :style {:color "var(--muted-foreground)"
-           :opacity "0.9"
-           :transform "rotate(0deg)"}})
+   :aria-hidden            "true"
+   :style                  {:color     "var(--muted-foreground)"
+                            :opacity   "0.9"
+                            :transform "rotate(0deg)"}})
 
 (defn details-attrs
   []
   {:class "content-stack-theme"
-   :attrs {:style {:padding "0 1.25rem 1.25rem"
+   :attrs {:style {:padding    "0 1.25rem 1.25rem"
                    :background "transparent"
                    :border-top "0"
-                   :color "var(--foreground)"}}})
+                   :color      "var(--foreground)"}}})
 
 (defn actions-attrs
   []
-  {:class "cluster-theme items-center justify-end"
+  {:class                          "cluster-theme items-center justify-end"
    :data-humanhelp-request-actions true
-   :style {:padding-top "0.875rem"
-           :background "transparent"
-           :border-top "0"}})
+   :style                          {:padding-top "0.875rem"
+                                    :background  "transparent"
+                                    :border-top  "0"}})
 
 (defn action-form-attrs
   [{:keys [to board-state-selector attrs]}]
   (merge
    (compact-attrs
-    {:method "post"
-     :hx-post to
-     :hx-swap "none"
-     :hx-include board-state-selector
-     :class "inline-flex"
+    {:method                             "post"
+     :hx-post                            to
+     :hx-swap                            "none"
+     :hx-include                         board-state-selector
+     :class                              "inline-flex"
      :data-humanhelp-request-action-form true})
    attrs))

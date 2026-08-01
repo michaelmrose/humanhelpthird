@@ -1317,7 +1317,7 @@
           token-hash
           now
           expires-at]
-         :as normalized}
+         :as   normalized}
         (normalize-create-input
          input)
 
@@ -1617,7 +1617,7 @@
                [now
                 actor-id
                 reason]
-               :as input}]
+               :as   input}]
   (ensure-pending!
    invitation)
 

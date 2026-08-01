@@ -1209,7 +1209,7 @@
           requestor
           content
           now]
-         :as normalized}
+         :as   normalized}
         (normalize-create-request-input
          input)
 
@@ -2223,7 +2223,7 @@
           source
           actor-id
           now]
-         :as normalized}
+         :as   normalized}
         (normalize-create-assignment-input
          input)
 

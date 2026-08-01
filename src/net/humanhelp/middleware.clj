@@ -11,7 +11,7 @@
 (defn wrap-redirect-signed-in [handler]
   (fn [{:keys [session] :as ctx}]
     (if (some? (:uid session))
-      {:status 303
+      {:status  303
        :headers {"location" "/app"}}
       (handler ctx))))
 
@@ -19,7 +19,7 @@
   (fn [{:keys [session] :as ctx}]
     (if (some? (:uid session))
       (handler ctx)
-      {:status 303
+      {:status  303
        :headers {"location" "/signin?error=not-signed-in"}})))
 
 ;; -----------------------------------------------------------------------------
@@ -46,9 +46,9 @@
 
 (defn forbidden
   [message]
-  {:status 403
+  {:status  403
    :headers {"content-type" "text/plain; charset=utf-8"}
-   :body message})
+   :body    message})
 
 (defn wrap-dev-load-token
   "Protect only /api/microblog/dev/load... routes.

@@ -62,10 +62,10 @@
   :start
   (fn [{::keys
         [create-user-input]
-        :as ctx}]
+        :as    ctx}]
     (let [{:keys
            [result]
-           :as planned}
+           :as   planned}
           (user/plan-create-user
            ctx
            create-user-input)]

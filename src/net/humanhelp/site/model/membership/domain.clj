@@ -28,7 +28,7 @@
   :membership)
 
 (def membership-version
-  {:revision-key :membership/revision
+  {:revision-key   :membership/revision
    :created-at-key :membership/created-at
    :updated-at-key :membership/updated-at})
 
@@ -36,7 +36,7 @@
   :role-assignment)
 
 (def role-assignment-version
-  {:revision-key :role-assignment/revision
+  {:revision-key   :role-assignment/revision
    :created-at-key :role-assignment/created-at
    :updated-at-key :role-assignment/updated-at})
 
@@ -221,7 +221,7 @@
     message
     {:error/type error-type
      :error/details
-     {:errors errors
+     {:errors  errors
       :context context}})))
 
 (defn- ensure!
@@ -243,10 +243,10 @@
     :revoked})
 
 (def ^:private membership-transitions
-  {[:active :suspend] :suspended
+  {[:active :suspend]       :suspended
    [:suspended :reactivate] :active
-   [:active :revoke] :revoked
-   [:suspended :revoke] :revoked})
+   [:active :revoke]        :revoked
+   [:suspended :revoke]     :revoked})
 
 (defn membership-status?
   [value]
@@ -562,7 +562,7 @@
           organization-id
           skills
           now]
-         :as normalized}
+         :as   normalized}
         (normalize-membership-create-input input)
 
         errors
@@ -573,8 +573,8 @@
        :membership/invalid-create-input
        "A valid Organization membership could not be created."
        errors
-       {:membership/id id
-        :membership/user user-id
+       {:membership/id           id
+        :membership/user         user-id
         :membership/organization organization-id}))
 
     (ensure-membership-document!
@@ -1222,7 +1222,7 @@
           actor-id
           reason
           now]
-         :as normalized}
+         :as   normalized}
         (normalize-role-assignment-create-input input)
 
         errors
@@ -1235,10 +1235,10 @@
        :role-assignment/invalid-create-input
        "A valid role assignment could not be created."
        errors
-       {:role-assignment/id id
+       {:role-assignment/id    id
         :role-assignment/membership
         (membership-id membership)
-        :role-assignment/role role
+        :role-assignment/role  role
         :role-assignment/scope scope}))
 
     (ensure-role-assignment-document!

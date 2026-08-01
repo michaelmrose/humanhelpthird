@@ -62,9 +62,9 @@
 
 (defn- verified-user []
   (user-document
-   {:phone canonical-phone
-    :email canonical-email
-    :display-name "Person"
+   {:phone           canonical-phone
+    :email           canonical-email
+    :display-name    "Person"
     :phone-verified? true
     :email-verified? true}))
 
@@ -97,7 +97,7 @@
 
 (defn- with-users* [documents f]
   (let [documents (vec documents)
-        by-id (into {} (map (juxt :xt/id identity)) documents)]
+        by-id     (into {} (map (juxt :xt/id identity)) documents)]
     (with-redefs
      [model/load-by-id
       (fn [descriptor _ctx id]
@@ -168,9 +168,9 @@
 (deftest create-contact-test
   (let [document
         (user-document
-         {:phone "  +12065550123  "
-          :email "  PERSON@EXAMPLE.COM  "
-          :display-name "  Person  "
+         {:phone           "  +12065550123  "
+          :email           "  PERSON@EXAMPLE.COM  "
+          :display-name    "  Person  "
           :phone-verified? true
           :email-verified? true})]
     (is (= canonical-phone (user/user-phone document)))
@@ -228,14 +228,14 @@
         (domain/edit-profile-command
          original
          {:display-name "  Person Name  "
-          :now t1})
-        changed (after command)
+          :now          t1})
+        changed  (after command)
         removed
         (after
          (domain/edit-profile-command
           changed
           {:display-name nil
-           :now t2}))]
+           :now          t2}))]
     (is (command/update? command))
     (is (= :edit-profile (command/operation command)))
     (is (= "Person Name" (user/user-display-name changed)))
@@ -249,7 +249,7 @@
             #(domain/edit-profile-command
               original
               {:display-name "   "
-               :now t1}))))))
+               :now          t1}))))))
 
 (deftest contact-command-test
   (let [original (verified-user)
@@ -258,13 +258,13 @@
          (domain/replace-phone-command
           original
           {:phone "  +12065550124  "
-           :now t1}))
+           :now   t1}))
         email-replaced
         (after
          (domain/replace-email-command
           phone-replaced
           {:email "  REPLACEMENT@EXAMPLE.COM  "
-           :now t2}))
+           :now   t2}))
         without-phone
         (after
          (domain/remove-phone-command
@@ -340,14 +340,14 @@
               {:email canonical-email :now t3}))))))
 
 (deftest lifecycle-command-test
-  (let [original (user-document)
+  (let [original    (user-document)
         suspend-command
         (domain/suspend-user-command
          original
          {:actor-id actor-id
-          :reason :test/suspended
-          :now t1})
-        suspended (after suspend-command)
+          :reason   :test/suspended
+          :now      t1})
+        suspended   (after suspend-command)
         reactivate-command
         (domain/reactivate-user-command suspended {:now t2})
         reactivated (after reactivate-command)
@@ -355,9 +355,9 @@
         (domain/delete-user-command
          suspended
          {:actor-id actor-id
-          :reason :test/deleted
-          :now t2})
-        deleted (after delete-command)]
+          :reason   :test/deleted
+          :now      t2})
+        deleted     (after delete-command)]
     (testing "suspend"
       (is (= :suspend (command/operation suspend-command)))
       (is (user/suspended? suspended))
@@ -402,7 +402,7 @@
           #(domain/edit-profile-command
             (user-document {:display-name "Person"})
             {:display-name "Changed"
-             :now t-before})))))
+             :now          t-before})))))
 
 ;; =============================================================================
 ;; Descriptor and generated model
@@ -454,7 +454,7 @@
             (model/lookup-resolver-id
              user.schema/user-descriptor
              :user/email)}
-          actual (set (map :biff.graph/id user/resolvers))]
+          actual   (set (map :biff.graph/id user/resolvers))]
       (is (= expected actual))
       (is (= 4 (count user/resolvers))))))
 
@@ -466,7 +466,7 @@
   (let [document (verified-user)
         other
         (user-document
-         {:id other-user-id
+         {:id    other-user-id
           :email replacement-email})]
     (with-users
       [document other]
@@ -535,7 +535,7 @@
 
       (let [{:keys [user transaction-fragment]}
             (user/require-user-dependency {} user-id)
-            guard (first (:guards transaction-fragment))]
+            guard                               (first (:guards transaction-fragment))]
         (is (= document user))
         (is (= [[:user user-id]]
                (mapv command/guard-target
@@ -563,7 +563,7 @@
             plan
             (user/plan-edit-profile
              {:biff.fx/now t1}
-             {:user-id user-id
+             {:user-id      user-id
               :display-name "Changed"})
             combined
             (model.tx/compose
@@ -592,12 +592,12 @@
     (let [plan
           (user/plan-create-user
            {:biff.fx/seed 7
-            :biff.fx/now t1}
-           {:phone canonical-phone
-            :email "PERSON@EXAMPLE.COM"
+            :biff.fx/now  t1}
+           {:phone        canonical-phone
+            :email        "PERSON@EXAMPLE.COM"
             :display-name "  Created Person  "})
           model-command (plan-command plan)
-          document (after model-command)]
+          document      (after model-command)]
       (is (command/create? model-command))
       (is (= :user (:model/entity-type model-command)))
       (is (= generated-user-id (:xt/id document)))
@@ -613,13 +613,13 @@
                [:= :user/email canonical-email])]
              (plan-assertions plan)))
 
-      (is (= {:topic :user
-              :id generated-user-id
-              :change/kind :created
+      (is (= {:topic          :user
+              :id             generated-user-id
+              :change/kind    :created
               :user/operation :create
-              :user/id generated-user-id
-              :user/status :active
-              :user/revision 0}
+              :user/id        generated-user-id
+              :user/status    :active
+              :user/revision  0}
              (plan-change plan)))
 
       (is (= {:coalesce-key [:user generated-user-id]}
@@ -633,7 +633,7 @@
     (let [plan
           (user/plan-create-user
            {:biff.fx/seed 7
-            :biff.fx/now t1}
+            :biff.fx/now  t1}
            {})]
       (is (empty? (plan-assertions plan)))
       (is (false?
@@ -648,9 +648,9 @@
           (user/plan-replace-email
            {:biff.fx/now t1}
            {:user-id user-id
-            :email "REPLACEMENT@EXAMPLE.COM"})
+            :email   "REPLACEMENT@EXAMPLE.COM"})
           model-command (plan-command plan)
-          changed (after model-command)]
+          changed       (after model-command)]
       (is (command/update? model-command))
       (is (= :replace-email
              (command/operation model-command)))
@@ -663,19 +663,19 @@
                [:= :user/email replacement-email])]
              (plan-assertions plan)))
 
-      (is (= {:topic :user
-              :id user-id
-              :change/kind :updated
+      (is (= {:topic          :user
+              :id             user-id
+              :change/kind    :updated
               :user/operation :replace-email
-              :user/id user-id
-              :user/status :active
-              :user/revision 1}
+              :user/id        user-id
+              :user/status    :active
+              :user/revision  1}
              (plan-change plan))))))
 
 (deftest non-contact-plans-have-no-uniqueness-assertions-test
   (let [active
         (user-document
-         {:phone canonical-phone
+         {:phone        canonical-phone
           :display-name "Person"})
         suspended
         (after
@@ -686,12 +686,12 @@
       (doseq [plan
               [(user/plan-edit-profile
                 {:biff.fx/now t1}
-                {:user-id user-id
+                {:user-id      user-id
                  :display-name "Changed"})
                (user/plan-verify-phone
                 {:biff.fx/now t1}
                 {:user-id user-id
-                 :phone canonical-phone})
+                 :phone   canonical-phone})
                (user/plan-remove-phone
                 {:biff.fx/now t1}
                 {:user-id user-id})
@@ -727,7 +727,7 @@
            (error-type
             #(user/plan-edit-profile
               {}
-              {:user-id user-id
+              {:user-id      user-id
                :display-name "Changed"})))))
 
   (with-users
@@ -736,14 +736,14 @@
            (error-type
             #(user/plan-edit-profile
               {:biff.fx/now t1}
-              {:user-id missing-user-id
+              {:user-id      missing-user-id
                :display-name "Changed"})))))
 
   (is (= :user/invalid-user-id
          (error-type
           #(user/plan-edit-profile
             {:biff.fx/now t1}
-            {:user-id "bad-id"
+            {:user-id      "bad-id"
              :display-name "Changed"})))))
 
 (deftest public-planner-operation-test
@@ -800,7 +800,7 @@
 
       (with-users
         [document]
-        (let [plan (planner {:biff.fx/now now} input)
+        (let [plan          (planner {:biff.fx/now now} input)
               model-command (plan-command plan)]
           (is (command/update? model-command))
           (is (= :user (:model/entity-type model-command)))
@@ -817,12 +817,12 @@
     (doseq [plan
             [(user/plan-edit-profile
               {:biff.fx/now t1}
-              {:user-id user-id
+              {:user-id      user-id
                :display-name "Changed"})
              (user/plan-replace-phone
               {:biff.fx/now t1}
               {:user-id user-id
-               :phone replacement-phone})
+               :phone   replacement-phone})
              (user/plan-delete-user
               {:biff.fx/now t1}
               {:user-id user-id})]]

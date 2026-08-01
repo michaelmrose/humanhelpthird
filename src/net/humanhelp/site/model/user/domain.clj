@@ -25,7 +25,7 @@
 (def entity-type :user)
 
 (def version
-  {:revision-key :user/revision
+  {:revision-key   :user/revision
    :created-at-key :user/created-at
    :updated-at-key :user/updated-at})
 
@@ -121,10 +121,10 @@
     :deleted})
 
 (def ^:private allowed-transitions
-  {[:active :suspend] :suspended
+  {[:active :suspend]       :suspended
    [:suspended :reactivate] :active
-   [:active :delete] :deleted
-   [:suspended :delete] :deleted})
+   [:active :delete]        :deleted
+   [:suspended :delete]     :deleted})
 
 (defn status?
   [value]
@@ -236,8 +236,8 @@
            :user/deleted-by
            :user/deletion-reason])
 
-        at (get user at-key)
-        by (get user by-key)
+        at     (get user at-key)
+        by     (get user by-key)
         reason (get user reason-key)]
     (and
      (or (nil? at)
@@ -335,7 +335,7 @@
 
 (defn- context
   [user]
-  {:user/id (user-id user)
+  {:user/id     (user-id user)
    :user/status (user-status user)})
 
 (defn- fail!
@@ -345,7 +345,7 @@
     message
     {:error/type error-type
      :error/details
-     {:errors errors
+     {:errors  errors
       :context context}})))
 
 (defn- ensure!
@@ -457,13 +457,13 @@
 (defn- normalize-create-input
   [input]
   (let [input (or input {})]
-    {:id (:id input)
-     :phone (normalize-phone (:phone input))
-     :email (normalize-email (:email input))
-     :display-name (normalize-display-name (:display-name input))
+    {:id              (:id input)
+     :phone           (normalize-phone (:phone input))
+     :email           (normalize-email (:email input))
+     :display-name    (normalize-display-name (:display-name input))
      :phone-verified? (get input :phone-verified? false)
      :email-verified? (get input :email-verified? false)
-     :now (:now input)}))
+     :now             (:now input)}))
 
 (defn- create-input-errors
   [{:keys
@@ -526,7 +526,7 @@
           phone-verified?
           email-verified?
           now]
-         :as normalized}
+         :as   normalized}
         (normalize-create-input input)
 
         errors
@@ -540,9 +540,9 @@
 
     (ensure-document!
      (cond->
-      {:xt/id id
-       :user/status :active
-       :user/revision 0
+      {:xt/id           id
+       :user/status     :active
+       :user/revision   0
        :user/created-at now
        :user/updated-at now}
 

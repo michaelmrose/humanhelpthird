@@ -45,7 +45,7 @@
   (throw
    (ex-info
     message
-    {:error/type type
+    {:error/type    type
      :error/details details})))
 
 (defn- load-organization
@@ -147,23 +147,23 @@
      :organization-group/not-found
      "The hierarchy refers to an organization group that no longer exists."
      {:organization-group/id organization-group-id
-      :organization/id organization-id})))
+      :organization/id       organization-id})))
 
 (defn- load-group-ancestors
   "Loads ancestor groups immediate-parent first, excluding the Organization."
   [ctx organization-id initial-parent-scope]
   (loop [parent-scope initial-parent-scope
-         ancestors []
-         visited #{}
-         depth 0]
+         ancestors    []
+         visited      #{}
+         depth        0]
     (when
      (>= depth hierarchy-depth-limit)
       (hierarchy-error!
        :organization.graph/hierarchy-too-deep
        "The organization hierarchy exceeds the supported defensive depth."
        {:organization/id organization-id
-        :parent-scope parent-scope
-        :depth depth}))
+        :parent-scope    parent-scope
+        :depth           depth}))
 
     (case
      (organization/scope-type parent-scope)
@@ -189,9 +189,9 @@
           (hierarchy-error!
            :organization.graph/hierarchy-cycle
            "The organization hierarchy contains a cycle."
-           {:organization/id organization-id
+           {:organization/id       organization-id
             :organization-group/id group-id
-            :visited-group-ids visited}))
+            :visited-group-ids     visited}))
 
         (let [group
               (require-ancestor-group!
@@ -209,7 +209,7 @@
        :organization.graph/invalid-parent-scope
        "The hierarchy contains an invalid parent scope."
        {:organization/id organization-id
-        :parent-scope parent-scope}))))
+        :parent-scope    parent-scope}))))
 
 ;; =============================================================================
 ;; Authoritative hierarchy snapshots
@@ -228,9 +228,9 @@
         scope-context
         (organization/organization-scope-context
          document)]
-    {:organization document
-     :target document
-     :ancestors []
+    {:organization  document
+     :target        document
+     :ancestors     []
      :scope-context scope-context
      :active?
      (organization/organization-active? document)
@@ -269,9 +269,9 @@
          organization-document
          group
          ancestors)]
-    {:organization organization-document
-     :target group
-     :ancestors ancestors
+    {:organization  organization-document
+     :target        group
+     :ancestors     ancestors
      :scope-context scope-context
      :active?
      (organization/organization-group-active? group)
@@ -310,9 +310,9 @@
          organization-document
          location
          ancestors)]
-    {:organization organization-document
-     :target location
-     :ancestors ancestors
+    {:organization  organization-document
+     :target        location
+     :ancestors     ancestors
      :scope-context scope-context
      :active?
      (organization/location-active? location)

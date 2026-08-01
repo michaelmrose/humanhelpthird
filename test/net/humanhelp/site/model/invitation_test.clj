@@ -653,7 +653,7 @@
            {:role :owner}
 
            {:scope {:scope/type :planet
-                    :scope/id location-id}}
+                    :scope/id   location-id}}
 
            {:token-hash "short"}
 
@@ -1822,7 +1822,7 @@
           id)
           document))]
 
-      (let [{loaded :invitation
+      (let [{loaded   :invitation
              fragment :transaction-fragment}
             (invitation/require-invitation-dependency
              {}
@@ -1867,7 +1867,7 @@
           supplied-hash)
           document))]
 
-      (let [{loaded :invitation
+      (let [{loaded   :invitation
              fragment :transaction-fragment}
             (invitation/require-invitation-by-token-dependency
              {}

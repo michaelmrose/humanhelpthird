@@ -33,7 +33,7 @@
           (throw
            (ex-info
             "Expected no argument or the single argument: local"
-            {:args args
+            {:args  args
              :usage ["bb themes [local]"
                      "bb dev [local]"]})))))
 
@@ -72,8 +72,8 @@
               ;;   src root:   .../gesso/src
               ;;   ns dir:     .../gesso/src/gesso
               candidate-src-roots
-              (let [p gesso-path
-                    parent (some-> p fs/parent str)
+              (let [p           gesso-path
+                    parent      (some-> p fs/parent str)
                     grandparent (some-> p fs/parent fs/parent str)]
                 [(when (dir? (str p "/gesso"))
                    p)
@@ -95,19 +95,19 @@
             (throw
              (ex-info
               "Could not locate Gesso source root from gesso.build.find-path output."
-              {:gesso-path gesso-path
+              {:gesso-path          gesso-path
                :candidate-src-roots candidate-src-roots})))
 
           (when-not (dir? gesso-components-dir)
             (throw
              (ex-info
               "Could not locate Gesso component CSS directory."
-              {:gesso-path gesso-path
-               :gesso-src-root gesso-src-root
+              {:gesso-path           gesso-path
+               :gesso-src-root       gesso-src-root
                :gesso-components-dir gesso-components-dir})))
 
           ((requiring-resolve 'gesso.build.themes/build!)
-           {:input-dir "resources/themes"
+           {:input-dir   "resources/themes"
             :output-file "resources/public/gesso/app-themes.css"
             :component-css-dirs
             [gesso-components-dir
@@ -131,7 +131,7 @@
       [args]
       (let [args (vec args)]
         {:local? (boolean (some #{"local"} args))
-         :args (vec (remove #{"local"} args))}))
+         :args   (vec (remove #{"local"} args))}))
 
     (defn run-tests!
       [args]
@@ -148,9 +148,9 @@
   to-template
   {:doc "Regenerate the deps-new template project from this repo."
    :task
-   (let [template-dir "gesso-template-deps-new"
+   (let [template-dir      "gesso-template-deps-new"
          source-primary-ns "humanehelp"
-         template-name "local/gesso-template-deps-new"]
+         template-name     "local/gesso-template-deps-new"]
      (shell "rm" "-rf" (str "../" template-dir))
      (shell "bb" "to-template.clj"
             template-dir

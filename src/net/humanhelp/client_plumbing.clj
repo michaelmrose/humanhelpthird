@@ -34,9 +34,9 @@
 ;; -----------------------------------------------------------------------------
 
 (def endpoint
-  {:base-path "/app/client-plumbing"
-   :stream-path "/app/client-plumbing/stream"
-   :pending-path "/app/client-plumbing/pending"
+  {:base-path       "/app/client-plumbing"
+   :stream-path     "/app/client-plumbing/stream"
+   :pending-path    "/app/client-plumbing/pending"
    :client-id-param :client-id})
 
 ;; -----------------------------------------------------------------------------
@@ -101,8 +101,8 @@
   [ctx]
   (let [user-id (current-user-id ctx)]
     {:client/user-id user-id
-     :client/scopes #{(user-scope user-id)
-                      app-scope}}))
+     :client/scopes  #{(user-scope user-id)
+                       app-scope}}))
 
 ;; -----------------------------------------------------------------------------
 ;; Channel
@@ -110,10 +110,10 @@
 
 (defonce channel
   (live-client/channel
-   {:id :net.humanhelp/client-oob
-    :event "client-oob"
+   {:id       :net.humanhelp/client-oob
+    :event    "client-oob"
     :endpoint endpoint
-    :client current-client}))
+    :client   current-client}))
 
 (defn reset-plumbing!
   "Clear connected clients and pending OOB fragments for this channel.
@@ -229,7 +229,7 @@
   [to & fragments]
   (live-client/send!
    channel
-   {:to to
+   {:to        to
     :fragments fragments}))
 
 (defn send-to-client!
@@ -296,15 +296,15 @@
   [{:keys [target scope excluded-user-id client-ids fragment-count results]}]
   (let [sent (reduce + (map #(or (:sent %) 0) results))
         woke (reduce + (map #(or (:woke %) 0) results))]
-    {:sent sent
-     :woke woke
-     :woke? (pos? woke)
-     :target target
-     :scope scope
+    {:sent             sent
+     :woke             woke
+     :woke?            (pos? woke)
+     :target           target
+     :scope            scope
      :excluded-user-id excluded-user-id
-     :client-ids client-ids
-     :fragment-count fragment-count
-     :results results}))
+     :client-ids       client-ids
+     :fragment-count   fragment-count
+     :results          results}))
 
 (defn send-to-scope-except-user!
   "Send arbitrary OOB fragments to every connected browser client in scope
@@ -322,22 +322,22 @@
                             (apply send-to-client! client-id fragments))
                           client-ids)]
     (summarize-send-results
-     {:target [:scope-except-user scope excluded-user-id]
-      :scope scope
+     {:target           [:scope-except-user scope excluded-user-id]
+      :scope            scope
       :excluded-user-id excluded-user-id
-      :client-ids client-ids
-      :fragment-count (count fragments)
-      :results results})))
+      :client-ids       client-ids
+      :fragment-count   (count fragments)
+      :results          results})))
 
 ;; -----------------------------------------------------------------------------
 ;; Generic toast helpers
 ;; -----------------------------------------------------------------------------
 
 (def default-toast
-  {:variant :info
-   :title "Live event"
+  {:variant     :info
+   :title       "Live event"
    :description "The page received a live update."
-   :duration 1000})
+   :duration    1000})
 
 (defn normalize-toast
   [toast]

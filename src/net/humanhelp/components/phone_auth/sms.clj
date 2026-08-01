@@ -91,19 +91,19 @@
   Later this function can be replaced with a Twilio Verify implementation while
   preserving the same input and return shape."
   [{:keys [phone length ttl-seconds]
-    :or {length default-code-length
-         ttl-seconds default-ttl-seconds}}]
+    :or   {length      default-code-length
+           ttl-seconds default-ttl-seconds}}]
   (let [phone'        (normalize-phone phone)
         phone-display (phone-display phone')]
     (if-not phone'
-      {:ok? false
+      {:ok?   false
        :error "Please enter a 10-digit US mobile number."}
 
       (let [code       (generate-code length)
             expires-at (+ (now-ms) (* ttl-seconds 1000))]
-        (swap! challenges assoc phone' {:code code
-                                        :length length
-                                        :attempts 0
+        (swap! challenges assoc phone' {:code       code
+                                        :length     length
+                                        :attempts   0
                                         :expires-at expires-at})
 
         (println)
@@ -116,11 +116,11 @@
         (println "========================================")
         (println)
 
-        {:ok? true
-         :phone phone'
+        {:ok?           true
+         :phone         phone'
          :phone-display phone-display
-         :length length
-         :expires-at expires-at}))))
+         :length        length
+         :expires-at    expires-at}))))
 
 (defn check-verification!
   "Check an SMS verification code.
@@ -129,58 +129,58 @@
   be replaced with a Twilio Verify implementation while preserving the same
   input and return shape."
   [{:keys [phone code max-attempts]
-    :or {max-attempts default-max-attempts}}]
+    :or   {max-attempts default-max-attempts}}]
   (let [phone'        (normalize-phone phone)
         phone-display (phone-display phone')
         code'         (some-> code str str/trim)
         challenge     (get @challenges phone')]
     (cond
       (nil? phone')
-      {:ok? false
+      {:ok?   false
        :error "Missing or invalid phone number."}
 
       (str/blank? (or code' ""))
-      {:ok? false
-       :phone phone'
+      {:ok?           false
+       :phone         phone'
        :phone-display phone-display
-       :error "Enter the code we sent you."}
+       :error         "Enter the code we sent you."}
 
       (nil? challenge)
-      {:ok? false
-       :phone phone'
+      {:ok?           false
+       :phone         phone'
        :phone-display phone-display
-       :error "Send a new code and try again."}
+       :error         "Send a new code and try again."}
 
       (< (:expires-at challenge) (now-ms))
       (do
         (swap! challenges dissoc phone')
-        {:ok? false
-         :phone phone'
+        {:ok?           false
+         :phone         phone'
          :phone-display phone-display
-         :error "That code expired. Send another code and try again."})
+         :error         "That code expired. Send another code and try again."})
 
       (>= (:attempts challenge) max-attempts)
       (do
         (swap! challenges dissoc phone')
-        {:ok? false
-         :phone phone'
+        {:ok?           false
+         :phone         phone'
          :phone-display phone-display
-         :error "Too many attempts. Send another code and try again."})
+         :error         "Too many attempts. Send another code and try again."})
 
       (= code' (:code challenge))
       (do
         (swap! challenges dissoc phone')
-        {:ok? true
-         :phone phone'
+        {:ok?           true
+         :phone         phone'
          :phone-display phone-display})
 
       :else
       (do
         (swap! challenges update-in [phone' :attempts] (fnil inc 0))
-        {:ok? false
-         :phone phone'
+        {:ok?           false
+         :phone         phone'
          :phone-display phone-display
-         :error "That code didn’t match. Try again."}))))
+         :error         "That code didn’t match. Try again."}))))
 
 (def provider
   {:start-verification! start-verification!

@@ -166,69 +166,69 @@
 ;; -----------------------------------------------------------------------------
 
 (def route-specs
-  [{:id page-id
+  [{:id     page-id
     :method :get
-    :route page-route}
+    :route  page-route}
 
-   {:id request-toolbar-fragment-id
+   {:id     request-toolbar-fragment-id
     :method :get
-    :route request-toolbar-fragment-route}
+    :route  request-toolbar-fragment-route}
 
-   {:id request-list-fragment-id
+   {:id     request-list-fragment-id
     :method :get
-    :route request-list-fragment-route}
+    :route  request-list-fragment-route}
 
-   {:id create-request-dialog-fragment-id
+   {:id     create-request-dialog-fragment-id
     :method :get
-    :route create-request-dialog-fragment-route}
+    :route  create-request-dialog-fragment-route}
 
-   {:id request-toolbar-stream-id
+   {:id     request-toolbar-stream-id
     :method :get
-    :route request-toolbar-stream-route}
+    :route  request-toolbar-stream-route}
 
-   {:id request-list-stream-id
+   {:id     request-list-stream-id
     :method :get
-    :route request-list-stream-route}
+    :route  request-list-stream-route}
 
-   {:id create-request-id
+   {:id     create-request-id
     :method :post
-    :route create-request-route}
+    :route  create-request-route}
 
-   {:id refresh-requests-id
+   {:id     refresh-requests-id
     :method :post
-    :route refresh-requests-route}
+    :route  refresh-requests-route}
 
-   {:id search-requests-id
+   {:id     search-requests-id
     :method :get
-    :route search-requests-route}
+    :route  search-requests-route}
 
-   {:id apply-board-options-id
+   {:id     apply-board-options-id
     :method :post
-    :route apply-board-options-route}
+    :route  apply-board-options-route}
 
-   {:id claim-request-id
+   {:id     claim-request-id
     :method :post
-    :route claim-request-route}
+    :route  claim-request-route}
 
-   {:id unclaim-request-id
+   {:id     unclaim-request-id
     :method :post
-    :route unclaim-request-route}
+    :route  unclaim-request-route}
 
-   {:id take-over-request-id
+   {:id     take-over-request-id
     :method :post
-    :route take-over-request-route}
+    :route  take-over-request-route}
 
-   {:id done-request-id
+   {:id     done-request-id
     :method :post
-    :route done-request-route}
+    :route  done-request-route}
 
-   {:id cancel-request-id
+   {:id     cancel-request-id
     :method :post
-    :route cancel-request-route}
+    :route  cancel-request-route}
 
-   {:id reset-demo-id
+   {:id     reset-demo-id
     :method :post
-    :route reset-demo-route}])
+    :route  reset-demo-route}])
 
 (def route-spec-by-id
   (into {}
@@ -240,7 +240,7 @@
   (or (get route-spec-by-id route-id)
       (throw
        (ex-info "Unknown Human Help route id."
-                {:route-id route-id
+                {:route-id        route-id
                  :known-route-ids (set (keys route-spec-by-id))}))))
 
 ;; -----------------------------------------------------------------------------
@@ -252,10 +252,10 @@
   (or (get handlers id)
       (throw
        (ex-info "Missing Human Help route handler."
-                {:route-id id
-                 :method method
-                 :route route
-                 :spec spec
+                {:route-id    id
+                 :method      method
+                 :route       route
+                 :spec        spec
                  :handler-ids (set (keys handlers))}))))
 
 (defn- route-entry
@@ -385,7 +385,7 @@
              []
 
              (sequential? v)
-             (for [item v
+             (for [item  v
                    :when (present? item)]
                [(name k) item])
 
@@ -423,7 +423,7 @@
            unclaimed-first?
            show-terminal?]}]
   (let [created-order' (created-order-query-value created-order)]
-    (cond-> {search-param search
+    (cond-> {search-param           search
              visible-revision-param visible-revision}
       (some? created-order')
       (assoc created-order-param created-order')
@@ -571,7 +571,7 @@
     (throw
      (ex-info "Unknown Human Help request action."
               {:request-id request-id
-               :action action}))))
+               :action     action}))))
 
 ;; -----------------------------------------------------------------------------
 ;; Dev/demo

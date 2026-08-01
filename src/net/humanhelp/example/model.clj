@@ -251,9 +251,9 @@
      customer-name
        Optional display name. The app can fall back to user email."
   [params]
-  {:title (or (trim-value (request-param params :title)) "")
-   :area (or (trim-value (request-param params :area)) "")
-   :details (blank->nil (trim-value (request-param params :details)))
+  {:title         (or (trim-value (request-param params :title)) "")
+   :area          (or (trim-value (request-param params :area)) "")
+   :details       (blank->nil (trim-value (request-param params :details)))
    :customer-name (blank->nil
                    (trim-value
                     (or (request-param params :customer-name)
@@ -522,9 +522,9 @@
 
 (defn request-matches-search?
   [request search]
-  (let [terms (if (sequential? search)
-                search
-                (parse-search search))
+  (let [terms    (if (sequential? search)
+                   search
+                   (parse-search search))
         haystack (request-search-text request)]
     (every? #(str/includes? haystack %) terms)))
 
@@ -567,15 +567,15 @@
      2. search
      3. terminal visibility / terminal grace"
   [requests view-state-or-env]
-  (let [{:keys [view-state]
-         supplied-now-ms :now-ms} (if (and (map? view-state-or-env)
-                                           (or (contains? view-state-or-env :view-state)
-                                               (contains? view-state-or-env :user)
-                                               (contains? view-state-or-env :now-ms)))
-                                    view-state-or-env
-                                    {:view-state view-state-or-env})
-        view-state' (or view-state {})
-        current-ms  (or supplied-now-ms (now-ms))]
+  (let [{:keys           [view-state]
+         supplied-now-ms :now-ms}     (if (and (map? view-state-or-env)
+                                               (or (contains? view-state-or-env :view-state)
+                                                   (contains? view-state-or-env :user)
+                                                   (contains? view-state-or-env :now-ms)))
+                                        view-state-or-env
+                                        {:view-state view-state-or-env})
+        view-state'                   (or view-state {})
+        current-ms                    (or supplied-now-ms (now-ms))]
     (->> requests
          (filter #(request-visible-at-revision?
                    (:visible-revision view-state')
@@ -622,15 +622,15 @@
         (nil? (:request/claimed-by request)))))
 
 (def request-created-order-methods
-  [{:order/id :newest
-    :order/label "Newest first"
+  [{:order/id          :newest
+    :order/label       "Newest first"
     :order/description "Newest created requests first."
-    :order/key newest-created-key}
+    :order/key         newest-created-key}
 
-   {:order/id :oldest
-    :order/label "Oldest first"
+   {:order/id          :oldest
+    :order/label       "Oldest first"
     :order/description "Oldest created requests first."
-    :order/key oldest-created-key}])
+    :order/key         oldest-created-key}])
 
 (def request-created-order-methods-by-id
   (into {}
@@ -654,17 +654,17 @@
       (get request-created-order-methods-by-id default-created-order)))
 
 (def request-priority-sort-keys
-  [{:priority/id :mine-first
-    :priority/label "Mine first"
+  [{:priority/id          :mine-first
+    :priority/label       "Mine first"
     :priority/description "Requests claimed by me or created by me first."
     :priority/enabled-key :mine-first?
-    :priority/key mine-first-key}
+    :priority/key         mine-first-key}
 
-   {:priority/id :unclaimed-first
-    :priority/label "Unclaimed first"
+   {:priority/id          :unclaimed-first
+    :priority/label       "Unclaimed first"
     :priority/description "Requests nobody has claimed first."
     :priority/enabled-key :unclaimed-first?
-    :priority/key unclaimed-first-key}])
+    :priority/key         unclaimed-first-key}])
 
 (defn enabled-priority-sort-keys
   [view-state]
@@ -705,9 +705,9 @@
    or board env. The one-arity form is retained so older tests/callers do not
    fail with an arity error while the feature lands namespace-by-namespace."
   [request]
-  (let [rank {:open 0
-              :claimed 1
-              :done 2
+  (let [rank {:open      0
+              :claimed   1
+              :done      2
               :cancelled 3}]
     [(get rank (:request/status request) 99)
      (- (or (:request/updated-at-ms request) 0))]))
@@ -745,10 +745,10 @@
 
 (defn annotate-board-requests
   [requests view-state-or-env]
-  (let [{:keys [view-state]
-         supplied-now-ms :now-ms} (normalize-board-env view-state-or-env)
-        view-state' (or view-state {})
-        current-ms  (or supplied-now-ms (now-ms))]
+  (let [{:keys           [view-state]
+         supplied-now-ms :now-ms}     (normalize-board-env view-state-or-env)
+        view-state'                   (or view-state {})
+        current-ms                    (or supplied-now-ms (now-ms))]
     (mapv #(annotate-board-request current-ms view-state' %)
           requests)))
 
@@ -774,21 +774,21 @@
   [active-created-order]
   (let [active-created-order (normalize-created-order active-created-order)]
     (mapv (fn [{:order/keys [id label description]}]
-            {:id id
-             :label label
+            {:id          id
+             :label       label
              :description description
-             :active? (= id active-created-order)})
+             :active?     (= id active-created-order)})
           request-created-order-methods)))
 
 (defn priority-sort-options
   "Return GUI-safe priority sort metadata, omitting function values."
   [view-state]
   (mapv (fn [{:priority/keys [id label description enabled-key]}]
-          {:id id
-           :label label
+          {:id          id
+           :label       label
            :description description
            :enabled-key enabled-key
-           :checked? (truthy-param? (get view-state enabled-key))})
+           :checked?    (truthy-param? (get view-state enabled-key))})
         request-priority-sort-keys))
 
 (defn terminal-visibility-option
@@ -797,11 +797,11 @@
    This is intentionally separate from sort metadata: terminal visibility is a
    filter/visibility option, not an ordering option."
   [view-state]
-  {:id :show-terminal
-   :label "Show done and cancelled"
+  {:id          :show-terminal
+   :label       "Show done and cancelled"
    :description "Include closed requests in the board instead of showing only active requests."
    :enabled-key :show-terminal?
-   :checked? (show-terminal? view-state)})
+   :checked?    (show-terminal? view-state)})
 
 ;; -----------------------------------------------------------------------------
 ;; Time labels
@@ -872,25 +872,25 @@
   (cond
     (nil? request)
     {:error/type :humanhelp/request-not-found
-     :message "Request not found."}
+     :message    "Request not found."}
 
     (not (some #{action} lifecycle-actions))
-    {:error/type :humanhelp/unknown-action
-     :message "Unknown request action."
-     :action action
+    {:error/type    :humanhelp/unknown-action
+     :message       "Unknown request action."
+     :action        action
      :valid-actions lifecycle-actions}
 
     (request-terminal? request)
-    {:error/type :humanhelp/request-closed
-     :message "This request is already closed."
+    {:error/type     :humanhelp/request-closed
+     :message        "This request is already closed."
      :request/status (:request/status request)
-     :action action}
+     :action         action}
 
     (not (action-available? request user action))
-    {:error/type :humanhelp/action-not-allowed
-     :message "That action is not available for this request."
-     :request/status (:request/status request)
-     :action action
+    {:error/type        :humanhelp/action-not-allowed
+     :message           "That action is not available for this request."
+     :request/status    (:request/status request)
+     :action            action
      :available-actions (available-actions request user)}
 
     :else
@@ -898,14 +898,14 @@
 
 (defn claim-fields
   [user]
-  {:request/status :claimed
-   :request/claimed-by (user-id user)
+  {:request/status           :claimed
+   :request/claimed-by       (user-id user)
    :request/claimed-by-email (user-email user)})
 
 (defn clear-claim-fields
   []
-  {:request/status :open
-   :request/claimed-by nil
+  {:request/status           :open
+   :request/claimed-by       nil
    :request/claimed-by-email nil})
 
 (defn terminal-fields
@@ -935,10 +935,10 @@
    (transition-request request action user {}))
   ([request action user opts]
    (let [{supplied-now-ms :now-ms
-          revision :revision} opts]
+          revision        :revision} opts]
      (if-let [error (transition-error request action user)]
-       {:status :error
-        :error error
+       {:status  :error
+        :error   error
         :request request}
 
        (let [now-ms'   (or supplied-now-ms (now-ms))
@@ -965,11 +965,11 @@
 
              request' (merge request
                              patch
-                             {:request/updated-at-ms now-ms'
+                             {:request/updated-at-ms    now-ms'
                               :request/updated-revision revision'})]
-         {:status :ok
+         {:status   :ok
           :previous request
-          :request request'})))))
+          :request  request'})))))
 
 (defn action-label
   [action]
@@ -1038,106 +1038,106 @@
            created-offset-ms
            terminal-at-ms
            revision]}]
-  (let [created-at       (- seed-now-ms (or created-offset-ms 0))
-        id               (request-id number)
-        revision'        (or revision number)
-        terminal-at-ms'  (or terminal-at-ms
-                             (when (contains? terminal-statuses status)
-                               (- seed-now-ms (* 2 terminal-fade-ms))))]
-    {:request/id id
-     :request/number number
-     :request/store-id store-id
-     :request/title title
-     :request/area area
-     :request/details details
+  (let [created-at      (- seed-now-ms (or created-offset-ms 0))
+        id              (request-id number)
+        revision'       (or revision number)
+        terminal-at-ms' (or terminal-at-ms
+                            (when (contains? terminal-statuses status)
+                              (- seed-now-ms (* 2 terminal-fade-ms))))]
+    {:request/id               id
+     :request/number           number
+     :request/store-id         store-id
+     :request/title            title
+     :request/area             area
+     :request/details          details
      :request/customer-user-id customer-user-id
-     :request/customer-name customer-name
-     :request/status status
-     :request/claimed-by claimed-by
+     :request/customer-name    customer-name
+     :request/status           status
+     :request/claimed-by       claimed-by
      :request/claimed-by-email claimed-by-email
-     :request/created-at-ms created-at
-     :request/updated-at-ms created-at
-     :request/terminal-at-ms terminal-at-ms'
+     :request/created-at-ms    created-at
+     :request/updated-at-ms    created-at
+     :request/terminal-at-ms   terminal-at-ms'
      :request/created-revision revision'
      :request/updated-revision revision'}))
 
 (defn seeded-event
   [{:keys [number kind message request-id created-offset-ms revision]}]
-  {:event/id (event-id number)
-   :event/store-id store-id
-   :event/kind kind
-   :event/message message
+  {:event/id         (event-id number)
+   :event/store-id   store-id
+   :event/kind       kind
+   :event/message    message
    :event/request-id request-id
-   :event/at-ms (- seed-now-ms (or created-offset-ms 0))
-   :event/revision (or revision number)})
+   :event/at-ms      (- seed-now-ms (or created-offset-ms 0))
+   :event/revision   (or revision number)})
 
 (defn initial-state
   []
   (let [r1 (seeded-request
-            {:number 1
-             :title "Need help finding a rake"
-             :area "Garden"
-             :details "Looking for a sturdy rake for bark and leaves."
-             :customer-user-id "seed-user-1"
-             :customer-name "Jon"
-             :status :open
-             :claimed-by nil
-             :claimed-by-email nil
+            {:number            1
+             :title             "Need help finding a rake"
+             :area              "Garden"
+             :details           "Looking for a sturdy rake for bark and leaves."
+             :customer-user-id  "seed-user-1"
+             :customer-name     "Jon"
+             :status            :open
+             :claimed-by        nil
+             :claimed-by-email  nil
              :created-offset-ms (* 9 60000)
-             :revision 1})
+             :revision          1})
 
         r2 (seeded-request
-            {:number 2
-             :title "Can someone help load soil?"
-             :area "Garden"
-             :details "Six heavy bags near the entrance to the garden center."
-             :customer-user-id "seed-user-2"
-             :customer-name "Avery"
-             :status :claimed
-             :claimed-by "seed-helper-1"
-             :claimed-by-email "helper@example.com"
+            {:number            2
+             :title             "Can someone help load soil?"
+             :area              "Garden"
+             :details           "Six heavy bags near the entrance to the garden center."
+             :customer-user-id  "seed-user-2"
+             :customer-name     "Avery"
+             :status            :claimed
+             :claimed-by        "seed-helper-1"
+             :claimed-by-email  "helper@example.com"
              :created-offset-ms (* 17 60000)
-             :revision 2})
+             :revision          2})
 
         r3 (seeded-request
-            {:number 3
-             :title "Question about returns"
-             :area "Customer service"
-             :details "Customer needed the return window checked."
-             :customer-user-id "seed-user-3"
-             :customer-name "Sam"
-             :status :done
-             :claimed-by "seed-helper-1"
-             :claimed-by-email "helper@example.com"
+            {:number            3
+             :title             "Question about returns"
+             :area              "Customer service"
+             :details           "Customer needed the return window checked."
+             :customer-user-id  "seed-user-3"
+             :customer-name     "Sam"
+             :status            :done
+             :claimed-by        "seed-helper-1"
+             :claimed-by-email  "helper@example.com"
              :created-offset-ms (* 48 60000)
-             :revision 3})]
-    {:revision 3
+             :revision          3})]
+    {:revision            3
      :next-request-number 4
-     :next-event-number 4
-     :requests {(:request/id r1) r1
-                (:request/id r2) r2
-                (:request/id r3) r3}
-     :events [(seeded-event
-               {:number 1
-                :kind :request/created
-                :message "Jon requested help finding a rake in Garden."
-                :request-id (:request/id r1)
-                :created-offset-ms (* 9 60000)
-                :revision 1})
-              (seeded-event
-               {:number 2
-                :kind :request/claimed
-                :message "helper@example.com claimed Avery's soil request."
-                :request-id (:request/id r2)
-                :created-offset-ms (* 16 60000)
-                :revision 2})
-              (seeded-event
-               {:number 3
-                :kind :request/done
-                :message "Sam's return question was marked done."
-                :request-id (:request/id r3)
-                :created-offset-ms (* 44 60000)
-                :revision 3})]}))
+     :next-event-number   4
+     :requests            {(:request/id r1) r1
+                           (:request/id r2) r2
+                           (:request/id r3) r3}
+     :events              [(seeded-event
+                            {:number            1
+                             :kind              :request/created
+                             :message           "Jon requested help finding a rake in Garden."
+                             :request-id        (:request/id r1)
+                             :created-offset-ms (* 9 60000)
+                             :revision          1})
+                           (seeded-event
+                            {:number            2
+                             :kind              :request/claimed
+                             :message           "helper@example.com claimed Avery's soil request."
+                             :request-id        (:request/id r2)
+                             :created-offset-ms (* 16 60000)
+                             :revision          2})
+                           (seeded-event
+                            {:number            3
+                             :kind              :request/done
+                             :message           "Sam's return question was marked done."
+                             :request-id        (:request/id r3)
+                             :created-offset-ms (* 44 60000)
+                             :revision          3})]}))
 
 ;; -----------------------------------------------------------------------------
 ;; Context / XTDB helpers
@@ -1253,12 +1253,12 @@
 
 (defn state->store-doc
   [state]
-  {:xt/id store-doc-id
-   :store/id store-id
-   :store/name store-name
-   :store/revision (:revision state)
+  {:xt/id                     store-doc-id
+   :store/id                  store-id
+   :store/name                store-name
+   :store/revision            (:revision state)
    :store/next-request-number (:next-request-number state)
-   :store/next-event-number (:next-event-number state)})
+   :store/next-event-number   (:next-event-number state)})
 
 (defn put-doc-ops
   [table docs]
@@ -1286,8 +1286,8 @@
   [ctx]
   (q ctx
      {:select store-fields
-      :from [store-table]
-      :where [:= :store/id store-id]}))
+      :from   [store-table]
+      :where  [:= :store/id store-id]}))
 
 (defn store-meta-doc
   [ctx]
@@ -1297,15 +1297,15 @@
   [ctx]
   (q ctx
      {:select request-fields
-      :from [request-table]
-      :where [:= :request/store-id store-id]}))
+      :from   [request-table]
+      :where  [:= :request/store-id store-id]}))
 
 (defn event-docs
   [ctx]
   (q ctx
      {:select event-fields
-      :from [event-table]
-      :where [:= :event/store-id store-id]}))
+      :from   [event-table]
+      :where  [:= :event/store-id store-id]}))
 
 ;; -----------------------------------------------------------------------------
 ;; Whole-state persistence
@@ -1313,11 +1313,11 @@
 
 (defn state-docs
   [state]
-  {:store-docs [(state->store-doc state)]
+  {:store-docs   [(state->store-doc state)]
    :request-docs (mapv request->doc
                        (vals (:requests state)))
-   :event-docs (mapv event->doc
-                     (:events state))})
+   :event-docs   (mapv event->doc
+                       (:events state))})
 
 (defn replace-doc-ops
   "Build ops that make the Human Help XTDB tables match state for this demo
@@ -1328,9 +1328,9 @@
    That preserves atom-store semantics such as keeping only the most recent
    events."
   [ctx state]
-  (let [{desired-store-docs :store-docs
+  (let [{desired-store-docs   :store-docs
          desired-request-docs :request-docs
-         desired-event-docs :event-docs} (state-docs state)
+         desired-event-docs   :event-docs}  (state-docs state)
 
         existing-store-docs   (store-docs ctx)
         existing-request-docs (request-docs ctx)
@@ -1362,9 +1362,9 @@
   [ctx]
   (let [new-state (initial-state)]
     (persist-state! ctx new-state)
-    {:status :ok
+    {:status   :ok
      :revision (:revision new-state)
-     :state new-state}))
+     :state    new-state}))
 
 (defn ensure-seeded!
   "Seed the demo store when no Human Help store metadata document exists.
@@ -1391,13 +1391,13 @@
                       (map doc->event)
                       (sort-by :event/at-ms >)
                       vec)]
-    {:revision (:store/revision meta-doc)
+    {:revision            (:store/revision meta-doc)
      :next-request-number (:store/next-request-number meta-doc)
-     :next-event-number (:store/next-event-number meta-doc)
-     :requests (into {}
-                     (map (juxt :request/id identity))
-                     requests)
-     :events events}))
+     :next-event-number   (:store/next-event-number meta-doc)
+     :requests            (into {}
+                                (map (juxt :request/id identity))
+                                requests)
+     :events              events}))
 
 (defn latest-revision
   [ctx]
@@ -1433,16 +1433,16 @@
 (defn summary
   [ctx]
   (let [requests (all-requests ctx)]
-    {:store/id store-id
-     :store/name store-name
-     :revision (latest-revision ctx)
-     :total (count requests)
-     :open (open-request-count requests)
+    {:store/id     store-id
+     :store/name   store-name
+     :revision     (latest-revision ctx)
+     :total        (count requests)
+     :open         (open-request-count requests)
      :pending-open (fn [visible-revision]
                      (pending-open-request-count
                       requests
                       visible-revision))
-     :by-status (frequencies (map :request/status requests))}))
+     :by-status    (frequencies (map :request/status requests))}))
 
 ;; -----------------------------------------------------------------------------
 ;; State update helpers
@@ -1471,11 +1471,11 @@
   [state kind message data]
   (let [number (:next-event-number state)
         event  (merge
-                {:event/id (event-id number)
+                {:event/id       (event-id number)
                  :event/store-id store-id
-                 :event/kind kind
-                 :event/message message
-                 :event/at-ms (now-ms)
+                 :event/kind     kind
+                 :event/message  message
+                 :event/at-ms    (now-ms)
                  :event/revision (:revision state)}
                 data)]
     (-> state
@@ -1508,20 +1508,20 @@
         customer-name (or (:customer-name input)
                           (user-email user)
                           (user-id user))
-        request       {:request/id id
-                       :request/number number
-                       :request/store-id store-id
-                       :request/title (:title input)
-                       :request/area (:area input)
-                       :request/details (:details input)
+        request       {:request/id               id
+                       :request/number           number
+                       :request/store-id         store-id
+                       :request/title            (:title input)
+                       :request/area             (:area input)
+                       :request/details          (:details input)
                        :request/customer-user-id (user-id user)
-                       :request/customer-name customer-name
-                       :request/status :open
-                       :request/claimed-by nil
+                       :request/customer-name    customer-name
+                       :request/status           :open
+                       :request/claimed-by       nil
                        :request/claimed-by-email nil
-                       :request/created-at-ms now
-                       :request/updated-at-ms now
-                       :request/terminal-at-ms nil
+                       :request/created-at-ms    now
+                       :request/updated-at-ms    now
+                       :request/terminal-at-ms   nil
                        :request/created-revision revision
                        :request/updated-revision revision}]
     [(-> state
@@ -1536,8 +1536,8 @@
                ": "
                (:request/title request))
           {:event/request-id id}))
-     {:status :ok
-      :request request
+     {:status   :ok
+      :request  request
       :revision revision}]))
 
 (defn create-request!
@@ -1626,7 +1626,7 @@
                   request
                   action
                   user
-                  {:now-ms (now-ms)
+                  {:now-ms   (now-ms)
                    :revision revision})]
     (if (= :ok (:status result))
       (let [request' (:request result)]
@@ -1637,7 +1637,7 @@
               (transition-event-kind action)
               (transition-message action user request')
               {:event/request-id (:request/id request')
-               :event/action action}))
+               :event/action     action}))
          (assoc result
                 :revision revision)])
 
@@ -1739,35 +1739,35 @@
       :show-terminal? ...}"
   [ctx view-state]
   (let [view-state' (or view-state {})]
-    {:search (normalize-search
-              (view-state-value view-state' :search :q "q"))
+    {:search           (normalize-search
+                        (view-state-value view-state' :search :q "q"))
      :visible-revision (normalize-visible-revision
                         ctx
                         (view-state-value view-state'
                                           :visible-revision
                                           "visible-revision"))
-     :created-order (normalize-created-order
-                     (view-state-value view-state'
-                                       :created-order
-                                       "created-order"))
-     :mine-first? (truthy-param?
-                   (view-state-value view-state'
-                                     :mine-first?
-                                     :mine-first
-                                     "mine-first?"
-                                     "mine-first"))
+     :created-order    (normalize-created-order
+                        (view-state-value view-state'
+                                          :created-order
+                                          "created-order"))
+     :mine-first?      (truthy-param?
+                        (view-state-value view-state'
+                                          :mine-first?
+                                          :mine-first
+                                          "mine-first?"
+                                          "mine-first"))
      :unclaimed-first? (truthy-param?
                         (view-state-value view-state'
                                           :unclaimed-first?
                                           :unclaimed-first
                                           "unclaimed-first?"
                                           "unclaimed-first"))
-     :show-terminal? (truthy-param?
-                      (view-state-value view-state'
-                                        :show-terminal?
-                                        :show-terminal
-                                        "show-terminal?"
-                                        "show-terminal"))}))
+     :show-terminal?   (truthy-param?
+                        (view-state-value view-state'
+                                          :show-terminal?
+                                          :show-terminal
+                                          "show-terminal?"
+                                          "show-terminal"))}))
 
 (defn normalize-board-data-arg
   "Accept either legacy view-state or {:user ... :view-state ... :now-ms ...}."
@@ -1781,21 +1781,21 @@
 
 (defn board-option-metadata
   [view-state]
-  {:created-order-options (created-order-options (:created-order view-state))
-   :priority-sort-options (priority-sort-options view-state)
+  {:created-order-options      (created-order-options (:created-order view-state))
+   :priority-sort-options      (priority-sort-options view-state)
    :terminal-visibility-option (terminal-visibility-option view-state)})
 
 (defn board-requests
   "Return visible request cards for a view-state or board env."
   [ctx arg]
-  (let [{:keys [user view-state]
-         supplied-now-ms :now-ms} (normalize-board-data-arg arg)
-        view-state' (normalize-view-state ctx view-state)]
+  (let [{:keys           [user view-state]
+         supplied-now-ms :now-ms}          (normalize-board-data-arg arg)
+        view-state'                        (normalize-view-state ctx view-state)]
     (visible-board-requests
      (all-requests ctx)
-     {:user user
+     {:user       user
       :view-state view-state'
-      :now-ms supplied-now-ms})))
+      :now-ms     supplied-now-ms})))
 
 (defn board-data
   "Return the data needed to render the request board for view-state.
@@ -1804,31 +1804,31 @@
    view-state map is still accepted for existing call sites while the app/live
    namespaces are migrated."
   [ctx arg]
-  (let [{:keys [user view-state]
-         supplied-now-ms :now-ms} (normalize-board-data-arg arg)
-        view-state'      (normalize-view-state ctx view-state)
-        requests         (all-requests ctx)
-        latest-revision' (latest-revision ctx)
-        visible-revision (:visible-revision view-state')
-        current-ms       (or supplied-now-ms (now-ms))
-        visible-requests (visible-board-requests
-                          requests
-                          {:user user
-                           :view-state view-state'
-                           :now-ms current-ms})]
+  (let [{:keys           [user view-state]
+         supplied-now-ms :now-ms}          (normalize-board-data-arg arg)
+        view-state'                        (normalize-view-state ctx view-state)
+        requests                           (all-requests ctx)
+        latest-revision'                   (latest-revision ctx)
+        visible-revision                   (:visible-revision view-state')
+        current-ms                         (or supplied-now-ms (now-ms))
+        visible-requests                   (visible-board-requests
+                                            requests
+                                            {:user       user
+                                             :view-state view-state'
+                                             :now-ms     current-ms})]
     (merge
-     {:store/id store-id
-      :store/name store-name
-      :view-state view-state'
-      :latest-revision latest-revision'
-      :visible-revision visible-revision
-      :stale? (board-stale? visible-revision latest-revision')
-      :open-count (open-request-count requests)
+     {:store/id           store-id
+      :store/name         store-name
+      :view-state         view-state'
+      :latest-revision    latest-revision'
+      :visible-revision   visible-revision
+      :stale?             (board-stale? visible-revision latest-revision')
+      :open-count         (open-request-count requests)
       :pending-open-count (pending-open-request-count
                            requests
                            visible-revision)
-      :requests visible-requests
-      :next-prune-ms (next-prune-ms visible-requests)}
+      :requests           visible-requests
+      :next-prune-ms      (next-prune-ms visible-requests)}
      (board-option-metadata view-state'))))
 
 (defn toolbar-data
@@ -1844,21 +1844,21 @@
    namespaces are migrated."
   [ctx arg]
   (let [{:keys [view-state]} (normalize-board-data-arg arg)
-        view-state'         (normalize-view-state ctx view-state)
-        requests            (all-requests ctx)
-        latest-revision'    (latest-revision ctx)
-        visible-revision    (:visible-revision view-state')
-        pending-open-count' (pending-open-request-count
-                             requests
-                             visible-revision)]
+        view-state'          (normalize-view-state ctx view-state)
+        requests             (all-requests ctx)
+        latest-revision'     (latest-revision ctx)
+        visible-revision     (:visible-revision view-state')
+        pending-open-count'  (pending-open-request-count
+                              requests
+                              visible-revision)]
     (merge
-     {:store/id store-id
-      :store/name store-name
-      :view-state view-state'
-      :latest-revision latest-revision'
-      :visible-revision visible-revision
-      :stale? (pos? pending-open-count')
-      :open-count (open-request-count requests)
+     {:store/id           store-id
+      :store/name         store-name
+      :view-state         view-state'
+      :latest-revision    latest-revision'
+      :visible-revision   visible-revision
+      :stale?             (pos? pending-open-count')
+      :open-count         (open-request-count requests)
       :pending-open-count pending-open-count'}
      (board-option-metadata view-state'))))
 
@@ -1870,6 +1870,6 @@
   [ctx]
   (let [new-state (initial-state)]
     (persist-state! ctx new-state)
-    {:status :ok
+    {:status   :ok
      :revision (:revision new-state)
-     :state new-state}))
+     :state    new-state}))

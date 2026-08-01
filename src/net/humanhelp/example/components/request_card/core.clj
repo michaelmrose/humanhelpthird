@@ -29,8 +29,8 @@
   [request]
   (g/status-pill
    {:status (status-pill-status request)
-    :text (status-label request)
-    :dot? true}))
+    :text   (status-label request)
+    :dot?   true}))
 
 ;; -----------------------------------------------------------------------------
 ;; Hidden Parameter Sync
@@ -39,8 +39,8 @@
 (defn hidden-input
   [name value]
   (when (some? value)
-    [:input {:type "hidden"
-             :name name
+    [:input {:type  "hidden"
+             :name  name
              :value value}]))
 
 (defn- true-input
@@ -159,43 +159,43 @@
                attrs]}]
   [:form
    (attr/action-form-attrs
-    {:to to
+    {:to                   to
      :board-state-selector board-state-selector
-     :attrs (merge
-             (when optimistic-template-id
-               {:data-gesso-optimistic-template optimistic-template-id
-                :data-gesso-optimistic-target "closest [data-humanhelp-request-card]"})
-             attrs)})
+     :attrs                (merge
+                            (when optimistic-template-id
+                              {:data-gesso-optimistic-template optimistic-template-id
+                               :data-gesso-optimistic-target   "closest [data-humanhelp-request-card]"})
+                            attrs)})
    (g/anti-forgery-input ctx)
    (view-state-hidden-inputs view-state)
    (g/button
     {:variant (or variant :default)
-     :size (or size :sm)
-     :text text
-     :attrs (cond-> {:type "submit"}
-              disabled?
-              (assoc :disabled true
-                     :aria-disabled "true"))})])
+     :size    (or size :sm)
+     :text    text
+     :attrs   (cond-> {:type "submit"}
+                disabled?
+                (assoc :disabled true
+                       :aria-disabled "true"))})])
 
 (defn action-button
   [ctx request action view-state board-state-selector]
   (form-action
    ctx
-   {:to (routes/action-url (:request/id request) action)
-    :text (model/action-label action)
-    :variant (case action
-               :done :primary
-               :claim :primary
-               :take-over :primary
-               :cancel :outline
-               :unclaim :outline
-               :default)
-    :view-state view-state
-    :board-state-selector board-state-selector
+   {:to                     (routes/action-url (:request/id request) action)
+    :text                   (model/action-label action)
+    :variant                (case action
+                              :done :primary
+                              :claim :primary
+                              :take-over :primary
+                              :cancel :outline
+                              :unclaim :outline
+                              :default)
+    :view-state             view-state
+    :board-state-selector   board-state-selector
     :optimistic-template-id (optimistic-template-id request action)
-    :disabled? (:ui/disable-actions? request)
-    :attrs {:data-humanhelp-request-action (name action)
-            :data-gesso-optimistic-label (action-pending-label action)}}))
+    :disabled?              (:ui/disable-actions? request)
+    :attrs                  {:data-humanhelp-request-action (name action)
+                             :data-gesso-optimistic-label   (action-pending-label action)}}))
 
 ;; -----------------------------------------------------------------------------
 ;; Card Content
@@ -207,38 +207,38 @@
    (request-status-pill request)
 
    (g/muted-text
-    {:as :span
+    {:as    :span
      :class "text-xs-theme"
-     :text (:request/area request)})
+     :text  (:request/area request)})
 
    (g/muted-text
-    {:as :span
+    {:as    :span
      :class "text-xs-theme"
-     :text "·"})
+     :text  "·"})
 
    (g/muted-text
-    {:as :span
+    {:as    :span
      :class "text-xs-theme"
-     :text (str "waiting " (model/waiting-label request))})])
+     :text  (str "waiting " (model/waiting-label request))})])
 
 (defn- pending-note
   [request]
   (when (:ui/pending? request)
     (g/muted-text
-     {:as :span
+     {:as    :span
       :class "text-xs-theme leading-body weight-medium-theme"
       :attrs {:data-humanhelp-request-pending-note true
-              :aria-live "polite"
-              :style {:position "absolute"
-                      :inset-block-start "var(--space-3)"
-                      :inset-inline-end "calc(var(--space-5) + var(--icon-size-lg))"
-                      :z-index 2
-                      :pointer-events "none"
-                      :padding "0.125rem 0.4rem"
-                      :border-radius "var(--radius-sm)"
-                      :background "color-mix(in srgb, var(--card) 88%, transparent)"
-                      :box-shadow "var(--shadow-xs)"}}
-      :text "confirming…"})))
+              :aria-live                           "polite"
+              :style                               {:position          "absolute"
+                                                    :inset-block-start "var(--space-3)"
+                                                    :inset-inline-end  "calc(var(--space-5) + var(--icon-size-lg))"
+                                                    :z-index           2
+                                                    :pointer-events    "none"
+                                                    :padding           "0.125rem 0.4rem"
+                                                    :border-radius     "var(--radius-sm)"
+                                                    :background        "color-mix(in srgb, var(--card) 88%, transparent)"
+                                                    :box-shadow        "var(--shadow-xs)"}}
+      :text  "confirming…"})))
 
 (defn request-card-actions
   [ctx request user view-state board-state-selector]
@@ -275,19 +275,19 @@
 
     [:div (attr/customer-row-attrs)
      (g/text
-      {:as :span
+      {:as      :span
        :variant :small
-       :class "weight-medium-theme"
-       :text (:request/customer-name request)})
+       :class   "weight-medium-theme"
+       :text    (:request/customer-name request)})
 
      (when-let [claimed-by (claimed-by-label request user)]
        (g/muted-text
-        {:as :span
+        {:as    :span
          :class "text-xs-theme leading-body"
-         :text (str "claimed by " claimed-by)}))]]
+         :text  (str "claimed by " claimed-by)}))]]
 
    (g/icon "chevron-down"
-           {:size :sm
+           {:size  :sm
             :class "shrink-0 transition-transform duration-200 ease-in-out"
             :attrs (attr/chevron-attrs open?)})])
 
@@ -297,10 +297,10 @@
    (attr/details-attrs)
    (when (model/present? (:request/details request))
      (g/text
-      {:as :p
+      {:as      :p
        :variant :small
-       :class "leading-body"
-       :text (:request/details request)}))
+       :class   "leading-body"
+       :text    (:request/details request)}))
    (request-card-actions ctx request user view-state board-state-selector)))
 
 ;; -----------------------------------------------------------------------------
@@ -344,11 +344,11 @@
     [:template {:data-gesso-optimistic-template template-id}
      (base-request-card
       ctx
-      {:request (optimistic-request request user action)
-       :user user
-       :view-state view-state
+      {:request              (optimistic-request request user action)
+       :user                 user
+       :view-state           view-state
        :board-state-selector board-state-selector
-       :open? true})]))
+       :open?                true})]))
 
 (defn- optimistic-templates
   [ctx {:keys [request user view-state board-state-selector optimistic-templates?]}]
@@ -359,11 +359,11 @@
          (for [action actions]
            (optimistic-template
             ctx
-            {:request request
-             :user user
-             :view-state view-state
+            {:request              request
+             :user                 user
+             :view-state           view-state
              :board-state-selector board-state-selector
-             :action action})))))))
+             :action               action})))))))
 
 ;; -----------------------------------------------------------------------------
 ;; Public Card
@@ -377,21 +377,21 @@
                board-state-selector
                open?
                optimistic-templates?]
-        :or {open? false
-             optimistic-templates? true}}]
-  (let [card (base-request-card
-              ctx
-              {:request request
-               :user user
-               :view-state view-state
-               :board-state-selector board-state-selector
-               :open? open?})
+        :or   {open?                 false
+               optimistic-templates? true}}]
+  (let [card      (base-request-card
+                   ctx
+                   {:request              request
+                    :user                 user
+                    :view-state           view-state
+                    :board-state-selector board-state-selector
+                    :open?                open?})
         templates (optimistic-templates
                    ctx
-                   {:request request
-                    :user user
-                    :view-state view-state
-                    :board-state-selector board-state-selector
+                   {:request               request
+                    :user                  user
+                    :view-state            view-state
+                    :board-state-selector  board-state-selector
                     :optimistic-templates? optimistic-templates?})]
     (if (seq templates)
       (into card templates)

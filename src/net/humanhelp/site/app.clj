@@ -124,7 +124,7 @@
   {:status 303
    :headers
    {"location" url}
-   :body ""})
+   :body   ""})
 
 ;; =============================================================================
 ;; Current User
@@ -187,10 +187,10 @@
   :start
   (fn [{::keys
         [create-request-input]
-        :as ctx}]
+        :as    ctx}]
     (let [{:keys
            [result]
-           :as planned}
+           :as   planned}
           (request/plan-create-request
            ctx
            create-request-input)]

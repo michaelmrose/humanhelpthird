@@ -8,46 +8,46 @@
   (let [[subject action] (if user-exists
                            [(str "Sign in to " settings/app-name) "sign in"]
                            [(str "Sign up for " settings/app-name) "sign up"])]
-    {:to [{:email to}]
+    {:to      [{:email to}]
      :subject subject
-     :html (rum/render-static-markup
-            [:html
-             [:body
-              [:p "We received a request to " action " to " settings/app-name
-               " using this email address. Click this link to " action ":"]
-              [:p [:a {:href url :target "_blank"} "Click here to " action "."]]
-              [:p "This link will expire in one hour. "
-               "If you did not request this link, you can ignore this email."]]])
-     :text (str "We received a request to " action " to " settings/app-name
-                " using this email address. Click this link to " action ":\n"
-                "\n"
-                url "\n"
-                "\n"
-                "This link will expire in one hour. If you did not request this link, "
-                "you can ignore this email.")}))
+     :html    (rum/render-static-markup
+               [:html
+                [:body
+                 [:p "We received a request to " action " to " settings/app-name
+                  " using this email address. Click this link to " action ":"]
+                 [:p [:a {:href url :target "_blank"} "Click here to " action "."]]
+                 [:p "This link will expire in one hour. "
+                  "If you did not request this link, you can ignore this email."]]])
+     :text    (str "We received a request to " action " to " settings/app-name
+                   " using this email address. Click this link to " action ":\n"
+                   "\n"
+                   url "\n"
+                   "\n"
+                   "This link will expire in one hour. If you did not request this link, "
+                   "you can ignore this email.")}))
 
 (defn signin-code [{:keys [to code user-exists]}]
   (let [[subject action] (if user-exists
                            [(str "Sign in to " settings/app-name) "sign in"]
                            [(str "Sign up for " settings/app-name) "sign up"])]
-    {:to [{:email to}]
+    {:to      [{:email to}]
      :subject subject
-     :html (rum/render-static-markup
-            [:html
-             [:body
-              [:p "We received a request to " action " to " settings/app-name
-               " using this email address. Enter the following code to " action ":"]
-              [:p {:style {:font-size "2rem"}} code]
-              [:p
-               "This code will expire in three minutes. "
-               "If you did not request this code, you can ignore this email."]]])
-     :text (str "We received a request to " action " to " settings/app-name
-                " using this email address. Enter the following code to " action ":\n"
-                "\n"
-                code "\n"
-                "\n"
-                "This code will expire in three minutes. If you did not request this code, "
-                "you can ignore this email.")}))
+     :html    (rum/render-static-markup
+               [:html
+                [:body
+                 [:p "We received a request to " action " to " settings/app-name
+                  " using this email address. Enter the following code to " action ":"]
+                 [:p {:style {:font-size "2rem"}} code]
+                 [:p
+                  "This code will expire in three minutes. "
+                  "If you did not request this code, you can ignore this email."]]])
+     :text    (str "We received a request to " action " to " settings/app-name
+                   " using this email address. Enter the following code to " action ":\n"
+                   "\n"
+                   code "\n"
+                   "\n"
+                   "This code will expire in three minutes. If you did not request this code, "
+                   "you can ignore this email.")}))
 
 (defn template [k opts]
   ((case k
@@ -56,14 +56,14 @@
    opts))
 
 (defn send-mailersend [{:keys [biff/secret mailersend/from mailersend/reply-to]} form-params]
-  (let [result (http/post "https://api.mailersend.com/v1/email"
-                          {:oauth-token (secret :mailersend/api-key)
-                           :content-type :json
-                           :throw-exceptions false
-                           :as :json
-                           :form-params (merge {:from {:email from :name settings/app-name}
-                                                :reply_to {:email reply-to :name settings/app-name}}
-                                               form-params)})
+  (let [result  (http/post "https://api.mailersend.com/v1/email"
+                           {:oauth-token      (secret :mailersend/api-key)
+                            :content-type     :json
+                            :throw-exceptions false
+                            :as               :json
+                            :form-params      (merge {:from     {:email from :name settings/app-name}
+                                                      :reply_to {:email reply-to :name settings/app-name}}
+                                                     form-params)})
         success (< (:status result) 400)]
     (when-not success
       (log/error (:body result)))

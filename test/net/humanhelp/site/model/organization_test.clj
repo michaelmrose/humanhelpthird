@@ -140,9 +140,9 @@
   ([id name]
    (after
     (domain/create-organization-command
-     {:id id
+     {:id   id
       :name name
-      :now t0}))))
+      :now  t0}))))
 
 (defn- group-document
   ([id parent-scope name]
@@ -154,11 +154,11 @@
   ([organization-id id parent-scope name]
    (after
     (domain/create-organization-group-command
-     {:id id
+     {:id              id
       :organization-id organization-id
-      :parent-scope parent-scope
-      :name name
-      :now t0}))))
+      :parent-scope    parent-scope
+      :name            name
+      :now             t0}))))
 
 (defn- location-document
   ([parent-scope]
@@ -170,11 +170,11 @@
   ([organization-id id parent-scope name]
    (after
     (domain/create-location-command
-     {:id id
+     {:id              id
       :organization-id organization-id
-      :parent-scope parent-scope
-      :name name
-      :now t0}))))
+      :parent-scope    parent-scope
+      :name            name
+      :now             t0}))))
 
 (defn- ordinary-hierarchy
   []
@@ -318,19 +318,19 @@
     (is
      (=
       {:scope/type :organization
-       :scope/id organization-id}
+       :scope/id   organization-id}
       organization-scope))
 
     (is
      (=
       {:scope/type :organization-group
-       :scope/id root-group-id}
+       :scope/id   root-group-id}
       root-group-scope))
 
     (is
      (=
       {:scope/type :location
-       :scope/id location-id}
+       :scope/id   location-id}
       location-scope)))
 
   (testing "scope predicates distinguish target and parent scopes"
@@ -359,7 +359,7 @@
      (false?
       (organization/scope?
        {:scope/type :unknown
-        :scope/id organization-id}))))
+        :scope/id   organization-id}))))
 
   (testing "scope identity is type plus id"
     (is
@@ -431,8 +431,8 @@
     (is
      (false?
       (organization/scope-context?
-       {:organization/id organization-id
-        :scope/target location-scope
+       {:organization/id    organization-id
+        :scope/target       location-scope
         :scope/applicable
         [child-group-scope
          location-scope
@@ -442,8 +442,8 @@
     (is
      (false?
       (organization/scope-context?
-       {:organization/id organization-id
-        :scope/target location-scope
+       {:organization/id    organization-id
+        :scope/target       location-scope
         :scope/applicable
         [location-scope
          other-organization-scope]
@@ -577,7 +577,7 @@
        #(domain/rename-organization
          before
          {:name "Human Help"
-          :now t1}))))
+          :now  t1}))))
 
     (is
      (=
@@ -586,7 +586,7 @@
        #(domain/rename-organization
          before
          {:name "Earlier"
-          :now t-before}))))))
+          :now  t-before}))))))
 
 (deftest move-transitions-test
   (let [group
@@ -1133,7 +1133,7 @@
     (let [plan
           (organization/plan-create-organization
            {:biff.fx/seed 1
-            :biff.fx/now t1}
+            :biff.fx/now  t1}
            {:name
             "  New Organization  "})
 
@@ -1166,13 +1166,13 @@
 
       (is
        (=
-        {:topic :organization
-         :id new-organization-id
-         :change/kind :created
+        {:topic                  :organization
+         :id                     new-organization-id
+         :change/kind            :created
          :organization/operation :create
-         :organization/id new-organization-id
-         :organization/status :active
-         :organization/revision 0}
+         :organization/id        new-organization-id
+         :organization/status    :active
+         :organization/revision  0}
         (plan-change plan))))))
 
 (deftest create-child-plan-test
@@ -1187,7 +1187,7 @@
       (let [plan
             (organization/plan-create-organization-group
              {:biff.fx/seed 2
-              :biff.fx/now t1}
+              :biff.fx/now  t1}
              {:parent-scope
               organization-scope
 
@@ -1237,8 +1237,8 @@
           (organization/plan-rename-location
            {:biff.fx/now t1}
            {:location-id location-id
-            :name "  Downtown Store  "
-            :actor-id actor-id})
+            :name        "  Downtown Store  "
+            :actor-id    actor-id})
 
           model-command
           (plan-command plan)
@@ -1330,17 +1330,17 @@
     (doseq [[planner input entity-type]
             [[organization/plan-close-organization
               {:organization-id organization-id
-               :actor-id actor-id}
+               :actor-id        actor-id}
               :organization]
 
              [organization/plan-close-organization-group
               {:organization-group-id child-group-id
-               :actor-id actor-id}
+               :actor-id              actor-id}
               :organization-group]
 
              [organization/plan-close-location
               {:location-id location-id
-               :actor-id actor-id}
+               :actor-id    actor-id}
               :location]]]
 
       (let [plan
@@ -1547,7 +1547,7 @@
           (error-type
            #(organization/plan-create-location
              {:biff.fx/seed 3
-              :biff.fx/now t2}
+              :biff.fx/now  t2}
              {:parent-scope
               root-group-scope
 
@@ -1569,7 +1569,7 @@
        #(organization/plan-rename-location
          {:biff.fx/now t1}
          {:location-id missing-id
-          :name "Missing"}))))
+          :name        "Missing"}))))
 
     (is
      (=
@@ -1577,7 +1577,7 @@
       (error-type
        #(organization/plan-create-location
          {:biff.fx/seed 4
-          :biff.fx/now t1}
+          :biff.fx/now  t1}
          {:parent-scope
           (organization/organization-group-scope
            missing-id)

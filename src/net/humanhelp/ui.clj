@@ -13,32 +13,32 @@
 
 (def default-theme
   {:color-theme "cosmicnight"
-   :density "default"
-   :typography "sans-headings"
-   :shape "default"})
+   :density     "default"
+   :typography  "sans-headings"
+   :shape       "default"})
 
 (def default-mode
   :dark)
 
 (def axis-specs
-  [{:axis :color-theme
-    :attr "data-color-theme"
-    :label "Color"
+  [{:axis        :color-theme
+    :attr        "data-color-theme"
+    :label       "Color"
     :description "Choose the app color palette."}
 
-   {:axis :density
-    :attr "data-density"
-    :label "Density"
+   {:axis        :density
+    :attr        "data-density"
+    :label       "Density"
     :description "Adjust spacing, control size, and layout rhythm."}
 
-   {:axis :typography
-    :attr "data-typography"
-    :label "Typography"
+   {:axis        :typography
+    :attr        "data-typography"
+    :label       "Typography"
     :description "Choose the body and heading type system."}
 
-   {:axis :shape
-    :attr "data-shape"
-    :label "Shape"
+   {:axis        :shape
+    :attr        "data-shape"
+    :label       "Shape"
     :description "Adjust border radius and component softness."}])
 
 ;; -----------------------------------------------------------------------------
@@ -341,18 +341,18 @@
   {:color-theme (or (:color-theme ctx)
                     (:data-color-theme ctx)
                     (:color-theme default-theme))
-   :density (or (:density ctx)
-                (:data-density ctx)
-                (:density default-theme))
-   :typography (or (:typography ctx)
-                   (:data-typography ctx)
-                   (:typography default-theme))
-   :shape (or (:shape ctx)
-              (:data-shape ctx)
-              (:shape default-theme))
-   :mode (or (:mode ctx)
-             (:data-color-theme-mode ctx)
-             default-mode)})
+   :density     (or (:density ctx)
+                    (:data-density ctx)
+                    (:density default-theme))
+   :typography  (or (:typography ctx)
+                    (:data-typography ctx)
+                    (:typography default-theme))
+   :shape       (or (:shape ctx)
+                    (:data-shape ctx)
+                    (:shape default-theme))
+   :mode        (or (:mode ctx)
+                    (:data-color-theme-mode ctx)
+                    default-mode)})
 
 (defn- mode-token
   [mode]
@@ -377,8 +377,8 @@
   []
   {:border-style "solid"
    :border-color "var(--border)"
-   :background "var(--background)"
-   :color "var(--foreground)"})
+   :background   "var(--background)"
+   :color        "var(--foreground)"})
 
 (defn- theme-select
   [{:keys [axis attr label description options selected id-prefix]}]
@@ -392,10 +392,10 @@
       description]
 
      [:select
-      {:id id
-       :name (name axis)
-       :class "control-theme radius-md border-theme font-body text-sm-theme"
-       :style (control-style)
+      {:id       id
+       :name     (name axis)
+       :class    "control-theme radius-md border-theme font-body text-sm-theme"
+       :style    (control-style)
        :onchange (str "document.documentElement.setAttribute('"
                       attr
                       "', this.value)")}
@@ -413,8 +413,8 @@
     "Switch between light, dark, or your browser preference."]
 
    [:select
-    {:id (str id-prefix "-mode")
-     :name "mode"
+    {:id    (str id-prefix "-mode")
+     :name  "mode"
      :class "control-theme radius-md border-theme font-body text-sm-theme"
      :style (control-style)
      :onchange
@@ -457,7 +457,7 @@
   ([ctx]
    (theme-dialog ctx {}))
   ([ctx {:keys [trigger-label? id id-prefix]
-         :or {trigger-label? true}}]
+         :or   {trigger-label? true}}]
    (let [dialog-id     (or id "net.humanhelp-theme-dialog")
          id-prefix'    (or id-prefix dialog-id)
          state         (theme-state ctx)
@@ -474,7 +474,7 @@
       (g/dialog-overlay)
 
       (g/dialog-content
-       {:title "Theme"
+       {:title       "Theme"
         :description "Explore the generated Gesso theme dimensions. Changes apply to this page immediately."
         :body
         [[:div {:class "form-theme"}
@@ -490,7 +490,7 @@
                     :selected (get state axis))))
 
           (mode-select
-           {:selected (:mode state)
+           {:selected  (:mode state)
             :id-prefix id-prefix'})]]
         :footer
         [(g/dialog-close {:text "Done"})]})))))
@@ -509,20 +509,20 @@
      :alt"
   ([] (brand {}))
   ([{:keys [href image-src text alt]
-     :or {href "/app"
-          image-src "/img/hh.png"
-          text settings/app-name
-          alt ""}}]
-   [:a {:href href
+     :or   {href      "/app"
+            image-src "/img/hh.png"
+            text      settings/app-name
+            alt       ""}}]
+   [:a {:href  href
         :class "cluster-theme items-center"
-        :style {:color "var(--foreground)"
+        :style {:color           "var(--foreground)"
                 :text-decoration "none"}}
-    [:img (cond-> {:src image-src
-                   :alt alt
-                   :style {:width "1.5rem"
-                           :height "1.5rem"
+    [:img (cond-> {:src   image-src
+                   :alt   alt
+                   :style {:width      "1.5rem"
+                           :height     "1.5rem"
                            :object-fit "contain"
-                           :display "block"}}
+                           :display    "block"}}
             (not (seq alt))
             (assoc :aria-hidden "true"))]
     [:span {:class "font-heading text-md-theme leading-heading tracking-heading weight-semibold-theme"}
@@ -608,9 +608,9 @@
    {:action "/auth/signout"}
    (g/button
     {:variant :ghost
-     :text "Log out"
-     :class "w-full justify-start"
-     :attrs {:type "submit"}})))
+     :text    "Log out"
+     :class   "w-full justify-start"
+     :attrs   {:type "submit"}})))
 
 (defn user-menu
   [user]
@@ -621,11 +621,11 @@
      (g/dropdown-menu-trigger
       {:class "inline-flex items-center justify-center control-theme radius-md"
        :attrs {:aria-label "Account"
-               :title label
-               :style {:width "3rem"
-                       :height "3rem"}}}
+               :title      label
+               :style      {:width  "3rem"
+                            :height "3rem"}}}
       (g/icon "circle-user-round"
-              {:size :2xl
+              {:size  :2xl
                :title "Account"
                :attrs {:stroke-width 1.5}}))
 
@@ -638,12 +638,12 @@
                  "Signed in as"
                  "Account")]
         [:span {:class "font-body text-sm-theme leading-body weight-medium-theme"
-                :style {:display "block"
-                        :max-width "16rem"
-                        :overflow "hidden"
+                :style {:display       "block"
+                        :max-width     "16rem"
+                        :overflow      "hidden"
                         :text-overflow "ellipsis"
-                        :white-space "nowrap"
-                        :color "var(--foreground)"}}
+                        :white-space   "nowrap"
+                        :color         "var(--foreground)"}}
          label]])
 
       (when signed-in?
@@ -682,7 +682,7 @@
 
 (defn- page-shell-main
   [{:keys [main-attrs main-class]
-    :or {main-class "flex-grow"}}
+    :or   {main-class "flex-grow"}}
    body]
   (into [:main (merge {:class main-class}
                       main-attrs)]
@@ -698,7 +698,7 @@
     toaster
 
     :else
-    (g/toaster {:id "app-toaster"
+    (g/toaster {:id       "app-toaster"
                 :position :bottom-right})))
 
 (defn- page-shell-rightmost
@@ -712,9 +712,9 @@
   [ctx opts]
   (g/bars
    {:topbar-only? true
-    :brand (or (:brand opts)
-               (brand))
-    :rightmost (page-shell-rightmost ctx opts)}))
+    :brand        (or (:brand opts)
+                      (brand))
+    :rightmost    (page-shell-rightmost ctx opts)}))
 
 ;; -----------------------------------------------------------------------------
 ;; Base page shell
@@ -728,49 +728,49 @@
      (-> ctx
          (merge
           (g/theme {:color-theme color-theme
-                    :density density
-                    :typography typography
-                    :shape shape}
+                    :density     density
+                    :typography  typography
+                    :shape       shape}
                    mode))
          (update :base/head
                  (fn [head]
                    (concat
                     head
-                    [[:script {:src (static-path "/js/gesso-theme.js")
+                    [[:script {:src   (static-path "/js/gesso-theme.js")
                                :defer true}]
-                     [:script {:src (static-path "/js/gesso-live.js")
+                     [:script {:src   (static-path "/js/gesso-live.js")
                                :defer true}]
-                     [:link {:rel "stylesheet"
+                     [:link {:rel  "stylesheet"
                              :href (static-path "/css/main.css")}]
-                     [:link {:rel "stylesheet"
+                     [:link {:rel  "stylesheet"
                              :href "https://cdn.jsdelivr.net/npm/basecoat-css@0.3.11/dist/basecoat.cdn.min.css"}]
-                     [:link {:rel "stylesheet"
+                     [:link {:rel  "stylesheet"
                              :href (static-path "/gesso/themes.css")}]
                      (when (io/resource "public/gesso/app-themes.css")
-                       [:link {:rel "stylesheet"
+                       [:link {:rel  "stylesheet"
                                :href (static-path "/gesso/app-themes.css")}])
-                     [:link {:rel "icon"
-                             :href "/favicon.ico"
+                     [:link {:rel   "icon"
+                             :href  "/favicon.ico"
                              :sizes "any"}]
 
-                     [:script {:src "https://cdn.jsdelivr.net/npm/basecoat-css@0.3.11/dist/js/all.min.js"
+                     [:script {:src   "https://cdn.jsdelivr.net/npm/basecoat-css@0.3.11/dist/js/all.min.js"
                                :defer true}]
-                     [:script {:src (static-path "/js/main.js")
+                     [:script {:src   (static-path "/js/main.js")
                                :defer true}]
                      [:script {:src "https://unpkg.com/htmx.org@2.0.7"}]
                      [:script {:src "https://cdn.jsdelivr.net/npm/htmx-ext-sse@2.2.4"}]
                      [:script {:src "https://unpkg.com/htmx-ext-ws@2.0.2/ws.js"}]
                      [:script {:src "https://unpkg.com/hyperscript.org@0.9.14"}]
                      (when recaptcha
-                       [:script {:src "https://www.google.com/recaptcha/api.js"
+                       [:script {:src   "https://www.google.com/recaptcha/api.js"
                                  :async "async"
                                  :defer "defer"}])])))
          (merge
-          #:base{:title settings/app-name
-                 :lang "en-US"
-                 :icon "/img/glider.png"
+          #:base{:title       settings/app-name
+                 :lang        "en-US"
+                 :icon        "/img/glider.png"
                  :description (str settings/app-name " Description")
-                 :image "https://clojure.org/images/clojure-logo-120b.png"}))
+                 :image       "https://clojure.org/images/clojure-logo-120b.png"}))
      body)))
 
 (defn container
@@ -789,7 +789,7 @@
          [:main {:class "flex-grow py-10"}
           (apply container body)]
 
-         (g/toaster {:id "app-toaster"
+         (g/toaster {:id       "app-toaster"
                      :position :bottom-right})]))
 
 (defn page-shell
@@ -860,12 +860,12 @@
 
 (defn on-error
   [{:keys [status] :as ctx}]
-  {:status status
+  {:status  status
    :headers {"content-type" "text/html"}
-   :body (rum/render-static-markup
-          (page
-           ctx
-           [:h1 {:class "font-heading text-2xl-theme leading-heading tracking-heading weight-semibold-theme"}
-            (if (= status 404)
-              "Page not found."
-              "Something went wrong.")]))})
+   :body    (rum/render-static-markup
+             (page
+              ctx
+              [:h1 {:class "font-heading text-2xl-theme leading-heading tracking-heading weight-semibold-theme"}
+               (if (= status 404)
+                 "Page not found."
+                 "Something went wrong.")]))})

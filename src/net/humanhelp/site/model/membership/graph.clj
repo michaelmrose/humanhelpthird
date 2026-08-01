@@ -45,7 +45,7 @@
   (throw
    (ex-info
     message
-    {:error/type type
+    {:error/type    type
      :error/details details})))
 
 (defn- require-uuid!

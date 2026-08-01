@@ -169,7 +169,7 @@
       (fail!
        :organization/ownership-mismatch
        "The current and destination scopes belong to different Organizations."
-       {:current-organization-id current-id
+       {:current-organization-id     current-id
         :destination-organization-id destination-id}))
     destination))
 
@@ -209,7 +209,7 @@
 
         base
         {:topic entity
-         :id (:xt/id document)
+         :id    (:xt/id document)
          :change/kind
          (if
           (command/create? model-command)
@@ -220,7 +220,7 @@
       (merge
        base
        {:organization/operation operation
-        :organization/id (:xt/id document)
+        :organization/id        (:xt/id document)
         :organization/status
         (:organization/status document)
         :organization/revision
@@ -230,7 +230,7 @@
       (merge
        base
        {:organization-group/operation operation
-        :organization-group/id (:xt/id document)
+        :organization-group/id        (:xt/id document)
         :organization/id
         (:organization-group/organization document)
         :organization-group/parent-type
@@ -246,7 +246,7 @@
       (merge
        base
        {:location/operation operation
-        :location/id (:xt/id document)
+        :location/id        (:xt/id document)
         :organization/id
         (:location/organization document)
         :location/parent-type
@@ -360,7 +360,7 @@
      :organization.fx/unsupported-update
      "The requested Organization update is not supported."
      {:entity-kind entity
-      :operation operation})))
+      :operation   operation})))
 
 ;; =============================================================================
 ;; Create plans
