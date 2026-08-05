@@ -12,7 +12,7 @@
    Session mutation and Ring responses remain the caller's responsibility."
 
   (:require
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.tx :as model.tx]
    [net.humanhelp.components.phone-auth.sms :as phone-auth.sms]
    [net.humanhelp.site.model.user.core :as user]))

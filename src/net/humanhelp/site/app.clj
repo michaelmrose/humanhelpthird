@@ -8,7 +8,7 @@
    Views receive already-resolved values and perform no persistence work."
   (:require
    [gesso.core :as g]
-   [gesso.fx :as fx]
+   [com.biffweb.fx :as fx]
    [gesso.model.tx :as model.tx]
    [net.humanhelp.middleware :as mid]
    [net.humanhelp.site.mock-data :as mock-data]
