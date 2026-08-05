@@ -10,6 +10,7 @@
    User creation plan when no User exists.
 
    Session mutation and Ring responses remain the caller's responsibility."
+
   (:require
    [gesso.fx :as fx]
    [gesso.model.tx :as model.tx]
@@ -125,6 +126,7 @@
 
      {:ok? false
       :error ...}"
+
   [ctx {:keys
         [phone]}]
   (if-let [phone'
