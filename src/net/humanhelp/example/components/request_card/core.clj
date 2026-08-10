@@ -184,51 +184,72 @@
     :unclaim :outline
     :default))
 
+(defn- action-button-class
+  [action]
+  ;; Match gesso.components.button's :sm classes so the low-level Live request
+  ;; owner remains visually identical to the ordinary Gesso button component.
+  (case (action-variant action)
+    :primary "btn-sm-primary"
+    :outline "btn-sm-outline"
+    "btn-sm"))
+
 (defn- action-button-attrs
+  [action]
+  {:class                         (action-button-class action)
+   :data-humanhelp-request-action (name action)})
+
+(defn- projected-action-button
+  "Render an inert action control inside optimistic projection markup.
+
+   Do not use live/post-button here. An optimistic template is itself rendered
+   inside the authoritative action's lightweight wrapper form. Putting more Live
+   wrapper forms inside that template creates nested-form HTML, which browsers
+   are allowed to repair while parsing and can change the projection DOM shape
+   before Gesso validates it."
   [request action]
-  (cond-> {:data-humanhelp-request-action (name action)
-           ;; The example is intentionally not preserving the old hand-written
-           ;; optimistic attrs. Gesso Live owns every data-gesso-optimistic-*
-           ;; attribute now.
-           :data-humanhelp-button-variant (name (action-variant action))}
-    (:ui/disable-actions? request)
-    (assoc :disabled true
-           :aria-disabled "true")))
+  (g/button
+   {:variant (action-variant action)
+    :size    :sm
+    :text    (model/action-label action)
+    :attrs   {:type                          "button"
+              :disabled                      true
+              :aria-disabled                 "true"
+              :data-humanhelp-request-action (name action)
+              :data-humanhelp-projected-action true}}))
 
 (defn action-button
   [ctx request user action view-state board-state-selector]
-  (let [text (model/action-label action)]
-    (live/post-button
-     ctx
-     {:to      (routes/action-url (:request/id request) action)
-      :swap    "none"
-      :include board-state-selector
-      :form-attrs
-      {:class                              "inline-flex"
-       :data-humanhelp-request-action-form true}
-
-      ;; post-button owns the actual <button>. Keep the removable example's
-      ;; action identity on that clicked source so the new optimistic runtime
-      ;; sees the same element HTMX sends.
-      :button-attrs
-      (action-button-attrs request action)
-
-      ;; A label target lets the runtime replace the clicked button's text during
-      ;; request handoff before/while the full-card projection is installed.
-      :children
-      [[:span {:data-gesso-button-label true}
-        text]]
-
-      ;; Pending/projection cards render disabled ordinary buttons. Authoritative
-      ;; cards render the protocol-v2 descriptor and sibling projection template.
-      :optimistic
-      (optimistic-config
+  (if (:ui/disable-actions? request)
+    (projected-action-button request action)
+    (let [text (model/action-label action)]
+      (live/post-button
        ctx
-       request
-       user
-       action
-       view-state
-       board-state-selector)})))
+       {:to      (routes/action-url (:request/id request) action)
+        :swap    "none"
+        :include board-state-selector
+        :form-attrs
+        {:class                              "inline-flex"
+         :data-humanhelp-request-action-form true}
+
+        ;; post-button owns the actual clicked <button>. Keep component styling
+        ;; and application identity on that real HTMX/protocol source.
+        :button-attrs
+        (action-button-attrs action)
+
+        ;; The optimistic runtime can swap this label to :pending-label after the
+        ;; click has been accepted, while the whole-card projection is installed.
+        :children
+        [[:span {:data-gesso-button-label true}
+          text]]
+
+        :optimistic
+        (optimistic-config
+         ctx
+         request
+         user
+         action
+         view-state
+         board-state-selector)}))))
 
 ;; -----------------------------------------------------------------------------
 ;; Card Content
