@@ -665,8 +665,8 @@
            :result     result})))
       (case (:status result)
         :ok
-        {:outcome   :confirmed
-         :revision  (:revision result)
+        {:outcome  :confirmed
+         :revision (:revision result)
          :canonical
          (views/request-lifecycle-canonical
           fx-ctx
@@ -675,9 +675,9 @@
            :view-state view-state'})}
 
         :error
-        {:outcome   :rejected
-         :revision  (request-revision request)
-         :reason    (rejection-reason result)
+        {:outcome  :rejected
+         :revision (request-revision request)
+         :reason   (rejection-reason result)
          :canonical
          (views/request-lifecycle-canonical
           fx-ctx
@@ -736,7 +736,7 @@
           (lifecycle-settle
            user
            view-state)})
-        settlement (:settlement prepared)
+        settlement  (:settlement prepared)
         request     (model/request-by-id ctx request-id')
         extra
         (lifecycle-response-extra

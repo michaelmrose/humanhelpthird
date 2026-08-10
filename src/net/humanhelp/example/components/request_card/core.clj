@@ -211,10 +211,10 @@
    {:variant (action-variant action)
     :size    :sm
     :text    (model/action-label action)
-    :attrs   {:type                          "button"
-              :disabled                      true
-              :aria-disabled                 "true"
-              :data-humanhelp-request-action (name action)
+    :attrs   {:type                            "button"
+              :disabled                        true
+              :aria-disabled                   "true"
+              :data-humanhelp-request-action   (name action)
               :data-humanhelp-projected-action true}}))
 
 (defn action-button
