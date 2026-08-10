@@ -1,6 +1,7 @@
 (ns net.humanhelp.example.components.request-card.core
   (:require
    [gesso.core :as g]
+   [gesso.live.core :as live]
    [net.humanhelp.example.components.request-card.attr :as attr]
    [net.humanhelp.example.model :as model]
    [net.humanhelp.example.routes :as routes]))
@@ -33,7 +34,7 @@
     :dot?   true}))
 
 ;; -----------------------------------------------------------------------------
-;; Hidden Parameter Sync
+;; Hidden Parameter Helpers
 ;; -----------------------------------------------------------------------------
 
 (defn hidden-input
@@ -55,14 +56,12 @@
     (hidden-input routes/created-order-param (name created-order))))
 
 (defn view-state-hidden-inputs
-  "Render board view-state hidden inputs for request action forms.
+  "Render board view-state hidden inputs.
 
-   Action forms do not have their own visible search or board-option controls,
-   so they preserve the current normalized board state.
-
-   Open/selected request-card state is intentionally not preserved here.
-   Preserving local accordion open state across fragment replacement belongs to
-   Gesso Live continuity."
+   The new Live post-button path normally carries board state by including the
+   stable page-level board-state form. This helper remains useful to the
+   removable example's other form-shaped UI and can disappear when the example
+   is rewritten."
   [{:keys [search
            visible-revision
            created-order
@@ -91,13 +90,18 @@
     :cancel "Canceling…"
     "Updating…"))
 
-(defn- optimistic-template-id
-  [request action]
-  (str "humanhelp-request-"
-       (:request/id request)
-       "-"
-       (name action)
-       "-optimistic"))
+(defn- action-transition
+  [action]
+  (keyword "request" (name action)))
+
+(defn- request-scope
+  [request]
+  [:request (:request/id request)])
+
+(defn- request-revision
+  [request]
+  (or (:request/updated-revision request)
+      (:request/created-revision request)))
 
 (defn- pending-request
   [request action pending-label]
@@ -143,59 +147,88 @@
 
       (pending-request request action pending-label))))
 
+;; base-request-card is also the projection renderer. Projected requests carry
+;; :ui/disable-actions?, so their action buttons deliberately do not attach
+;; another optimistic descriptor.
+(declare base-request-card)
+
+(defn- optimistic-config
+  [ctx request user action view-state board-state-selector]
+  (when-not (:ui/disable-actions? request)
+    {:transition      (action-transition action)
+     :scope           (request-scope request)
+     :base-revision   (request-revision request)
+     :target          "closest [data-humanhelp-request-card]"
+     :pending-label   (action-pending-label action)
+     :projection-mode :provisional
+     :content
+     (base-request-card
+      ctx
+      {:request              (optimistic-request request user action)
+       :user                 user
+       :view-state           view-state
+       :board-state-selector board-state-selector
+       :open?                true})}))
+
 ;; -----------------------------------------------------------------------------
-;; Action Form Composition
+;; Action Composition
 ;; -----------------------------------------------------------------------------
 
-(defn form-action
-  [ctx {:keys [to
-               text
-               variant
-               size
-               view-state
-               board-state-selector
-               optimistic-template-id
-               disabled?
-               attrs]}]
-  [:form
-   (attr/action-form-attrs
-    {:to                   to
-     :board-state-selector board-state-selector
-     :attrs                (merge
-                            (when optimistic-template-id
-                              {:data-gesso-optimistic-template optimistic-template-id
-                               :data-gesso-optimistic-target   "closest [data-humanhelp-request-card]"})
-                            attrs)})
-   (g/anti-forgery-input ctx)
-   (view-state-hidden-inputs view-state)
-   (g/button
-    {:variant (or variant :default)
-     :size    (or size :sm)
-     :text    text
-     :attrs   (cond-> {:type "submit"}
-                disabled?
-                (assoc :disabled true
-                       :aria-disabled "true"))})])
+(defn- action-variant
+  [action]
+  (case action
+    :done :primary
+    :claim :primary
+    :take-over :primary
+    :cancel :outline
+    :unclaim :outline
+    :default))
+
+(defn- action-button-attrs
+  [request action]
+  (cond-> {:data-humanhelp-request-action (name action)
+           ;; The example is intentionally not preserving the old hand-written
+           ;; optimistic attrs. Gesso Live owns every data-gesso-optimistic-*
+           ;; attribute now.
+           :data-humanhelp-button-variant (name (action-variant action))}
+    (:ui/disable-actions? request)
+    (assoc :disabled true
+           :aria-disabled "true")))
 
 (defn action-button
-  [ctx request action view-state board-state-selector]
-  (form-action
-   ctx
-   {:to                     (routes/action-url (:request/id request) action)
-    :text                   (model/action-label action)
-    :variant                (case action
-                              :done :primary
-                              :claim :primary
-                              :take-over :primary
-                              :cancel :outline
-                              :unclaim :outline
-                              :default)
-    :view-state             view-state
-    :board-state-selector   board-state-selector
-    :optimistic-template-id (optimistic-template-id request action)
-    :disabled?              (:ui/disable-actions? request)
-    :attrs                  {:data-humanhelp-request-action (name action)
-                             :data-gesso-optimistic-label   (action-pending-label action)}}))
+  [ctx request user action view-state board-state-selector]
+  (let [text (model/action-label action)]
+    (live/post-button
+     ctx
+     {:to      (routes/action-url (:request/id request) action)
+      :swap    "none"
+      :include board-state-selector
+      :form-attrs
+      {:class                              "inline-flex"
+       :data-humanhelp-request-action-form true}
+
+      ;; post-button owns the actual <button>. Keep the removable example's
+      ;; action identity on that clicked source so the new optimistic runtime
+      ;; sees the same element HTMX sends.
+      :button-attrs
+      (action-button-attrs request action)
+
+      ;; A label target lets the runtime replace the clicked button's text during
+      ;; request handoff before/while the full-card projection is installed.
+      :children
+      [[:span {:data-gesso-button-label true}
+        text]]
+
+      ;; Pending/projection cards render disabled ordinary buttons. Authoritative
+      ;; cards render the protocol-v2 descriptor and sibling projection template.
+      :optimistic
+      (optimistic-config
+       ctx
+       request
+       user
+       action
+       view-state
+       board-state-selector)})))
 
 ;; -----------------------------------------------------------------------------
 ;; Card Content
@@ -246,7 +279,13 @@
     (when (seq actions)
       (into
        [:div (attr/actions-attrs)]
-       (map #(action-button ctx request % view-state board-state-selector))
+       (map #(action-button
+              ctx
+              request
+              user
+              %
+              view-state
+              board-state-selector))
        actions))))
 
 (defn- claimed-by-label
@@ -301,7 +340,12 @@
        :variant :small
        :class   "leading-body"
        :text    (:request/details request)}))
-   (request-card-actions ctx request user view-state board-state-selector)))
+   (request-card-actions
+    ctx
+    request
+    user
+    view-state
+    board-state-selector)))
 
 ;; -----------------------------------------------------------------------------
 ;; Card Shell
@@ -323,7 +367,11 @@
             (name (:ui/pending-action request))))))
 
 (defn- base-request-card
-  [ctx {:keys [request user view-state board-state-selector open?]}]
+  [ctx {:keys [request
+               user
+               view-state
+               board-state-selector
+               open?]}]
   (let [view-state (or view-state {})]
     (g/accordion-item
      {:value (:request/id request)
@@ -332,67 +380,40 @@
       :attrs (request-item-attrs request open?)}
      (request-summary request user open?)
      (pending-note request)
-     (request-content ctx request user view-state board-state-selector))))
-
-;; -----------------------------------------------------------------------------
-;; Optimistic Templates
-;; -----------------------------------------------------------------------------
-
-(defn- optimistic-template
-  [ctx {:keys [request user view-state board-state-selector action]}]
-  (let [template-id (optimistic-template-id request action)]
-    [:template {:data-gesso-optimistic-template template-id}
-     (base-request-card
+     (request-content
       ctx
-      {:request              (optimistic-request request user action)
-       :user                 user
-       :view-state           view-state
-       :board-state-selector board-state-selector
-       :open?                true})]))
-
-(defn- optimistic-templates
-  [ctx {:keys [request user view-state board-state-selector optimistic-templates?]}]
-  (when-not (= false optimistic-templates?)
-    (let [actions (model/available-actions request user)]
-      (when (seq actions)
-        (doall
-         (for [action actions]
-           (optimistic-template
-            ctx
-            {:request              request
-             :user                 user
-             :view-state           view-state
-             :board-state-selector board-state-selector
-             :action               action})))))))
+      request
+      user
+      view-state
+      board-state-selector))))
 
 ;; -----------------------------------------------------------------------------
 ;; Public Card
 ;; -----------------------------------------------------------------------------
 
 (defn request-card
-  "Render a model-backed request accordion row with embedded optimistic template hooks."
+  "Render one request card using Gesso Live protocol-v2 optimistic actions.
+
+   The authoritative card contains ordinary application state. Each available
+   lifecycle action uses live/post-button, which owns:
+   - the clicked HTMX request source
+   - execution correlation
+   - protocol attrs
+   - the matched projection template
+
+   The request-list Live panel owns client continuity, so scroll/focus/details
+   state can survive both optimistic replacement and later authoritative/OOB
+   replacement without this component encoding selection state."
   [ctx {:keys [request
                user
                view-state
                board-state-selector
-               open?
-               optimistic-templates?]
-        :or   {open?                 false
-               optimistic-templates? true}}]
-  (let [card      (base-request-card
-                   ctx
-                   {:request              request
-                    :user                 user
-                    :view-state           view-state
-                    :board-state-selector board-state-selector
-                    :open?                open?})
-        templates (optimistic-templates
-                   ctx
-                   {:request               request
-                    :user                  user
-                    :view-state            view-state
-                    :board-state-selector  board-state-selector
-                    :optimistic-templates? optimistic-templates?})]
-    (if (seq templates)
-      (into card templates)
-      card)))
+               open?]
+        :or   {open? false}}]
+  (base-request-card
+   ctx
+   {:request              request
+    :user                 user
+    :view-state           view-state
+    :board-state-selector board-state-selector
+    :open?                open?}))

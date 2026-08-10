@@ -18,6 +18,7 @@
    [clojure.string :as str]
    [com.biffweb.xtdb :as biff.xtdb]
    [gesso.core :as g]
+   [gesso.live.core :as live]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.example.live :as app-live]
    [net.humanhelp.example.model :as model]
@@ -294,6 +295,22 @@
   [node]
   (g/html-response node))
 
+(defn- optimistic-html
+  "Render one prepared optimistic settlement and complete its projected HTTP send.
+
+   Ring handler return is the adapter's send-handoff boundary: once the response
+   has been constructed successfully, Gesso's projected server endpoint may
+   release the settlement send and terminate. If rendering throws, the send is
+   deliberately not completed and the browser observes a request failure."
+  [prepared & nodes]
+  (let [response
+        (html
+         (apply live/optimistic-response-hiccup
+                prepared
+                nodes))]
+    (live/complete-optimistic-send prepared)
+    response))
+
 (defn- with-board-state-oob
   [ctx view-state & nodes]
   (apply views/with-board-state-oob
@@ -561,55 +578,176 @@
 ;; Request lifecycle actions
 ;; -----------------------------------------------------------------------------
 
+(defn- lifecycle-transition
+  [action]
+  (keyword "request" (name action)))
+
+(defn- lifecycle-scope
+  [request-id]
+  [:request request-id])
+
+(defn- request-revision
+  [request]
+  (or (:request/updated-revision request)
+      (:request/created-revision request)))
+
+(defn- rejection-reason
+  [result]
+  (or (get-in result [:error :error/type])
+      (get-in result [:error :message])
+      (:reason result)
+      :request/rejected))
+
+(defn- notify-transition-safely!
+  [ctx {:keys [action request previous revision actor]}]
+  (try
+    (notify!
+     ctx
+     (app-live/request-transition-change
+      {:action   action
+       :request  request
+       :previous previous
+       :revision revision
+       :actor    actor}))
+    (catch Exception e
+      ;; Observer delivery must not convert an already-committed model mutation
+      ;; into an HTTP failure. The actor still receives its canonical settlement.
+      (println
+       "[humanhelp] request transition notification failed"
+       {:message    (.getMessage e)
+        :action     action
+        :request/id (:request/id request)
+        :revision   revision}))))
+
+(defn- lifecycle-fx-machine
+  "Adapt the removable demo's existing transition function to Gesso's optimistic
+   server FX boundary.
+
+   The function deliberately uses the merged Biff/optimistic ctx supplied by
+   Gesso instead of closing over the original Ring ctx. That exercises the real
+   projected server boundary without pointlessly rewriting this disposable
+   example's persistence layer."
+  [action transition-fn user request-id]
+  (fn [fx-ctx]
+    (let [result
+          (transition-fn
+           fx-ctx
+           {:request-id request-id
+            :user       user})]
+      (when (= :ok (:status result))
+        (notify-transition-safely!
+         fx-ctx
+         {:action   action
+          :request  (:request result)
+          :previous (:previous result)
+          :revision (:revision result)
+          :actor    user}))
+      result)))
+
+(defn- lifecycle-settle
+  "Translate the demo model result into protocol-v2 optimistic semantics.
+
+   :ok is a confirmed command and uses the newly persisted request/revision.
+   :error is a semantic rejection and re-renders the unchanged authoritative
+   request. Unexpected result shapes throw, deliberately exercising browser
+   request-failure recovery instead of pretending they are semantic outcomes."
+  [user view-state]
+  (fn [fx-ctx result]
+    (let [request     (:request result)
+          view-state' (normalized-view-state fx-ctx view-state)]
+      (when-not request
+        (throw
+         (ex-info
+          "Human Help optimistic lifecycle settlement requires an authoritative request."
+          {:status     (:status result)
+           :request-id (:request-id result)
+           :action     (:action result)
+           :result     result})))
+      (case (:status result)
+        :ok
+        {:outcome   :confirmed
+         :revision  (:revision result)
+         :canonical
+         (views/request-lifecycle-canonical
+          fx-ctx
+          {:request    request
+           :user       user
+           :view-state view-state'})}
+
+        :error
+        {:outcome   :rejected
+         :revision  (request-revision request)
+         :reason    (rejection-reason result)
+         :canonical
+         (views/request-lifecycle-canonical
+          fx-ctx
+          {:request    request
+           :user       user
+           :view-state view-state'})}
+
+        (throw
+         (ex-info
+          "Human Help lifecycle transition returned an unsupported result status."
+          {:status (:status result)
+           :result result}))))))
+
+(defn- lifecycle-response-extra
+  [ctx {:keys [action request view-state settlement]}]
+  (if (:command-applied? settlement)
+    (views/request-lifecycle-extras
+     ctx
+     {:action     action
+      :request    request
+      :toolbar    (render-toolbar-node ctx view-state)
+      :view-state view-state})
+    (views/request-action-error
+     {:result
+      {:reason (:reason settlement)}})))
+
 (defn- lifecycle-action!
-  "Shared request lifecycle action boundary.
+  "Run one request lifecycle action through Gesso Live optimistic choreography.
 
-   action is one of:
-     :claim
-     :unclaim
-     :take-over
-     :done
-     :cancel"
+   The route supplies semantic transition/scope; the browser supplies the
+   execution correlation header. The existing demo transition function executes
+   at Gesso's projected FX boundary. Its result becomes a semantic settlement
+   whose canonical root is the exact request-card target.
+
+   Successful mutations still emit normal Live invalidation, so the actor first
+   receives the immediate canonical card and can then independently exercise
+   request-list continuity when SSE refreshes the surrounding list."
   [ctx action transition-fn]
-  (let [user       (current-user ctx)
-        view-state (request-view-state ctx)
-        id         (request-id ctx)
-        result     (transition-fn
-                    ctx
-                    {:request-id id
-                     :user       user})]
-    (if (= :ok (:status result))
-      (let [{:keys [request revision previous]} result]
-        (notify!
+  (let [user        (current-user ctx)
+        request-id' (request-id ctx)
+        view-state  (normalized-view-state
+                     ctx
+                     (request-view-state ctx))
+        prepared
+        (live/run-optimistic-command
          ctx
-         (app-live/request-transition-change
-          {:action   action
-           :request  request
-           :previous previous
-           :revision revision
-           :actor    user}))
-
-        (html
-         (with-board-state-oob
-           ctx
-           view-state
-           (views/request-lifecycle-result
-            (merge
-             {:user       user
-              :action     action
-              :request    request
-              :previous   previous
-              :revision   revision
-              :view-state view-state}
-             (board-fragments ctx view-state))))))
-
-      (html
-       (views/request-action-error
-        {:user       user
-         :request-id id
-         :action     action
-         :result     result
-         :view-state view-state})))))
+         {:transition (lifecycle-transition action)
+          :scope      (lifecycle-scope request-id')}
+         {:fx-machine
+          (lifecycle-fx-machine
+           action
+           transition-fn
+           user
+           request-id')
+          :settle
+          (lifecycle-settle
+           user
+           view-state)})
+        settlement (:settlement prepared)
+        request     (model/request-by-id ctx request-id')
+        extra
+        (lifecycle-response-extra
+         ctx
+         {:action     action
+          :request    request
+          :view-state view-state
+          :settlement settlement})]
+    (optimistic-html
+     prepared
+     extra)))
 
 (defn claim-request!
   [ctx]
