@@ -22,6 +22,8 @@
    - ordinary Request-owned reads;
    - guarded Request dependencies for cross-model composition;
    - Request transaction planners;
+   - independently callable authoritative Request operations needed by higher
+     distributed layers;
    - selected stable pure Request and RequestAssignment facts.
 
    Constructors, mutation functions, command constructors, schema internals,
@@ -29,6 +31,7 @@
    to the Request model."
   (:require
    [gesso.model.core :as model]
+   [gesso.model.tx :as model.tx]
    [net.humanhelp.site.model.request.domain :as domain]
    [net.humanhelp.site.model.request.fx :as request.fx]
    [net.humanhelp.site.model.request.graph :as request.graph]
@@ -385,6 +388,82 @@
   (request.fx/plan-claim-request
    ctx
    input))
+
+(defn- transaction-plan
+  "Combines one Request planner's transaction fragment and transaction options
+   into the single plan consumed by gesso.model.tx/transact!.
+
+   Request FX owns domain planning. gesso.model.tx owns the atomic commit
+   boundary. Keeping this assembly private prevents callers from treating the
+   transport/transaction representation as part of Request's semantic API."
+  [{:keys
+    [transaction-fragment
+     transaction-options]}]
+  (merge
+   transaction-fragment
+   transaction-options))
+
+(defn claim
+  "Authoritatively claims an open Request in one atomic model transaction.
+
+   input is the same semantic Request input accepted by plan-claim-request:
+
+     {:request-id uuid
+      :helper-id  optional-uuid
+      :skill      optional-string}
+
+   The authenticated actor is established from ctx by the Request model. With no
+   :helper-id the actor claims personally; claiming for another helper requires
+   the existing Request/Membership/Organization manager policy.
+
+   This function deliberately performs no choreography work. It does not accept
+   browser authority, does not trust a rendered capability, does not manufacture
+   command identity, and does not interpret an observed browser basis as an
+   automatic stale-command rejection. Higher distributed layers may place an
+   authoritative progression requirement on ctx before invoking this operation;
+   Request then evaluates its ordinary model policy against the authoritative
+   facts it reads.
+
+   On successful commit, returns the planner's canonical Request result plus:
+
+     :commit/status  :committed
+     :progression    transaction-established authoritative progression, when
+                     the commit produced one
+
+   Raw transaction plans, XTDB consistency internals, and the consistency-aware
+   transaction ctx are intentionally not exposed as Request result semantics.
+
+   Pre-commit failures escape unchanged and leave no partial claim. A classified
+   post-commit delivery failure from gesso.model.tx also escapes unchanged; its
+   :commit/status remains :committed and must never be interpreted as rollback
+   or as permission to blindly reapply the mutation."
+  [ctx input]
+  (let [{:keys [result]
+         :as planned}
+        (plan-claim-request
+         ctx
+         input)
+
+        transaction
+        (model.tx/transact!
+         ctx
+         (transaction-plan
+          planned))]
+
+    (cond->
+     (assoc
+      result
+      :commit/status
+      (:commit/status
+       transaction))
+
+      (contains?
+       transaction
+       :progression)
+      (assoc
+       :progression
+       (:progression
+        transaction)))))
 
 (defn plan-unclaim-request
   "Plans returning the primary helper's claimed Request to open and ending all
