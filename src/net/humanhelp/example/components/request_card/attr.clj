@@ -35,14 +35,6 @@
   [request]
   (true? (:board/fading-terminal? request)))
 
-(defn pending-request?
-  [request]
-  (true? (:ui/pending? request)))
-
-(defn optimistic-request?
-  [request]
-  (true? (:ui/optimistic? request)))
-
 (defn terminal-fade-remaining-ms
   [request]
   (:board/terminal-fade-remaining-ms request))
@@ -81,11 +73,7 @@
     (when (terminal-request? request)
       "humanhelp-request-card--terminal")
     (when (fading-terminal? request)
-      "humanhelp-request-card--fading-terminal")
-    (when (pending-request? request)
-      "humanhelp-request-card--pending")
-    (when (optimistic-request? request)
-      "humanhelp-request-card--optimistic"))))
+      "humanhelp-request-card--fading-terminal"))))
 
 (defn item-attrs
   [request open?]
@@ -95,9 +83,6 @@
     :data-humanhelp-request-selected        (when open? "true")
     :data-humanhelp-request-terminal        (when (terminal-request? request) "true")
     :data-humanhelp-request-fading-terminal (when (fading-terminal? request) "true")
-    :data-humanhelp-request-pending         (when (pending-request? request) "true")
-    :data-humanhelp-request-optimistic      (when (optimistic-request? request) "true")
-    :data-humanhelp-request-pending-action  (some-> (:ui/pending-action request) name)
     :data-terminal-fade-remaining-ms        (terminal-fade-remaining-ms request)
     :style                                  (card-style request)}))
 
