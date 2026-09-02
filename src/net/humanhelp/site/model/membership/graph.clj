@@ -318,7 +318,8 @@
     [:and
      [:=
       :role-assignment/scope-type
-      (organization/scope-type scope)]
+      [:lift
+       (organization/scope-type scope)]]
 
      [:=
       :role-assignment/scope-id
@@ -360,7 +361,8 @@
 
      [:=
       :role-assignment/scope-type
-      (organization/scope-type scope)]
+      [:lift
+       (organization/scope-type scope)]]
 
      [:=
       :role-assignment/scope-id
@@ -368,7 +370,7 @@
 
      [:=
       :role-assignment/status
-      :active]])))
+      [:lift :active]]])))
 
 ;; =============================================================================
 ;; Membership authorization read snapshot
