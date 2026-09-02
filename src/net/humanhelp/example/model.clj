@@ -760,15 +760,6 @@
         (sort-requests-for-board env)
         (annotate-board-requests env))))
 
-(defn next-prune-ms
-  "Return the soonest fade expiration among rendered requests, or nil."
-  [requests]
-  (some->> requests
-           (keep :board/terminal-fade-remaining-ms)
-           seq
-           (apply min)
-           (max 1)))
-
 (defn created-order-options
   "Return GUI-safe created-order metadata, omitting function values."
   [active-created-order]
@@ -1827,8 +1818,7 @@
       :pending-open-count (pending-open-request-count
                            requests
                            visible-revision)
-      :requests           visible-requests
-      :next-prune-ms      (next-prune-ms visible-requests)}
+      :requests           visible-requests}
      (board-option-metadata view-state'))))
 
 (defn toolbar-data
