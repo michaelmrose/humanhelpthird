@@ -169,7 +169,7 @@
      include-ended?)
     (conj
      [:= :request-assignment/status
-      :active])))
+      [:lift :active]])))
 
 (defn- assignment-order
   [assignments]
@@ -264,7 +264,7 @@
               helper-id]
 
              [:= :request-assignment/status
-              :active]]})]
+              [:lift :active]]]})]
       (case
        (count
         matches)
@@ -315,10 +315,10 @@
               request-id]
 
              [:= :request-assignment/role
-              :primary]
+              [:lift :primary]]
 
              [:= :request-assignment/status
-              :active]]})]
+              [:lift :active]]]})]
       (case
        (count
         matches)
@@ -349,13 +349,13 @@
 (def active-request-predicate
   [:or
    [:= :request/status
-    :open]
+    [:lift :open]]
 
    [:= :request/status
-    :claimed]
+    [:lift :claimed]]
 
    [:= :request/status
-    :on-the-way]])
+    [:lift :on-the-way]]])
 
 (defn- requests-for-location-where
   [organization-id location-id include-terminal?]
