@@ -995,7 +995,7 @@
 
     [:=
      :request-assignment/status
-     :active]]))
+     [:lift :active]]]))
 
 (defn- assert-no-active-assignment-for-helper
   [request-id helper-id]
@@ -1012,7 +1012,7 @@
 
     [:=
      :request-assignment/status
-     :active]]))
+     [:lift :active]]]))
 
 ;; =============================================================================
 ;; Creation
