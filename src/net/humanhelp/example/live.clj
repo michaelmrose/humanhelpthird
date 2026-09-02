@@ -252,11 +252,6 @@
      [:request-toolbar
       :request-list]
 
-     ;; A minute tick can update waiting-time labels without any request
-     ;; mutation. We can wire the actual timer later.
-     :clock/minute
-     [:request-list]
-
      ;; Development/demo reset wakes everything.
      :humanhelp-demo/reset
      [:request-toolbar
@@ -269,10 +264,7 @@
                         (request-toolbar-dom-id))
       :query          request-toolbar-query
       :render         request-toolbar-render
-      :swap           :outerHTML
-      :request-policy {:in-flight       :one
-                       :queued          :last
-                       :stale-window-ms 750}}
+      :swap           :outerHTML}
 
      :request-list
      {:scope          :request-list
@@ -280,10 +272,7 @@
                         (request-list-dom-id))
       :query          request-list-query
       :render         request-list-render
-      :swap           :outerHTML
-      :request-policy {:in-flight       :one
-                       :queued          :last
-                       :stale-window-ms 750}}}}))
+      :swap           :outerHTML}}}))
 
 (def live-rules
   "Compiled invalidation rules exported for the app module.
@@ -313,15 +302,13 @@
      :request-toolbar
      {:fragment-url (routes/request-toolbar-fragment-url)
       :stream-url   (routes/request-toolbar-stream-url)
-      :trigger      "load, pageshow from:window, visibilitychange from:document, online from:window, htmx:sseOpen from:body, gesso:live-connected from:body"
       :root-attrs   {:hx-include (board-state-selector)}}
 
      :request-list
      {:fragment-url      (routes/request-list-fragment-url)
       :stream-url        (routes/request-list-stream-url)
-      :trigger           "load"
-      :root-attrs        {:hx-include (board-state-selector)
-                          :hx-swap    "outerHTML show:none focus-scroll:false"}
+      :swap              "outerHTML show:none focus-scroll:false"
+      :root-attrs        {:hx-include (board-state-selector)}
       :client-continuity request-list-client-continuity}
 
      (throw
@@ -475,12 +462,6 @@
     :revision                 revision
     :actor                    {:user/id    (:user/id actor)
                                :user/email (:user/email actor)}}))
-
-(defn minute-tick-change
-  []
-  (merge
-   (store-change-base :clock/minute)
-   {:at-ms (model/now-ms)}))
 
 (defn demo-reset-change
   [{:keys [revision actor]}]
