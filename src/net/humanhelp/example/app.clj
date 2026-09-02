@@ -15,10 +15,14 @@
    It should not own Hiccup/OOB response shape beyond choosing which view helper
    to return. Board-state OOB rendering is delegated to views.clj."
   (:require
+   [clojure.edn :as edn]
    [clojure.string :as str]
    [com.biffweb.xtdb :as biff.xtdb]
+   [gesso.choreo.identity :as choreo.identity]
    [gesso.core :as g]
    [gesso.live.core :as live]
+   [gesso.live.optimistic.protocol :as optimistic.protocol]
+   [gesso.live.ui :as live.ui]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.example.live :as app-live]
    [net.humanhelp.example.model :as model]
@@ -296,17 +300,23 @@
   (g/html-response node))
 
 (defn- optimistic-html
-  "Render one prepared optimistic settlement and complete its projected HTTP send.
+  "Render one protocol-v3 settlement marker plus response nodes, then complete
+   the trusted authority projection's direct settlement send.
 
-   Ring handler return is the adapter's send-handoff boundary: once the response
-   has been constructed successfully, Gesso's projected server endpoint may
-   release the settlement send and terminate. If rendering throws, the send is
-   deliberately not completed and the browser observes a request failure."
+   The settlement marker is inert transport correlation. It carries only the
+   trusted protocol-v3 settlement already produced by Gesso's server boundary.
+   Canonical DOM installation remains owned by the ordinary Live/HTMX authority
+   path; actor-specific OOB extras may accompany the marker in this response.
+
+   Completing the projected send happens only after response construction
+   succeeds. If rendering throws, the send remains incomplete and the browser
+   observes transport uncertainty rather than a fabricated semantic failure."
   [prepared & nodes]
-  (let [response
+  (let [settlement (:settlement prepared)
+        response
         (html
-         (apply live/optimistic-response-hiccup
-                prepared
+         (apply views/oob-response
+                (live.ui/optimistic-settlement-marker settlement)
                 nodes))]
     (live/complete-optimistic-send prepared)
     response))
@@ -582,10 +592,6 @@
   [action]
   (keyword "request" (name action)))
 
-(defn- lifecycle-scope
-  [request-id]
-  [:request request-id])
-
 (defn- request-revision
   [request]
   (or (:request/updated-revision request)
@@ -619,130 +625,233 @@
         :request/id (:request/id request)
         :revision   revision}))))
 
-(defn- lifecycle-fx-machine
-  "Adapt the removable demo's existing transition function to Gesso's optimistic
-   server FX boundary.
+(def optimistic-command-param
+  "HTMX parameter installed by Gesso's protocol-v3 optimistic browser bridge."
+  "__gesso_live_optimistic_command")
 
-   The function deliberately uses the merged Biff/optimistic ctx supplied by
-   Gesso instead of closing over the original Ring ctx. That exercises the real
-   projected server boundary without pointlessly rewriting this disposable
-   example's persistence layer."
-  [action transition-fn user request-id]
-  (fn [fx-ctx]
-    (let [result
-          (transition-fn
-           fx-ctx
-           {:request-id request-id
-            :user       user})]
-      (when (= :ok (:status result))
-        (notify-transition-safely!
-         fx-ctx
-         {:action   action
-          :request  (:request result)
-          :previous (:previous result)
-          :revision (:revision result)
-          :actor    user}))
-      result)))
+(defn- optimistic-command-wire
+  "Read one protocol-v3 optimistic command wire value from the HTMX request.
 
-(defn- lifecycle-settle
-  "Translate the demo model result into protocol-v2 optimistic semantics.
-
-   :ok is a confirmed command and uses the newly persisted request/revision.
-   :error is a semantic rejection and re-renders the unchanged authoritative
-   request. Unexpected result shapes throw, deliberately exercising browser
-   request-failure recovery instead of pretending they are semantic outcomes."
-  [user view-state]
-  (fn [fx-ctx result]
-    (let [request     (:request result)
-          view-state' (normalized-view-state fx-ctx view-state)]
-      (when-not request
+   The browser bridge encodes portable EDN into a normal request parameter.
+   EDN parsing establishes only shape. Authentication, operation resolution,
+   authorization, current-state reread, and mutation remain trusted server/model
+   responsibilities."
+  [ctx]
+  (let [encoded (param ctx optimistic-command-param)]
+    (when-not (and (string? encoded)
+                   (not (str/blank? encoded)))
+      (throw
+       (ex-info
+        "Human Help optimistic lifecycle request is missing its Gesso protocol-v3 command."
+        {:parameter optimistic-command-param})))
+    (try
+      (edn/read-string encoded)
+      (catch Exception e
         (throw
          (ex-info
-          "Human Help optimistic lifecycle settlement requires an authoritative request."
-          {:status     (:status result)
-           :request-id (:request-id result)
-           :action     (:action result)
-           :result     result})))
-      (case (:status result)
-        :ok
-        {:outcome  :confirmed
-         :revision (:revision result)
-         :canonical
-         (views/request-lifecycle-canonical
-          fx-ctx
-          {:request    request
-           :user       user
-           :view-state view-state'})}
+          "Human Help optimistic lifecycle request contains unreadable command EDN."
+          {:parameter optimistic-command-param}
+          e))))))
 
-        :error
-        {:outcome  :rejected
-         :revision (request-revision request)
-         :reason   (rejection-reason result)
-         :canonical
-         (views/request-lifecycle-canonical
-          fx-ctx
-          {:request    request
-           :user       user
-           :view-state view-state'})}
+(defn- lifecycle-authoritative
+  "Build the trusted protocol-v3 authoritative observation for one demo request.
 
-        (throw
-         (ex-info
-          "Human Help lifecycle transition returned an unsupported result status."
-          {:status (:status result)
-           :result result}))))))
+   The removable example uses its monotonic store revision as the authority
+   basis. The projection is the authoritative request value itself; Gesso treats
+   that projection as opaque application data and never infers authorization
+   from it."
+  [request revision]
+  (when request
+    (optimistic.protocol/authoritative
+     {:presence      :present
+      :basis         revision
+      :projection    request
+      :fact-versions {:request/revision (request-revision request)}})))
+
+(defn- lifecycle-operation-result
+  [ctx action result]
+  (case (:status result)
+    :ok
+    {:resolution    :confirmed
+     :authoritative (lifecycle-authoritative
+                     (:request result)
+                     (:revision result))
+     :outcome       (app-live/request-transition-topic action)}
+
+    :error
+    (let [request  (:request result)
+          revision (model/latest-revision ctx)]
+      (cond->
+       {:resolution :rejected
+        :reason     (rejection-reason result)}
+        request
+        (assoc :authoritative
+               (lifecycle-authoritative request revision))))
+
+    (throw
+     (ex-info
+      "Human Help lifecycle transition returned an unsupported result status."
+      {:action action
+       :status (:status result)
+       :result result}))))
+
+(defn- lifecycle-operation
+  "Construct one trusted protocol-v3 optimistic operation for the removable
+   example.
+
+   Browser arguments remain untrusted. The operation derives the actor from the
+   trusted Ring/Biff context, rereads current demo state through the public demo
+   model transition, and only then classifies the semantic settlement."
+  [action transition-fn]
+  (let [operation (lifecycle-transition action)]
+    (live/optimistic-operation
+     {:name      (keyword "humanhelp.example.optimistic" (name action))
+      :operation operation
+      :execute!
+      (fn [{:keys [ctx arguments]}]
+        (let [user       (current-user ctx)
+              request-id (:request-id arguments)
+              result
+              (transition-fn
+               ctx
+               {:request-id request-id
+                :user       user})]
+          (when (= :ok (:status result))
+            (notify-transition-safely!
+             ctx
+             {:action   action
+              :request  (:request result)
+              :previous (:previous result)
+              :revision (:revision result)
+              :actor    user}))
+          (lifecycle-operation-result ctx action result)))})))
+
+(def optimistic-server
+  "Trusted protocol-v3 server registry for the removable example's lifecycle
+   actions.
+
+   Rendering an optimistic affordance does not grant authority. Principal is
+   reconstructed from trusted request/session context on every command, and a
+   browser can select only operations present in this registry."
+  (live/optimistic-server
+   {:principal-fn
+    (fn [ctx]
+      (let [user-id (:user/id (current-user ctx))]
+        (when-not user-id
+          (throw
+           (ex-info
+            "Human Help optimistic lifecycle action requires an authenticated user."
+            {})))
+        (choreo.identity/principal user-id)))
+
+    :operations
+    {:request/claim
+     (lifecycle-operation :claim model/claim-request!)
+
+     :request/unclaim
+     (lifecycle-operation :unclaim model/unclaim-request!)
+
+     :request/take-over
+     (lifecycle-operation :take-over model/take-over-request!)
+
+     :request/done
+     (lifecycle-operation :done model/mark-request-done!)
+
+     :request/cancel
+     (lifecycle-operation :cancel model/cancel-request!)}}))
+
+(defn- require-route-command!
+  "Fail closed when browser command semantics do not match the HTTP route.
+
+   The browser is allowed to propose a semantic command, but it may not turn a
+   /claim endpoint into some other registered operation or retarget the route to
+   a different request id by rewriting the optimistic command parameter."
+  [ctx action command]
+  (let [expected-operation (lifecycle-transition action)
+        expected-request-id (request-id ctx)
+        actual-operation (:operation command)
+        actual-request-id (get-in command [:arguments :request-id])]
+    (when-not (= expected-operation actual-operation)
+      (throw
+       (ex-info
+        "Human Help optimistic command does not match the lifecycle route operation."
+        {:expected-operation expected-operation
+         :actual-operation   actual-operation})))
+    (when-not (= expected-request-id actual-request-id)
+      (throw
+       (ex-info
+        "Human Help optimistic command request id does not match the lifecycle route."
+        {:expected-request-id expected-request-id
+         :actual-request-id   actual-request-id
+         :operation           actual-operation})))
+    command))
+
+(defn- settlement-request
+  [settlement]
+  (get-in settlement [:authoritative :projection]))
 
 (defn- lifecycle-response-extra
-  [ctx {:keys [action request view-state settlement]}]
-  (if (:command-applied? settlement)
-    (views/request-lifecycle-extras
-     ctx
-     {:action     action
-      :request    request
-      :toolbar    (render-toolbar-node ctx view-state)
-      :view-state view-state})
-    (views/request-action-error
-     {:result
-      {:reason (:reason settlement)}})))
+  [ctx {:keys [action view-state settlement]}]
+  (let [request    (settlement-request settlement)
+        resolution (:resolution settlement)]
+    (cond
+      (contains? #{:confirmed :reconciled :already-incorporated}
+                 resolution)
+      (views/request-lifecycle-extras
+       ctx
+       {:action     action
+        :request    request
+        :toolbar    (render-toolbar-node ctx view-state)
+        :view-state view-state})
+
+      (contains? #{:rejected :failed} resolution)
+      (views/request-action-error
+       {:result
+        {:reason (:reason settlement)}})
+
+      :else
+      (throw
+       (ex-info
+        "Human Help optimistic lifecycle response received an unsupported settlement resolution."
+        {:action     action
+         :settlement settlement})))))
 
 (defn- lifecycle-action!
-  "Run one request lifecycle action through Gesso Live optimistic choreography.
+  "Run one request lifecycle endpoint through Gesso Live optimistic protocol v3.
 
-   The route supplies semantic transition/scope; the browser supplies the
-   execution correlation header. The existing demo transition function executes
-   at Gesso's projected FX boundary. Its result becomes a semantic settlement
-   whose canonical root is the exact request-card target.
+   The browser supplies only an encoded semantic command. This route binds that
+   command to the route's operation and request id before the trusted Gesso
+   server registry authenticates principal, resolves the operation, invokes the
+   demo model transition, and constructs the settlement.
 
-   Successful mutations still emit normal Live invalidation, so the actor first
-   receives the immediate canonical card and can then independently exercise
-   request-list continuity when SSE refreshes the surrounding list."
-  [ctx action transition-fn]
-  (let [user        (current-user ctx)
-        request-id' (request-id ctx)
-        view-state  (normalized-view-state
-                     ctx
-                     (request-view-state ctx))
+   The HTTP response carries one inert settlement marker plus actor-specific OOB
+   extras. Canonical card installation/reconciliation belongs to the ordinary
+   Live/HTMX authoritative refresh path, not to a server-supplied Hiccup payload
+   embedded inside the settlement."
+  [ctx action]
+  (let [view-state
+        (normalized-view-state
+         ctx
+         (request-view-state ctx))
+
+        command
+        (->> (optimistic-command-wire ctx)
+             live/decode-optimistic-command
+             (require-route-command! ctx action))
+
         prepared
         (live/run-optimistic-command
+         optimistic-server
          ctx
-         {:transition (lifecycle-transition action)
-          :scope      (lifecycle-scope request-id')}
-         {:fx-machine
-          (lifecycle-fx-machine
-           action
-           transition-fn
-           user
-           request-id')
-          :settle
-          (lifecycle-settle
-           user
-           view-state)})
-        settlement  (:settlement prepared)
-        request     (model/request-by-id ctx request-id')
+         command)
+
+        settlement
+        (:settlement prepared)
+
         extra
         (lifecycle-response-extra
          ctx
          {:action     action
-          :request    request
           :view-state view-state
           :settlement settlement})]
     (optimistic-html
@@ -751,38 +860,23 @@
 
 (defn claim-request!
   [ctx]
-  (lifecycle-action!
-   ctx
-   :claim
-   model/claim-request!))
+  (lifecycle-action! ctx :claim))
 
 (defn unclaim-request!
   [ctx]
-  (lifecycle-action!
-   ctx
-   :unclaim
-   model/unclaim-request!))
+  (lifecycle-action! ctx :unclaim))
 
 (defn take-over-request!
   [ctx]
-  (lifecycle-action!
-   ctx
-   :take-over
-   model/take-over-request!))
+  (lifecycle-action! ctx :take-over))
 
 (defn mark-request-done!
   [ctx]
-  (lifecycle-action!
-   ctx
-   :done
-   model/mark-request-done!))
+  (lifecycle-action! ctx :done))
 
 (defn cancel-request!
   [ctx]
-  (lifecycle-action!
-   ctx
-   :cancel
-   model/cancel-request!))
+  (lifecycle-action! ctx :cancel))
 
 ;; -----------------------------------------------------------------------------
 ;; Dev/demo reset
