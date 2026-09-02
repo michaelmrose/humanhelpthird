@@ -548,10 +548,9 @@
 (defn request-card-node
   "Render one authoritative request card with the stable board-state include.
 
-   Keeping this as a view helper gives both the request-list renderer and the
-   optimistic settlement path exactly the same canonical card shape. The
-   request-card component owns optimistic projection generation; this helper
-   only supplies app context."
+   This helper centralizes the canonical server-rendered card shape used by the
+   board. Protocol-v3 provisional DOM is derived by Gesso in the browser; this
+   view renders authoritative application state only."
   [ctx {:keys [request user view-state open?]}]
   (request-card
    ctx
@@ -578,24 +577,12 @@
         :view-state view-state}))
     requests)))
 
-(defn request-list-prune-attrs
-  [next-prune-ms]
-  (when (and (integer? next-prune-ms)
-             (pos? next-prune-ms))
-    {:hx-get                       (routes/request-list-fragment-url)
-     :hx-trigger                   (str "load delay:" next-prune-ms "ms")
-     :hx-swap                      "outerHTML"
-     :hx-include                   (board-state-selector)
-     :data-humanhelp-next-prune-ms next-prune-ms}))
-
 (defn request-list-fragment
-  [{:keys [ctx user view-state requests latest-revision next-prune-ms]}]
-  [:div (merge
-         {:id                      request-list-dom-id
-          :data-humanhelp-fragment "request-list"
-          :data-latest-revision    latest-revision
-          :class                   "content-stack-theme"}
-         (request-list-prune-attrs next-prune-ms))
+  [{:keys [ctx user view-state requests latest-revision]}]
+  [:div {:id                      request-list-dom-id
+         :data-humanhelp-fragment "request-list"
+         :data-latest-revision    latest-revision
+         :class                   "content-stack-theme"}
    (if (seq requests)
      (request-accordion
       {:ctx        ctx
@@ -726,38 +713,14 @@
    {:toolbar      toolbar
     :request-list request-list}))
 
-(defn request-lifecycle-result
-  [{:keys [action request toolbar request-list]}]
-  (oob-response
-   (fragments-oob
-    {:toolbar      toolbar
-     :request-list request-list})
-   (when (and action request)
-     (g/render-toast-oob
-      {:variant     :success
-       :duration    2500
-       :title       (model/action-label action)
-       :description (model/action-result-message action request)}))))
-
-(defn request-lifecycle-canonical
-  "Render the authoritative request-card target for an optimistic settlement.
-
-   This intentionally renders only the card itself. gesso.live wraps it with
-   canonical protocol metadata and owns replacement/reconciliation."
-  [ctx {:keys [request user view-state]}]
-  (request-card-node
-   ctx
-   {:request    request
-    :user       user
-    :view-state view-state}))
-
 (defn request-lifecycle-extras
-  "Render actor-path OOB extras for an optimistic lifecycle settlement.
+  "Render actor-path OOB extras accompanying a protocol-v3 lifecycle settlement.
 
-   The canonical request card is *not* included here, and neither is an OOB
-   request-list replacement. The optimistic protocol owns the target card;
-   normal Live invalidation may still replace the list afterward, exercising
-   continuity across that independent authoritative refresh."
+   The direct lifecycle response carries no canonical request-card Hiccup and
+   does not OOB-replace the request list. Gesso's settlement marker communicates
+   the semantic result; authoritative card installation remains on the ordinary
+   managed Live refresh path. These extras are limited to board state, toolbar,
+   and user feedback that are independent of canonical card ownership."
   [ctx {:keys [action request toolbar view-state]}]
   (oob-response
    (when view-state
