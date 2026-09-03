@@ -118,13 +118,14 @@
 ;; Current user
 ;; -----------------------------------------------------------------------------
 
-(defn- session-uid
-  "Return the signed-in user's session id, when present."
+(defn- canonical-user-id
+  "Return the one authenticated identity used by the removable example.
+
+   Keep this boundary identical to connected-client routing. In particular,
+   explicit application/model identity must not be shadowed by stale session
+   data, and display fields such as email are never identity sources."
   [ctx]
-  (or (get-in ctx [:session :uid])
-      (get-in ctx [:session :user])
-      (:user/id ctx)
-      (get-in ctx [:user :xt/id])))
+  (client-plumbing/current-user-id ctx))
 
 (defn- ->uuid
   [x]
@@ -186,7 +187,7 @@
   [ctx]
   (let [uid
         (->uuid
-         (session-uid ctx))]
+         (canonical-user-id ctx))]
     (when
      (and
       uid
@@ -213,8 +214,7 @@
 (defn- current-user-id
   [ctx user-record]
   (or (:xt/id user-record)
-      (session-uid ctx)
-      (client-plumbing/current-user-id ctx)))
+      (canonical-user-id ctx)))
 
 (defn- current-user
   [ctx]
