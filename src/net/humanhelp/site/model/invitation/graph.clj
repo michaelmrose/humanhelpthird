@@ -253,7 +253,7 @@
 
       [:=
        :invitation/status
-       :pending]])
+       [:lift :pending]]])
 
     []))
 
@@ -292,7 +292,7 @@
 
       [:=
        :invitation/status
-       :pending]])
+       [:lift :pending]]])
 
     []))
 
@@ -346,7 +346,7 @@
 
       [:=
        :invitation/status
-       :pending]])
+       [:lift :pending]]])
 
     []))
 
@@ -366,7 +366,7 @@
 
       [:=
        :invitation/status
-       :pending]])
+       [:lift :pending]]])
 
     []))
 
@@ -488,12 +488,13 @@
 
        [:=
         :invitation/role
-        role]
+        [:lift role]]
 
        [:=
         :invitation/scope-type
-        (organization/scope-type
-         scope)]
+        [:lift
+         (organization/scope-type
+          scope)]]
 
        [:=
         :invitation/scope-id
@@ -502,7 +503,7 @@
 
        [:=
         :invitation/status
-        :pending]])))
+        [:lift :pending]]])))
 
 (defn pending-invitations-for-offer
   "Returns persisted pending Invitations representing one exact proposed grant.
@@ -559,8 +560,9 @@
      [:and
       [:=
        :invitation/scope-type
-       (organization/scope-type
-        scope)]
+       [:lift
+        (organization/scope-type
+         scope)]]
 
       [:=
        :invitation/scope-id
@@ -581,8 +583,9 @@
      [:and
       [:=
        :invitation/scope-type
-       (organization/scope-type
-        scope)]
+       [:lift
+        (organization/scope-type
+         scope)]]
 
       [:=
        :invitation/scope-id
@@ -591,7 +594,7 @@
 
       [:=
        :invitation/status
-       :pending]])
+       [:lift :pending]]])
 
     []))
 
