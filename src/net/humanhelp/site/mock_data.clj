@@ -296,24 +296,40 @@
    If a fixed fixture UUID already refers to incompatible data, this fails
    loudly instead of mutating or silently accepting that data.
 
-   Fixture creation is intentionally silent in Gesso Live.
+   Fixture creation is intentionally silent in Gesso Live. When creation commits,
+   the returned :ctx is the progression-aware context produced by
+   gesso.model.tx/transact!. Callers that immediately read or plan against the
+   fixtures must use that returned context rather than continuing from the
+   pre-commit request snapshot.
 
-   Returns the fixture IDs and the number of documents created."
+   Returns:
+     :organization-id  fixed fixture Organization id
+     :locations        fixed fixture Location descriptors
+     :created-count    number of fixture documents created
+     :transaction      committed Gesso transaction metadata, when creation ran
+     :ctx              authoritative post-commit context, or the input ctx when
+                       no fixture transaction was necessary"
   [ctx]
   (let [commands
         (missing-commands
+         ctx)
+
+        transaction
+        (when
+         (seq
+          commands)
+          (model.tx/transact!
+           ctx
+           {:commands
+            commands
+
+            :emit
+            false}))
+
+        ctx'
+        (or
+         (:ctx transaction)
          ctx)]
-
-    (when
-     (seq
-      commands)
-      (model.tx/transact!
-       ctx
-       {:commands
-        commands
-
-        :emit
-        false}))
 
     {:organization-id
      organization-id
@@ -323,4 +339,10 @@
 
      :created-count
      (count
-      commands)}))
+      commands)
+
+     :transaction
+     transaction
+
+     :ctx
+     ctx'}))
