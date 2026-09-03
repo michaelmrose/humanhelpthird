@@ -403,6 +403,64 @@
    transaction-fragment
    transaction-options))
 
+(defn- commit-planned!
+  "Commits one already-planned Request operation and returns only stable
+   Request result semantics.
+
+   The planner result remains the semantic result. The transaction boundary adds
+   commit status and, when available, the authoritative progression established
+   by the successful commit. Raw transaction plans, transaction ctx, and XTDB
+   consistency internals remain private to the model."
+  [ctx {:keys [result]
+        :as planned}]
+  (let [transaction
+        (model.tx/transact!
+         ctx
+         (transaction-plan
+          planned))]
+    (cond->
+     (assoc
+      result
+      :commit/status
+      (:commit/status
+       transaction))
+
+      (contains?
+       transaction
+       :progression)
+      (assoc
+       :progression
+       (:progression
+        transaction)))))
+
+(defn create
+  "Authoritatively creates a User-owned Request in one atomic model
+   transaction.
+
+   input is the same semantic input accepted by plan-create-request.
+
+   Request FX owns validation, User/Organization dependencies, command
+   construction, and change production. This function owns only the atomic
+   commit boundary and stable commit/progression result semantics."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-create-request
+    ctx
+    input)))
+
+(defn edit
+  "Authoritatively edits Request-owned customer content in one atomic model
+   transaction.
+
+   input is the same semantic input accepted by plan-edit-request."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-edit-request
+    ctx
+    input)))
+
 (defn claim
   "Authoritatively claims an open Request in one atomic model transaction.
 
@@ -438,32 +496,11 @@
    :commit/status remains :committed and must never be interpreted as rollback
    or as permission to blindly reapply the mutation."
   [ctx input]
-  (let [{:keys [result]
-         :as planned}
-        (plan-claim-request
-         ctx
-         input)
-
-        transaction
-        (model.tx/transact!
-         ctx
-         (transaction-plan
-          planned))]
-
-    (cond->
-     (assoc
-      result
-      :commit/status
-      (:commit/status
-       transaction))
-
-      (contains?
-       transaction
-       :progression)
-      (assoc
-       :progression
-       (:progression
-        transaction)))))
+  (commit-planned!
+   ctx
+   (plan-claim-request
+    ctx
+    input)))
 
 (defn plan-unclaim-request
   "Plans returning the primary helper's claimed Request to open and ending all
@@ -473,12 +510,36 @@
    ctx
    input))
 
+(defn unclaim
+  "Authoritatively unclaims the active primary helper's Request in one atomic
+   model transaction.
+
+   input is the same semantic input accepted by plan-unclaim-request."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-unclaim-request
+    ctx
+    input)))
+
 (defn plan-mark-request-on-the-way
   "Plans moving the active primary helper's claimed Request to :on-the-way."
   [ctx input]
   (request.fx/plan-mark-request-on-the-way
    ctx
    input))
+
+(defn mark-on-the-way
+  "Authoritatively moves the active primary helper's claimed Request to
+   :on-the-way in one atomic model transaction.
+
+   input is the same semantic input accepted by plan-mark-request-on-the-way."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-mark-request-on-the-way
+    ctx
+    input)))
 
 (defn plan-complete-request
   "Plans completing the active primary helper's Request and ending all active
@@ -488,6 +549,18 @@
    ctx
    input))
 
+(defn complete
+  "Authoritatively completes the active primary helper's Request and ends all
+   active RequestAssignments in one atomic model transaction.
+
+   input is the same semantic input accepted by plan-complete-request."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-complete-request
+    ctx
+    input)))
+
 (defn plan-cancel-request
   "Plans cancellation by the active User requestor and ends all active
    RequestAssignments."
@@ -496,12 +569,36 @@
    ctx
    input))
 
+(defn cancel
+  "Authoritatively cancels the active User requestor's Request and ends all
+   active RequestAssignments in one atomic model transaction.
+
+   input is the same semantic input accepted by plan-cancel-request."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-cancel-request
+    ctx
+    input)))
+
 (defn plan-add-collaborator
   "Plans adding one effective helper as a collaborator to an assigned Request."
   [ctx input]
   (request.fx/plan-add-collaborator
    ctx
    input))
+
+(defn add-collaborator
+  "Authoritatively adds one effective helper as a collaborator in one atomic
+   model transaction.
+
+   input is the same semantic input accepted by plan-add-collaborator."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-add-collaborator
+    ctx
+    input)))
 
 (defn plan-remove-collaborator
   "Plans ending one active collaborator assignment.
@@ -512,6 +609,18 @@
    ctx
    input))
 
+(defn remove-collaborator
+  "Authoritatively ends one active collaborator assignment in one atomic model
+   transaction.
+
+   input is the same semantic input accepted by plan-remove-collaborator."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-remove-collaborator
+    ctx
+    input)))
+
 (defn plan-reassign-request
   "Plans replacing the primary helper on a claimed Request.
 
@@ -521,6 +630,18 @@
   (request.fx/plan-reassign-request
    ctx
    input))
+
+(defn reassign
+  "Authoritatively replaces the primary helper on a claimed Request in one
+   atomic model transaction.
+
+   input is the same semantic input accepted by plan-reassign-request."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-reassign-request
+    ctx
+    input)))
 
 ;; =============================================================================
 ;; Request projections
