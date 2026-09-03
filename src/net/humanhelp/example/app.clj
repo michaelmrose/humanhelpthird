@@ -17,7 +17,6 @@
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
-   [gesso.model.core :as gesso.model]
    [gesso.choreo.identity :as choreo.identity]
    [gesso.core :as g]
    [gesso.live.core :as live]
@@ -29,7 +28,8 @@
    [net.humanhelp.example.model :as model]
    [net.humanhelp.example.routes :as routes]
    [net.humanhelp.example.views :as views]
-   [net.humanhelp.middleware :as mid])
+   [net.humanhelp.middleware :as mid]
+   [net.humanhelp.site.model.user.core :as user])
   (:import
    [java.util UUID]))
 
@@ -143,102 +143,82 @@
     :else
     nil))
 
-(defn- emailish?
-  [x]
-  (and (string? x)
-       (str/includes? x "@")))
+(defn- production-user
+  "Load the authenticated actor through the production HumanHelp User model.
 
-(defn- user-email-from-ctx
+   The example application is a proving surface for the production models, not
+   a parallel identity store. The canonical authenticated identity must
+   therefore resolve to a production User UUID and the User read must satisfy
+   whatever Gesso progression requirement is present on ctx."
   [ctx]
-  (some
-   (fn [x]
-     (when (emailish? x)
-       x))
-   [(:user/email ctx)
-    (:user/email (:user ctx))
-    (get-in ctx [:user :email])
-    (get-in ctx [:session :email])
-    (get-in ctx [:identity :email])]))
+  (let [user-id
+        (or
+         (->uuid
+          (canonical-user-id ctx))
+         (throw
+          (ex-info
+           "Human Help example requires a UUID production User identity."
+           {:error/type
+            :humanhelp.example/invalid-user-id
 
-(defn- user-phone-from-ctx
-  [ctx]
-  (some
-   identity
-   [(:user/phone ctx)
-    (:user/phone (:user ctx))
-    (get-in ctx [:user :phone])
-    (get-in ctx [:session :phone])]))
-
-(defn- user-phone-display-from-ctx
-  [ctx]
-  (some
-   identity
-   [(:user/phone-display ctx)
-    (:user/phone-display (:user ctx))
-    (get-in ctx [:user :phone-display])
-    (get-in ctx [:session :phone-display])]))
-
-(defn- user-record-from-db
-  "Load the authenticated User record when this request has XTDB access.
-
-   Database and progression failures deliberately propagate. Once this lookup
-   participates in a managed Live/progression context, silently falling back to
-   session/profile data would turn an authoritative read failure into a weaker
-   observation and defeat Gesso's consistency contract."
-  [ctx]
-  (let [uid
-        (->uuid
-         (canonical-user-id ctx))]
-    (when
-     (and
-      uid
-      (or
-       (:biff.xtdb/connection-pool ctx)
-       (:biff.xtdb/node ctx)))
-      (first
-       (gesso.model/q
-        ctx
-        {:select
-         [:xt/id
-          :user/email
-          :user/phone
-          :user/phone-display
-          :user/phone-verified-at
-          :user/joined-at]
-
-         :from
-         [:user]
-
-         :where
-         [:= :xt/id uid]})))))
-
-(defn- current-user-id
-  [ctx user-record]
-  (or (:xt/id user-record)
-      (canonical-user-id ctx)))
+            :identity
+            (canonical-user-id ctx)})))]
+    (user/require-user
+     ctx
+     user-id)))
 
 (defn- current-user
+  "Adapt the authoritative production User document to the small view-facing
+   user map consumed by the removable example.
+
+   No session/profile fallback is allowed here. Display data comes from the
+   production User model so the example exercises the same authoritative facts
+   the eventual site UI will consume."
   [ctx]
-  (let [user-record   (user-record-from-db ctx)
-        user-id       (current-user-id ctx user-record)
-        email         (or (user-email-from-ctx ctx)
-                          (:user/email user-record))
-        phone         (or (user-phone-from-ctx ctx)
-                          (:user/phone user-record))
-        phone-display (or (user-phone-display-from-ctx ctx)
-                          (:user/phone-display user-record))]
-    (cond-> {:user/id user-id}
-      (:xt/id user-record)
-      (assoc :xt/id (:xt/id user-record))
+  (let [user-document
+        (production-user ctx)
+
+        user-id
+        (user/user-id
+         user-document)
+
+        email
+        (user/user-email
+         user-document)
+
+        phone
+        (user/user-phone
+         user-document)
+
+        display-name
+        (user/user-display-name
+         user-document)]
+
+    (cond->
+     {:xt/id
+      user-id
+
+      :user/id
+      user-id
+
+      :user/status
+      (user/user-status
+       user-document)}
 
       email
-      (assoc :user/email email)
+      (assoc
+       :user/email
+       email)
 
       phone
-      (assoc :user/phone phone)
+      (assoc
+       :user/phone
+       phone)
 
-      phone-display
-      (assoc :user/phone-display phone-display))))
+      display-name
+      (assoc
+       :user/display-name
+       display-name))))
 
 ;; -----------------------------------------------------------------------------
 ;; Live boundary
