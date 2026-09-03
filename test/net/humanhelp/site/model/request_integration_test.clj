@@ -53,6 +53,10 @@
   (UUID/fromString
    "93000000-0000-0000-0000-000000000001"))
 
+(def stale-session-user-id
+  (UUID/fromString
+   "93000000-0000-0000-0000-000000000002"))
+
 (def fixture-time
   (Instant/parse
    "2026-07-24T12:00:00Z"))
@@ -525,3 +529,125 @@
             " response="
             (pr-str
              response))))))))
+
+(deftest site-request-page-uses-canonical-authenticated-identity-test
+  (seed-prerequisites!)
+
+  (let [{:keys
+         [ctx]}
+        (runtime)
+
+        create-result
+        (create-request!
+         ctx)
+
+        request-id
+        (request/request-id
+         (:request
+          create-result))
+
+        read-ctx
+        (consistency-ctx
+         ctx
+         (:transaction
+          create-result))
+
+        rendered
+        (fn [_ctx props]
+          {:status
+           200
+
+           :body
+           props})]
+
+    (testing
+     "explicit canonical identity wins over a stale lower-priority session id"
+      (with-redefs
+       [await-help/page
+        rendered
+
+        request-finished/page
+        rendered]
+
+        (let [response
+              (site.app/request-page
+               (assoc
+                read-ctx
+
+                :current-user/id
+                user-id
+
+                :session
+                {:uid
+                 stale-session-user-id}
+
+                :path-params
+                {:request-id
+                 (str
+                  request-id)}))]
+
+          (is
+           (=
+            200
+            (:status
+             response))
+           (str
+            "The canonical :current-user/id must own the request even when "
+            "a stale session uid is also present. response="
+            (pr-str
+             response)))
+
+          (is
+           (=
+            user-id
+            (some->
+             response
+             :body
+             :user
+             :xt/id))))))
+
+    (testing
+     "an invalid higher-priority identity fails instead of falling through"
+      (let [failure
+            (try
+              (site.app/request-page
+               (assoc
+                read-ctx
+
+                :current-user/id
+                "not-a-uuid"
+
+                :session
+                {:uid
+                 user-id}
+
+                :path-params
+                {:request-id
+                 (str
+                  request-id)}))
+
+              nil
+
+              (catch clojure.lang.ExceptionInfo ex
+                ex))]
+
+        (is
+         (some?
+          failure)
+         "A malformed canonical identity must fail closed.")
+
+        (when
+         failure
+          (is
+           (=
+            :site.app/invalid-user-id
+            (:error/type
+             (ex-data
+              failure))))
+
+          (is
+           (=
+            "not-a-uuid"
+            (:user/id
+             (ex-data
+              failure)))))))))
