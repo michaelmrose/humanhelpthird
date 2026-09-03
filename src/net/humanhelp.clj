@@ -29,9 +29,9 @@
   "Application modules plus the Biff 2 infrastructure modules required by
    HumanHelp and Gesso.
 
-   HumanHelp keeps its existing :routes/:api-routes module contributions for
-   now. Routing is assembled below with Reitit exactly as before; converting
-   every application module to :biff.ring/routes is intentionally outside this
+   HumanHelp keeps its existing :routes module contributions for now. Routing
+   is assembled below with Reitit exactly as before; converting every
+   application module to :biff.ring/routes is intentionally outside this
    mechanical Biff 2 migration."
   [(biff.core/module)
    (biff.fx/module)
@@ -53,15 +53,6 @@
 
     (keep
      :routes
-     modules)]
-
-   [""
-    {:middleware
-     [mid/wrap-api-defaults
-      mid/wrap-dev-load-token]}
-
-    (keep
-     :api-routes
      modules)]])
 
 (defn- error-handler
@@ -123,11 +114,7 @@
    ;; Temporary Gesso model transaction compatibility. This is not a Biff 2
    ;; runtime key.
    :biff/malli-opts
-   #'malli-opts
-
-   :net.humanhelp.load/dev-token
-   (System/getenv
-    "GESSOTEST_LOAD_TOKEN")})
+   #'malli-opts})
 
 (defonce system
   (atom
@@ -338,12 +325,6 @@
      "Go to"
      (:biff.ring/base-url
       new-system))
-
-    (when-not
-     (:net.humanhelp.load/dev-token
-      new-system)
-      (log/warn
-       "GESSOTEST_LOAD_TOKEN is not set; protected dev/load routes will reject requests."))
 
     new-system))
 
