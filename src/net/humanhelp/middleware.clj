@@ -8,16 +8,37 @@
    [ring.middleware.defaults :as rd]
    [rum.core :as rum]))
 
+(defn valid-session-user-id?
+  "Return true only for session user ids that can represent HumanHelp identity.
+
+   Authentication middleware owns only the signed-in/session boundary; it does
+   not choose among application identity sources. UUIDs and nonblank strings
+   are accepted because the production site persists UUID User ids while the
+   removable example and focused tests may use string ids. Malformed present
+   values must not count as authentication."
+  [value]
+  (or
+   (uuid? value)
+   (and
+    (string? value)
+    (not
+     (str/blank? value)))))
+
+(defn signed-in?
+  [ctx]
+  (valid-session-user-id?
+   (get-in ctx [:session :uid])))
+
 (defn wrap-redirect-signed-in [handler]
-  (fn [{:keys [session] :as ctx}]
-    (if (some? (:uid session))
+  (fn [ctx]
+    (if (signed-in? ctx)
       {:status  303
        :headers {"location" "/app"}}
       (handler ctx))))
 
 (defn wrap-signed-in [handler]
-  (fn [{:keys [session] :as ctx}]
-    (if (some? (:uid session))
+  (fn [ctx]
+    (if (signed-in? ctx)
       (handler ctx)
       {:status  303
        :headers {"location" "/signin?error=not-signed-in"}})))
