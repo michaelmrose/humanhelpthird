@@ -19,7 +19,6 @@
    public cores to Request FX."
   (:require
    [com.biffweb.graph :as graph]
-   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.request.domain :as request]
@@ -92,31 +91,6 @@
       (malli-options
        ctx)})))
 
-(defn- query-context!
-  [ctx]
-  (if
-   (and
-    (map? ctx)
-    (or
-     (:biff.xtdb/connection-pool ctx)
-     (:biff.xtdb/node ctx)))
-    ctx
-
-    (fail!
-     :request.graph/missing-biff-connection
-     "Request reads require Biff 2 XTDB context with :biff.xtdb/connection-pool or :biff.xtdb/node."
-     {:ctx-keys
-      (when
-       (map? ctx)
-        (set
-         (keys ctx)))})))
-
-(defn- q
-  [ctx query]
-  (biff.xtdb/q
-   (query-context! ctx)
-   query))
-
 (defn- rows
   [descriptor ctx query]
   (mapv
@@ -124,7 +98,7 @@
      descriptor
      ctx
      %)
-   (q
+   (model/q
     ctx
     query)))
 
