@@ -60,20 +60,33 @@
 ;; -----------------------------------------------------------------------------
 
 (defn current-user-id
-  "Return the app user id used for connected-client targeting.
+  "Return the canonical authenticated user id used for client targeting.
 
-   Biff auth usually gives us a session uid. We intentionally return a string
-   because client targeting keys should be stable and easy to serialize/log."
+   Connected-client scopes are an authority-sensitive routing boundary: the
+   same authenticated user must resolve to the same key regardless of which
+   display/profile fields happen to be present on ctx, and a malformed signed-in
+   request must never collapse into a shared demo identity.
+
+   Prefer explicit model/application identity, then Biff's authenticated session
+   uid. Legacy :session/:user is accepted as an id-shaped compatibility source.
+   Email addresses are deliberately not identity sources here.
+
+   Throws when no authenticated user id is available. Routes exposing this
+   adapter are already protected by wrap-signed-in, so reaching this failure is
+   a wiring/auth-context error rather than an anonymous-user mode."
   [ctx]
-  (str
-   (or (:user/id ctx)
-       (:user/email ctx)
-       (get-in ctx [:user :xt/id])
-       (get-in ctx [:user :email])
-       (get-in ctx [:session :uid])
-       (get-in ctx [:session :user])
-       (get-in ctx [:session :email])
-       "demo-user")))
+  (let [user-id
+        (or (:current-user/id ctx)
+            (:user/id ctx)
+            (get-in ctx [:user :xt/id])
+            (get-in ctx [:session :uid])
+            (get-in ctx [:session :user]))]
+    (when-not (some? user-id)
+      (throw
+       (ex-info
+        "Connected HumanHelp client is missing an authenticated user id."
+        {:error/type :net.humanhelp.client-plumbing/missing-user-id})))
+    (str user-id)))
 
 (defn current-user-email
   "Best-effort display email for app UI.
