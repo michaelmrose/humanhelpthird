@@ -471,6 +471,26 @@
     :else
     nil))
 
+(defn- query-value
+  [value]
+  (if
+   (and
+    (vector?
+     value)
+
+    (=
+     :lift
+     (first
+      value))
+
+    (=
+     2
+     (count
+      value)))
+    (second
+     value)
+    value))
+
 (defn- predicate-match?
   [document predicate]
   (if
@@ -490,7 +510,8 @@
                expected]
               arguments]
           (=
-           expected
+           (query-value
+            expected)
            (get
             document
             field)))
@@ -2614,7 +2635,7 @@
 
                [:=
                 :request-assignment/status
-                :active]])]
+                [:lift :active]]])]
             (plan-assertions
              plan)))
 
@@ -3088,7 +3109,7 @@
 
                [:=
                 :request-assignment/status
-                :active]])]
+                [:lift :active]]])]
             (plan-assertions
              plan))))))))
 
