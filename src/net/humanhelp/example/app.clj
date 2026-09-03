@@ -177,6 +177,12 @@
     (get-in ctx [:session :phone-display])]))
 
 (defn- user-record-from-db
+  "Load the authenticated User record when this request has XTDB access.
+
+   Database and progression failures deliberately propagate. Once this lookup
+   participates in a managed Live/progression context, silently falling back to
+   session/profile data would turn an authoritative read failure into a weaker
+   observation and defeat Gesso's consistency contract."
   [ctx]
   (let [uid
         (->uuid
@@ -187,33 +193,22 @@
       (or
        (:biff.xtdb/connection-pool ctx)
        (:biff.xtdb/node ctx)))
-      (try
-        (first
-         (gesso.model/q
-          ctx
-          {:select
-           [:xt/id
-            :user/email
-            :user/phone
-            :user/phone-display
-            :user/phone-verified-at
-            :user/joined-at]
+      (first
+       (gesso.model/q
+        ctx
+        {:select
+         [:xt/id
+          :user/email
+          :user/phone
+          :user/phone-display
+          :user/phone-verified-at
+          :user/joined-at]
 
-           :from
-           [:user]
+         :from
+         [:user]
 
-           :where
-           [:= :xt/id uid]}))
-        (catch
-         Exception e
-          (println
-           "[humanhelp] current-user lookup failed"
-           {:message
-            (.getMessage e)
-
-            :uid
-            uid})
-          nil)))))
+         :where
+         [:= :xt/id uid]})))))
 
 (defn- current-user-id
   [ctx user-record]
