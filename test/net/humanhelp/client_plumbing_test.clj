@@ -123,8 +123,40 @@
 (deftest current-user-id-test
   (is (= "user-1" (plumbing/current-user-id base-ctx)))
   (is (= "session-user" (plumbing/current-user-id session-only-ctx)))
-  (is (= "session@example.com" (plumbing/current-user-id email-only-session-ctx)))
-  (is (= "demo-user" (plumbing/current-user-id anonymous-ctx))))
+
+  (is (= "explicit-user"
+         (plumbing/current-user-id
+          {:current-user/id "explicit-user"
+           :user/id "model-user"
+           :user/email "profile@example.com"
+           :session {:uid "session-user"
+                     :email "session@example.com"}})))
+
+  (is (= "model-user"
+         (plumbing/current-user-id
+          {:user/id "model-user"
+           :user/email "profile@example.com"
+           :session {:uid "session-user"
+                     :email "session@example.com"}})))
+
+  (is (= "xt-user"
+         (plumbing/current-user-id
+          {:user {:xt/id "xt-user"
+                  :email "profile@example.com"}
+           :session {:uid "session-user"}})))
+
+  (is (= "legacy-user"
+         (plumbing/current-user-id
+          {:session {:user "legacy-user"}})))
+
+  (doseq [ctx [email-only-session-ctx
+               anonymous-ctx]]
+    (try
+      (plumbing/current-user-id ctx)
+      (is false "Expected missing authenticated user identity to throw.")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :net.humanhelp.client-plumbing/missing-user-id
+               (:error/type (ex-data e))))))))
 
 (deftest current-user-email-test
   (is (= "user1@example.com" (plumbing/current-user-email base-ctx)))
@@ -147,7 +179,14 @@
 
   (is (= {:client/user-id "session-user"
           :client/scopes  #{[:user "session-user"] [:app/all]}}
-         (plumbing/current-client session-only-ctx))))
+         (plumbing/current-client session-only-ctx)))
+
+  (try
+    (plumbing/current-client email-only-session-ctx)
+    (is false "Expected client registration without an authenticated id to fail.")
+    (catch clojure.lang.ExceptionInfo e
+      (is (= :net.humanhelp.client-plumbing/missing-user-id
+             (:error/type (ex-data e)))))))
 
 ;; -----------------------------------------------------------------------------
 ;; Listener / stream / pending
