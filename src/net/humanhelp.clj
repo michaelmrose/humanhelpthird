@@ -3,7 +3,6 @@
    [aleph.http :as aleph]
    [clojure.tools.logging :as log]
    [clojure.tools.namespace.repl :as tn-repl]
-   [com.biffweb.background :as biff.background]
    [com.biffweb.config :as biff.config]
    [com.biffweb.core :as biff.core]
    [com.biffweb.fx :as biff.fx]
@@ -18,7 +17,6 @@
    [net.humanhelp.middleware :as mid]
    [net.humanhelp.schema :as schema]
    [net.humanhelp.ui :as ui]
-   [net.humanhelp.worker :as worker]
    [nrepl.cmdline :as nrepl-cmd]
    [reitit.ring :as reitit-ring])
   (:gen-class))
@@ -39,13 +37,10 @@
    (biff.fx/module)
    (biff.graph/module)
    (biff.xtdb/module)
-   (biff.background/module)
-
    app/module
    client-plumbing/module
    home/module
-   schema/module
-   worker/module])
+   schema/module])
 
 ;; -----------------------------------------------------------------------------
 ;; Routing
@@ -320,8 +315,6 @@
 (def components
   [biff.config/use-aero-config
    biff.xtdb/use-xtdb
-   biff.background/use-queues
-   biff.background/use-scheduled-tasks
    use-gesso-live
    use-aleph])
 
