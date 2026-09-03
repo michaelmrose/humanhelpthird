@@ -4,6 +4,21 @@
   "(function (global) {
   'use strict';
 
+  // This script is emitted inside the replaceable phone panel. HTMX may
+  // therefore execute it again when server validation returns another phone
+  // panel. Reuse the already-installed global runtime instead of registering a
+  // second copy of every document-level event listener. The existing runtime's
+  // init pass is enough to synchronize controls introduced by the swap.
+  var existing = global.HumanHelpPhoneAuth;
+
+  if (existing && existing.__installed) {
+    if (global.document && existing.init) {
+      existing.init(global.document);
+    }
+
+    return;
+  }
+
   var installed = false;
 
   function toArray(xs) {
@@ -462,6 +477,13 @@
 
     installed = true;
 
+    // Publish installation state on the global runtime, not only in this IIFE.
+    // A later HTMX-inserted copy of the inline script can then detect that the
+    // delegated listeners already exist.
+    if (global.HumanHelpPhoneAuth) {
+      global.HumanHelpPhoneAuth.__installed = true;
+    }
+
     doc.addEventListener('keydown', handleKeydown, true);
     doc.addEventListener('beforeinput', handleBeforeInput, true);
     doc.addEventListener('input', handleInput, true);
@@ -485,6 +507,7 @@
   }
 
   var PhoneAuth = {
+    __installed: false,
     rawDigits: rawDigits,
     stripCommonExtension: stripCommonExtension,
     phoneDigits: phoneDigits,
@@ -504,6 +527,7 @@
     handleBlur: handleBlur,
     handleInvalid: handleInvalid,
     handleSubmit: handleSubmit,
+    init: init,
     install: install
   };
 
