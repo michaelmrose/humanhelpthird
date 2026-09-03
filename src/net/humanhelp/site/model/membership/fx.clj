@@ -319,11 +319,11 @@
     [:or
      [:=
       :membership/status
-      :active]
+      [:lift :active]]
 
      [:=
       :membership/status
-      :suspended]]]))
+      [:lift :suspended]]]]))
 
 (defn- assert-no-active-role-assignment
   [membership-id role scope]
@@ -336,12 +336,13 @@
 
     [:=
      :role-assignment/role
-     role]
+     [:lift role]]
 
     [:=
      :role-assignment/scope-type
-     (organization/scope-type
-      scope)]
+     [:lift
+      (organization/scope-type
+       scope)]]
 
     [:=
      :role-assignment/scope-id
@@ -350,7 +351,7 @@
 
     [:=
      :role-assignment/status
-     :active]]))
+     [:lift :active]]]))
 
 ;; =============================================================================
 ;; Semantic changes
