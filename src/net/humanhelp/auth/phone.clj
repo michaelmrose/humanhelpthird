@@ -147,21 +147,35 @@
 
       (if
        existing
-        {:ok?
-         true
+        (if
+         (user/active? existing)
+          {:ok?
+           true
 
-         :user-id
-         (user/user-id
-          existing)
+           :user-id
+           (user/user-id
+            existing)
 
-         :phone
-         phone'
+           :phone
+           phone'
 
-         :phone-display
-         phone-display'
+           :phone-display
+           phone-display'
 
-         :new-user?
-         false}
+           :new-user?
+           false}
+
+          {:ok?
+           false
+
+           :phone
+           phone'
+
+           :phone-display
+           phone-display'
+
+           :error
+           "This account is not available for sign-in."})
 
         (let [result
               (create-user!
