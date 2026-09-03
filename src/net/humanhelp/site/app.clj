@@ -237,49 +237,52 @@
 
 (defn app-page
   [ctx]
-  (let [user-document
-        (current-user ctx)]
+  ;; The development fixture is persisted, not merely represented by UI
+  ;; values. ensure! creates only missing documents and verifies existing fixed
+  ;; fixture IDs rather than rewriting them. When fixture creation commits, all
+  ;; reads and rendering after that point must continue from its returned
+  ;; progression-aware context rather than the pre-commit request snapshot.
+  (let [{ctx' :ctx}
+        (mock-data/ensure!
+         ctx)
 
-    ;; The development fixture is persisted, not merely represented by UI
-    ;; values. ensure! creates only missing documents and verifies existing
-    ;; fixed fixture IDs rather than rewriting them.
-    (mock-data/ensure!
-     ctx)
+        user-document
+        (current-user ctx')
 
-    (let [location-id
-          (selected-location-id
-           ctx)
+        location-id
+        (selected-location-id
+         ctx')
 
-          location
-          (mock-location
-           location-id)]
+        location
+        (mock-location
+         location-id)]
 
-      (if
-       location
-        (new-request/page
-         ctx
-         {:user
-          user-document
+    (if
+     location
+      (new-request/page
+       ctx'
+       {:user
+        user-document
 
-          :location
-          location
+        :location
+        location
 
-          :values
-          {}
+        :values
+        {}
 
-          :errors
-          {}})
+        :errors
+        {}})
 
-        (select-location/page
-         ctx
-         {:user
-          user-document
+      (select-location/page
+       ctx'
+       {:user
+        user-document
 
-          :locations
-          mock-data/locations
+        :locations
+        mock-data/locations
 
-          :selected-location-id
-          mock-data/default-location-id})))))
+        :selected-location-id
+        mock-data/default-location-id}))))
 
 ;; =============================================================================
 ;; Request validation
@@ -299,81 +302,84 @@
 
 (defn create-request
   [ctx]
-  (let [user-document
-        (current-user ctx)]
+  ;; Keep direct POSTs correct even when the user did not first render /app.
+  ;; Fixture creation may itself commit, so every read, validation render, and
+  ;; Request plan after ensure! must use its authoritative post-commit context.
+  (let [{ctx' :ctx}
+        (mock-data/ensure!
+         ctx)
 
-    ;; Keep direct POSTs correct even when the user did not first render /app.
-    (mock-data/ensure!
-     ctx)
+        user-document
+        (current-user ctx')
 
-    (let [user-id
-          (:xt/id user-document)
+        user-id
+        (:xt/id user-document)
 
-          location-id
-          (selected-location-id
-           ctx)
+        location-id
+        (selected-location-id
+         ctx')
 
-          location
-          (mock-location
-           location-id)
+        location
+        (mock-location
+         location-id)
 
-          values
-          (request-values
-           ctx)
+        values
+        (request-values
+         ctx')
 
-          errors
-          (request/content-errors
-           values)]
+        errors
+        (request/content-errors
+         values)]
 
-      (cond
-        ;; A Location id submitted by the browser must be one of the locations
-        ;; exposed by this temporary development source.
-        (nil?
-         location)
+    (cond
+      ;; A Location id submitted by the browser must be one of the locations
+      ;; exposed by this temporary development source.
+      (nil?
+       location)
+      (redirect
+       routes/base-path)
+
+      ;; Authoritative Request-domain validation remains the final server check.
+      ;; The Gesso field validation endpoint is only the UX layer.
+      (seq
+       errors)
+      (new-request/page
+       ctx'
+       {:user
+        user-document
+
+        :location
+        location
+
+        :values
+        values
+
+        :errors
+        errors})
+
+      :else
+      (let [result
+            (commit-create-request
+             (assoc
+              ctx'
+              :current-user/id
+              user-id)
+             {:organization-id
+              mock-data/organization-id
+
+              :location-id
+              location-id
+
+              :content
+              values})
+
+            request-document
+            (:request result)]
+
         (redirect
-         routes/base-path)
-
-        ;; Authoritative Request-domain validation remains the final server
-        ;; check. The Gesso field validation endpoint is only the UX layer.
-        (seq
-         errors)
-        (new-request/page
-         ctx
-         {:user
-          user-document
-
-          :location
-          location
-
-          :values
-          values
-
-          :errors
-          errors})
-
-        :else
-        (let [result
-              (commit-create-request
-               (assoc
-                ctx
-                :current-user/id
-                user-id)
-               {:organization-id
-                mock-data/organization-id
-
-                :location-id
-                location-id
-
-                :content
-                values})
-
-              request-document
-              (:request result)]
-
-          (redirect
-           (routes/request-url
-            (request/request-id
-             request-document))))))))
+         (routes/request-url
+          (request/request-id
+           request-document)))))))
 
 ;; =============================================================================
 ;; Existing Request page
