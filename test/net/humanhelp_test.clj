@@ -7,18 +7,19 @@
    longer compiles against the current Gesso/Biff stack, loading this test
    namespace must fail before any assertion runs.
 
-   These tests do not start XTDB, Aleph, background workers, or Gesso Live. The
-   heavier runtime/integration suites own those boundaries."
+   These tests do not start XTDB, Aleph, or Gesso Live. The heavier
+   runtime/integration suites own those boundaries."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [com.biffweb.config :as biff.config]
+   [com.biffweb.xtdb :as biff.xtdb]
    [net.humanhelp :as humanhelp]
    [net.humanhelp.app :as app]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.home :as home]
    [net.humanhelp.schema :as schema]
    [net.humanhelp.site.app :as site]
-   [net.humanhelp.ui :as ui]
-   [net.humanhelp.worker :as worker]))
+   [net.humanhelp.ui :as ui]))
 
 (defn- contributes-module?
   [module]
@@ -44,8 +45,7 @@
     (is (contributes-module? app/module))
     (is (contributes-module? client-plumbing/module))
     (is (contributes-module? home/module))
-    (is (contributes-module? schema/module))
-    (is (contributes-module? worker/module)))
+    (is (contributes-module? schema/module)))
 
   (testing "the initial Biff system points at the assembled application boundaries"
     (is (identical?
@@ -88,11 +88,10 @@
          humanhelp/modules))))
 
 (deftest runtime-component-order-is-explicit-test
-  (testing "HumanHelp keeps Live between database/background setup and the Aleph server"
+  (testing "HumanHelp starts only config, XTDB, Gesso Live, and Aleph"
     (is (vector? humanhelp/components))
-    (is (= humanhelp/use-gesso-live
-           (nth humanhelp/components 4)))
-    (is (= humanhelp/use-aleph
-           (nth humanhelp/components 5)))
-    (is (= 6
-           (count humanhelp/components)))))
+    (is (= [biff.config/use-aero-config
+            biff.xtdb/use-xtdb
+            humanhelp/use-gesso-live
+            humanhelp/use-aleph]
+           humanhelp/components))))
