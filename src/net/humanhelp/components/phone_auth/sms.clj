@@ -122,18 +122,78 @@
          :length        length
          :expires-at    expires-at}))))
 
+(defn- verification-outcome
+  [phone phone-display code max-attempts now challenge]
+  (cond
+    (nil? challenge)
+    {:ok?           false
+     :phone         phone
+     :phone-display phone-display
+     :error         "Send a new code and try again."}
+
+    (< (:expires-at challenge) now)
+    {:ok?           false
+     :phone         phone
+     :phone-display phone-display
+     :error         "That code expired. Send another code and try again."}
+
+    (>= (:attempts challenge) max-attempts)
+    {:ok?           false
+     :phone         phone
+     :phone-display phone-display
+     :error         "Too many attempts. Send another code and try again."}
+
+    (= code (:code challenge))
+    {:ok?           true
+     :phone         phone
+     :phone-display phone-display}
+
+    :else
+    {:ok?           false
+     :phone         phone
+     :phone-display phone-display
+     :error         "That code didn’t match. Try again."}))
+
+(defn- advance-challenges
+  "Atomically advance one verification challenge for an attempted code.
+
+  A successful, expired, or exhausted challenge is consumed. A wrong code
+  increments the attempt counter. Missing challenges leave the map unchanged.
+  This function is pure so Atom CAS retries cannot duplicate side effects."
+  [challenge-map phone code max-attempts now]
+  (let [challenge
+        (get challenge-map phone)]
+    (cond
+      (nil? challenge)
+      challenge-map
+
+      (< (:expires-at challenge) now)
+      (dissoc challenge-map phone)
+
+      (>= (:attempts challenge) max-attempts)
+      (dissoc challenge-map phone)
+
+      (= code (:code challenge))
+      (dissoc challenge-map phone)
+
+      :else
+      (update-in challenge-map [phone :attempts] (fnil inc 0)))))
+
 (defn check-verification!
   "Check an SMS verification code.
 
   Current implementation checks the in-memory dev code. Later this function can
   be replaced with a Twilio Verify implementation while preserving the same
-  input and return shape."
+  input and return shape.
+
+  Challenge inspection and consumption happen in one Atom state transition.
+  Consequently one stored code can produce at most one successful verification,
+  even when duplicate verification requests arrive concurrently."
   [{:keys [phone code max-attempts]
     :or   {max-attempts default-max-attempts}}]
   (let [phone'        (normalize-phone phone)
         phone-display (phone-display phone')
-        code'         (some-> code str str/trim)
-        challenge     (get @challenges phone')]
+        code'         (some-> code str str/trim)]
     (cond
       (nil? phone')
       {:ok?   false
@@ -145,42 +205,28 @@
        :phone-display phone-display
        :error         "Enter the code we sent you."}
 
-      (nil? challenge)
-      {:ok?           false
-       :phone         phone'
-       :phone-display phone-display
-       :error         "Send a new code and try again."}
-
-      (< (:expires-at challenge) (now-ms))
-      (do
-        (swap! challenges dissoc phone')
-        {:ok?           false
-         :phone         phone'
-         :phone-display phone-display
-         :error         "That code expired. Send another code and try again."})
-
-      (>= (:attempts challenge) max-attempts)
-      (do
-        (swap! challenges dissoc phone')
-        {:ok?           false
-         :phone         phone'
-         :phone-display phone-display
-         :error         "Too many attempts. Send another code and try again."})
-
-      (= code' (:code challenge))
-      (do
-        (swap! challenges dissoc phone')
-        {:ok?           true
-         :phone         phone'
-         :phone-display phone-display})
-
       :else
-      (do
-        (swap! challenges update-in [phone' :attempts] (fnil inc 0))
-        {:ok?           false
-         :phone         phone'
-         :phone-display phone-display
-         :error         "That code didn’t match. Try again."}))))
+      (let [now
+            (now-ms)
+
+            [before _after]
+            (swap-vals!
+             challenges
+             advance-challenges
+             phone'
+             code'
+             max-attempts
+             now)
+
+            challenge
+            (get before phone')]
+        (verification-outcome
+         phone'
+         phone-display
+         code'
+         max-attempts
+         now
+         challenge)))))
 
 (def provider
   {:start-verification! start-verification!
