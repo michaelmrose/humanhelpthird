@@ -263,10 +263,11 @@
   [route {method (handler-for! handlers spec)}])
 
 (def required-route-ids
-  "Route ids that existed before board-options work.
+  "Every route id owned by the current Human Help example application.
 
-   These remain fail-fast: if app.clj omits one of these handlers, route-table
-   throws exactly as it did before this feature."
+   Route assembly is fail-fast: app.clj must provide a handler for every route
+   declared here so partially migrated route tables cannot silently omit an
+   application capability."
   [page-id
    request-toolbar-fragment-id
    request-list-fragment-id
@@ -276,24 +277,13 @@
    create-request-id
    refresh-requests-id
    search-requests-id
+   apply-board-options-id
    claim-request-id
    unclaim-request-id
    take-over-request-id
    done-request-id
    cancel-request-id
    reset-demo-id])
-
-(def optional-route-ids
-  "Route ids that routes.clj exposes before app.clj is required to handle them.
-
-   This lets routes/views/model work land one namespace at a time. Once app.clj
-   supplies a handler for an optional route id, route-table includes it."
-  [apply-board-options-id])
-
-(defn- optional-route-entry
-  [handlers route-id]
-  (when (contains? handlers route-id)
-    (route-entry handlers (route-spec route-id))))
 
 (defn route-table
   "Return a Reitit route table for Human Help.
@@ -315,15 +305,15 @@
   ([handlers]
    (route-table handlers nil))
   ([handlers {:keys [middleware]}]
-   (let [base-options (cond-> {}
-                        (seq middleware)
-                        (assoc :middleware middleware))
-         required     (mapv #(route-entry handlers (route-spec %))
-                            required-route-ids)
-         optional     (keep #(optional-route-entry handlers %)
-                            optional-route-ids)]
-     [(into [base-path base-options]
-            (concat required optional))])))
+   (let [base-options
+         (cond-> {}
+           (seq middleware)
+           (assoc :middleware middleware))]
+     [(into
+       [base-path base-options]
+       (map
+        #(route-entry handlers (route-spec %))
+        required-route-ids))])))
 
 ;; -----------------------------------------------------------------------------
 ;; URL helpers
