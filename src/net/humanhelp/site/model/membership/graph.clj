@@ -17,7 +17,6 @@
    remains in organization.core. Transaction guards and mutation planning remain
    in membership.fx."
   (:require
-   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.membership.domain :as membership]
@@ -94,7 +93,7 @@
 
 (defn- q
   [ctx query]
-  (biff.xtdb/q
+  (model/q
    (query-context! ctx)
    query))
 
