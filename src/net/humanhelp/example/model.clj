@@ -18,7 +18,6 @@
 
    It intentionally does not know about:
 
-   - Gesso Live
    - Hiccup/UI
    - routes
    - client plumbing
@@ -27,10 +26,10 @@
    are carried there."
   (:require
    [clojure.string :as str]
+   [gesso.live.core :as live]
    [gesso.model.core :as gmodel]
    [malli.core :as m]
-   [malli.error :as me]
-   [xtdb.api :as xt]))
+   [malli.error :as me]))
 
 ;; -----------------------------------------------------------------------------
 ;; Constants
@@ -1152,19 +1151,6 @@
          (set
           (keys ctx)))}))))
 
-(defn tx-node!
-  [ctx]
-  (or
-   (:biff.xtdb/node ctx)
-   (throw
-    (ex-info
-     "Human Help example writes require :biff.xtdb/node."
-     {:ctx-keys
-      (when
-       (map? ctx)
-        (set
-         (keys ctx)))}))))
-
 (defn q
   "Run one Human Help example query through Gesso's progression-aware model
    read boundary while preserving this namespace's explicit XTDB context
@@ -1174,7 +1160,24 @@
    (query-context! ctx)
    query))
 
+(defn- live-system
+  [ctx]
+  (or
+   (:gesso.live/system ctx)
+   (:live/system ctx)
+   {}))
+
 (defn execute-tx!
+  "Execute demo XTDB operations through Gesso Live's authoritative commit
+   boundary without publishing semantic changes yet.
+
+   The returned map includes transaction-derived consistency, progression, and
+   an updated :ctx. High-level example handlers can therefore perform
+   read-your-writes rendering and bind later observer delivery to the actual
+   commit rather than reconstructing freshness from application revisions.
+
+   Semantic invalidations are deliberately not emitted here because this
+   low-level helper does not know which domain change a caller is committing."
   [ctx tx-ops]
   (let [tx-ops
         (vec
@@ -1183,9 +1186,11 @@
           tx-ops))]
     (when
      (seq tx-ops)
-      (xt/execute-tx
-       (tx-node! ctx)
-       tx-ops))))
+      (live/transact-and-notify!
+       (live-system ctx)
+       ctx
+       {:tx-ops tx-ops
+        :emit   false}))))
 
 ;; -----------------------------------------------------------------------------
 ;; XTDB doc conversion
@@ -1354,11 +1359,12 @@
 
 (defn seed-state!
   [ctx]
-  (let [new-state (initial-state)]
-    (persist-state! ctx new-state)
-    {:status   :ok
-     :revision (:revision new-state)
-     :state    new-state}))
+  (let [new-state    (initial-state)
+        transaction  (persist-state! ctx new-state)]
+    {:status      :ok
+     :revision    (:revision new-state)
+     :state       new-state
+     :transaction transaction}))
 
 (defn ensure-seeded!
   "Seed the demo store when no Human Help store metadata document exists.
@@ -1375,13 +1381,20 @@
 
 (defn state
   [ctx]
-  (ensure-seeded! ctx)
-  (let [meta-doc (store-meta-doc ctx)
-        requests (->> (request-docs ctx)
+  (let [seed-result
+        (ensure-seeded! ctx)
+
+        ctx'
+        (or
+         (get-in seed-result [:transaction :ctx])
+         ctx)
+
+        meta-doc (store-meta-doc ctx')
+        requests (->> (request-docs ctx')
                       (map doc->request)
                       (sort-by :request/number)
                       vec)
-        events   (->> (event-docs ctx)
+        events   (->> (event-docs ctx')
                       (map doc->event)
                       (sort-by :event/at-ms >)
                       vec)]
@@ -1450,16 +1463,29 @@
 
      [new-state result]
 
+   Successful writes include :transaction metadata from Gesso Live. The nested
+   transaction :ctx carries the commit-derived progression required for any
+   dependent read or post-commit observer delivery.
+
    This keeps the old atom-backed result shapes but deliberately does not yet
    implement optimistic retry/precondition logic for contended concurrent writes.
    That is acceptable for this removable demo analogue; it can be tightened
    later if the example needs to demonstrate concurrent write handling."
   [ctx f]
-  (let [old-state    (state ctx)
-        [new result] (f old-state)]
-    (when-not (= old-state new)
-      (persist-state! ctx new))
-    result))
+  (let [old-state
+        (state ctx)
+
+        [new result]
+        (f old-state)
+
+        transaction
+        (when-not
+         (= old-state new)
+          (persist-state! ctx new))]
+    (cond->
+     result
+      transaction
+      (assoc :transaction transaction))))
 
 (defn add-event
   [state kind message data]
@@ -1861,8 +1887,9 @@
 
 (defn reset-demo-state!
   [ctx]
-  (let [new-state (initial-state)]
-    (persist-state! ctx new-state)
-    {:status   :ok
-     :revision (:revision new-state)
-     :state    new-state}))
+  (let [new-state   (initial-state)
+        transaction (persist-state! ctx new-state)]
+    {:status      :ok
+     :revision    (:revision new-state)
+     :state       new-state
+     :transaction transaction}))
