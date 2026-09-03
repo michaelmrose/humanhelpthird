@@ -149,6 +149,10 @@
          (plumbing/current-user-id
           {:session {:user "legacy-user"}})))
 
+  (is (= "00000000-0000-0000-0000-000000000001"
+         (plumbing/current-user-id
+          {:session {:uid #uuid "00000000-0000-0000-0000-000000000001"}})))
+
   (doseq [ctx [email-only-session-ctx
                anonymous-ctx]]
     (try
@@ -156,7 +160,35 @@
       (is false "Expected missing authenticated user identity to throw.")
       (catch clojure.lang.ExceptionInfo e
         (is (= :net.humanhelp.client-plumbing/missing-user-id
-               (:error/type (ex-data e))))))))
+               (:error/type (ex-data e)))))))
+
+  (doseq [[ctx expected-source expected-value]
+          [[{:session {:uid ""}}
+            [:session :uid]
+            ""]
+           [{:session {:uid "   "}}
+            [:session :uid]
+            "   "]
+           [{:current-user/id ""
+             :session {:uid "valid-session-user"}}
+            :current-user/id
+            ""]
+           [{:user/id 42
+             :session {:uid "valid-session-user"}}
+            :user/id
+            42]
+           [{:session {:user {:id "nested-user"}}}
+            [:session :user]
+            {:id "nested-user"}]]]
+    (try
+      (plumbing/current-user-id ctx)
+      (is false "Expected malformed authenticated user identity to throw.")
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (is (= :net.humanhelp.client-plumbing/invalid-user-id
+                 (:error/type data)))
+          (is (= expected-source (:identity/source data)))
+          (is (= expected-value (:identity/value data))))))))
 
 (deftest current-user-email-test
   (is (= "user1@example.com" (plumbing/current-user-email base-ctx)))
@@ -186,7 +218,19 @@
     (is false "Expected client registration without an authenticated id to fail.")
     (catch clojure.lang.ExceptionInfo e
       (is (= :net.humanhelp.client-plumbing/missing-user-id
-             (:error/type (ex-data e)))))))
+             (:error/type (ex-data e))))))
+
+  (try
+    (plumbing/current-client
+     {:current-user/id ""
+      :session {:uid "valid-session-user"}})
+    (is false "Expected malformed high-precedence identity to fail closed.")
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (is (= :net.humanhelp.client-plumbing/invalid-user-id
+               (:error/type data)))
+        (is (= :current-user/id (:identity/source data)))
+        (is (= "" (:identity/value data)))))))
 
 ;; -----------------------------------------------------------------------------
 ;; Listener / stream / pending
