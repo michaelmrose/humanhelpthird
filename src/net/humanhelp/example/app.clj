@@ -17,7 +17,7 @@
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
-   [com.biffweb.xtdb :as biff.xtdb]
+   [gesso.model.core :as gesso.model]
    [gesso.choreo.identity :as choreo.identity]
    [gesso.core :as g]
    [gesso.live.core :as live]
@@ -189,7 +189,7 @@
        (:biff.xtdb/node ctx)))
       (try
         (first
-         (biff.xtdb/q
+         (gesso.model/q
           ctx
           {:select
            [:xt/id
