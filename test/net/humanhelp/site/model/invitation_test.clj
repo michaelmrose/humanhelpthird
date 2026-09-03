@@ -1522,6 +1522,26 @@
 ;; In-memory Graph query seam
 ;; =============================================================================
 
+(defn- query-value
+  [value]
+  (if
+   (and
+    (vector?
+     value)
+
+    (=
+     :lift
+     (first
+      value))
+
+    (=
+     2
+     (count
+      value)))
+    (second
+     value)
+    value))
+
 (defn- predicate-match?
   [document predicate]
   (let [[op
@@ -1535,7 +1555,8 @@
       (let [[key value]
             args]
         (=
-         value
+         (query-value
+          value)
          (get
           document
           key)))
