@@ -16,6 +16,7 @@
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.home :as home]
    [net.humanhelp.schema :as schema]
+   [net.humanhelp.site.app :as site]
    [net.humanhelp.ui :as ui]
    [net.humanhelp.worker :as worker]))
 
@@ -33,6 +34,11 @@
     (is (vector? humanhelp/routes))
     (is (seq humanhelp/routes))
     (is (ifn? humanhelp/handler)))
+
+  (testing "the production /app module is the real HumanHelp site module"
+    (is (identical?
+         site/module
+         app/module)))
 
   (testing "the application modules required by the top-level entrypoint are registered"
     (is (contributes-module? app/module))
@@ -58,11 +64,28 @@
           humanhelp/initial-system)))))
 
 (deftest application-live-rules-assemble-test
-  (let [rules
-        (humanhelp/gesso-live-rules)]
-    (is (vector? rules))
-    (is (seq rules)
-        "HumanHelp currently has Live-enabled application modules; losing every Live rule should fail the assembly smoke test.")))
+  (testing "Live rules are collected from the registered production modules"
+    (let [expected-rules
+          (vec
+           (mapcat
+            :live-rules
+            humanhelp/modules))
+
+          actual-rules
+          (humanhelp/gesso-live-rules)]
+      (is (vector? actual-rules))
+      (is (= expected-rules
+             actual-rules))))
+
+  (testing "an application with no production Live rules is a valid assembly state"
+    ;; The removable example application is no longer the production /app
+    ;; module. Until the real site explicitly contributes Live rules, an empty
+    ;; collection is correct and must not be mistaken for an assembly failure.
+    (is (every?
+         #(or
+           (nil? (:live-rules %))
+           (sequential? (:live-rules %)))
+         humanhelp/modules))))
 
 (deftest runtime-component-order-is-explicit-test
   (testing "HumanHelp keeps Live between database/background setup and the Aleph server"
