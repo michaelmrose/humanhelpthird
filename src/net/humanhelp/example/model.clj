@@ -27,7 +27,7 @@
    are carried there."
   (:require
    [clojure.string :as str]
-   [com.biffweb.xtdb :as biff.xtdb]
+   [gesso.model.core :as gmodel]
    [malli.core :as m]
    [malli.error :as me]
    [xtdb.api :as xt]))
@@ -1166,8 +1166,11 @@
          (keys ctx)))}))))
 
 (defn q
+  "Run one Human Help example query through Gesso's progression-aware model
+   read boundary while preserving this namespace's explicit XTDB context
+   validation."
   [ctx query]
-  (biff.xtdb/q
+  (gmodel/q
    (query-context! ctx)
    query))
 
