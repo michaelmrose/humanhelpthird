@@ -9,6 +9,7 @@
    by the caller before the final atomic transaction is committed."
   (:require
    [gesso.model.core :as model]
+   [gesso.model.tx :as model.tx]
    [net.humanhelp.site.model.organization.domain :as domain]
    [net.humanhelp.site.model.organization.fx :as org.fx]
    [net.humanhelp.site.model.organization.graph :as org.graph]
@@ -400,14 +401,55 @@
    document))
 
 ;; =============================================================================
-;; Organization mutation planning
+;; Organization mutation planning / execution
 ;; =============================================================================
+
+(defn- transaction-plan
+  [{:keys [transaction-fragment transaction-options]}]
+  (merge
+   transaction-fragment
+   transaction-options))
+
+(defn- commit-planned!
+  "Commit one already-planned Organization operation through the shared Gesso
+   model transaction boundary.
+
+   Organization planners remain the semantic source of truth. This helper adds
+   only stable commit status and transaction-established progression to the
+   planner result; raw transaction fragments and XTDB internals remain private."
+  [ctx {:keys [result] :as planned}]
+  (let [transaction
+        (model.tx/transact!
+         ctx
+         (transaction-plan planned))]
+    (cond->
+     (assoc
+      result
+      :commit/status
+      (:commit/status transaction))
+
+      (contains? transaction :progression)
+      (assoc
+       :progression
+       (:progression transaction)))))
 
 (defn plan-create-organization
   [ctx input]
   (org.fx/plan-create-organization
    ctx
    input))
+
+(defn create-organization
+  "Authoritatively creates one Organization in a single Gesso model
+   transaction.
+
+   input is the same semantic input accepted by plan-create-organization."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-create-organization
+    ctx
+    input)))
 
 (defn plan-create-organization-group
   [ctx input]
@@ -420,6 +462,18 @@
   (org.fx/plan-create-location
    ctx
    input))
+
+(defn create-location
+  "Authoritatively creates one Location beneath an existing operational
+   Organization/Organization Group in a single Gesso model transaction.
+
+   input is the same semantic input accepted by plan-create-location."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-create-location
+    ctx
+    input)))
 
 (defn plan-rename-organization
   [ctx input]
