@@ -22,6 +22,7 @@
    [gesso.core :as g]
    [gesso.live.core :as live]
    [gesso.live.optimistic.protocol :as optimistic.protocol]
+   [gesso.live.progression :as progression]
    [gesso.live.ui :as live.ui]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.example.live :as app-live]
@@ -286,6 +287,66 @@
    ctx
    change))
 
+(defn- committed-transaction
+  "Return the authoritative transaction metadata from one successful demo model
+   mutation.
+
+   Successful mutations in the removable example are expected to cross Gesso
+   Live's transaction boundary. Failing closed here prevents a future model
+   regression from silently dropping the commit progression required by actor
+   read-your-writes rendering and observer convergence."
+  [result]
+  (or (:transaction result)
+      (throw
+       (ex-info
+        "Human Help successful mutation is missing authoritative transaction metadata."
+        {:status (:status result)
+         :result-keys (when (map? result)
+                        (set (keys result)))}))))
+
+(defn- committed-ctx
+  "Return the transaction-derived request context for a successful mutation."
+  [result]
+  (or (:ctx (committed-transaction result))
+      (throw
+       (ex-info
+        "Human Help committed mutation is missing its progression-aware context."
+        {:transaction-keys
+         (set (keys (committed-transaction result)))}))))
+
+(defn- transaction-bound-change
+  "Attach trusted commit metadata to one semantic change.
+
+   The transaction-established progression, not an application revision and not
+   the incoming request progression, is the authority carried by the primary
+   change. This mirrors gesso.live/transact-and-notify! for the removable demo's
+   temporary two-stage model boundary."
+  [result change]
+  (let [{:keys [consistency progression]} (committed-transaction result)]
+    (cond-> change
+      (seq consistency)
+      (assoc :gesso.live/consistency consistency)
+
+      progression
+      (assoc :progression progression))))
+
+(defn- receiver-ctx-after-commit
+  "Compose one committed transaction requirement into a receiver-specific ctx.
+
+   Connected-client callbacks have their own authenticated/request context, so
+   they cannot reuse the actor's transaction :ctx wholesale. Compose only the
+   authoritative progression requirement, preserving the receiver identity and
+   any earlier requirement it already carries."
+  [receiver-ctx result]
+  (let [commit-progression (:progression (committed-transaction result))]
+    (if commit-progression
+      (live/with-progression
+       receiver-ctx
+       (progression/compose
+        (live/progression receiver-ctx)
+        commit-progression))
+      receiver-ctx)))
+
 ;; -----------------------------------------------------------------------------
 ;; HTML / OOB helpers
 ;; -----------------------------------------------------------------------------
@@ -371,32 +432,36 @@
    - new-request toast
 
    It deliberately does not replace the request list. Observers should not have
-   their visible list jump on another user's create."
-  [request revision]
-  (fn [receiver-ctx]
-    (let [view-state (receiver-view-state-for-new-request
-                      receiver-ctx
-                      revision)
-          toolbar    (render-toolbar-node receiver-ctx view-state)]
-      (views/oob-response
-       (views/replace-toolbar-oob toolbar)
-       (g/render-toast-oob
-        {:variant     :info
-         :duration    5000
-         :title       "New request received"
-         :description (app-live/request-toast-description request)})))))
+   their visible list jump on another user's create. The receiver-specific read
+   context is conservatively composed with the creating transaction's
+   authoritative progression before the toolbar is rendered."
+  [result]
+  (let [{:keys [request revision]} result]
+    (fn [receiver-ctx]
+      (let [receiver-ctx' (receiver-ctx-after-commit receiver-ctx result)
+            view-state    (receiver-view-state-for-new-request
+                           receiver-ctx'
+                           revision)
+            toolbar       (render-toolbar-node receiver-ctx' view-state)]
+        (views/oob-response
+         (views/replace-toolbar-oob toolbar)
+         (g/render-toast-oob
+          {:variant     :info
+           :duration    5000
+           :title       "New request received"
+           :description (app-live/request-toast-description request)}))))))
 
 (defn- send-new-request-ui-safely!
-  [request revision user]
+  [result user]
   (try
     (client-plumbing/send-to-scope-except-user!
      app-live/notification-scope
      (:user/id user)
-     (new-request-client-oob request revision))
+     (new-request-client-oob result))
     (catch Exception e
       (println "[humanhelp] send-new-request-ui! failed"
                {:message    (.getMessage e)
-                :request/id (:request/id request)}))))
+                :request/id (get-in result [:request :request/id])}))))
 
 (defn- send-reset-toast-safely!
   []
@@ -405,6 +470,25 @@
     (catch Exception e
       (println "[humanhelp] send-reset-toast! failed"
                {:message (.getMessage e)}))))
+
+(defn- notify-reset-safely!
+  [result user]
+  (try
+    (notify!
+     (committed-ctx result)
+     (transaction-bound-change
+      result
+      (app-live/demo-reset-change
+       {:revision (:revision result)
+        :actor    user})))
+    (catch Exception e
+      ;; Reset is already committed. Delivery failure must not make the HTTP
+      ;; boundary report that the mutation itself failed.
+      (println
+       "[humanhelp] demo reset notification failed"
+       {:message     (.getMessage e)
+        :revision    (:revision result)
+        :progression (get-in result [:transaction :progression])}))))
 
 ;; -----------------------------------------------------------------------------
 ;; Page
@@ -478,17 +562,19 @@
 
    This is intentionally synchronous in the POST response so it cannot race a
    separate client-side refresh request."
-  [ctx {:keys [request revision view-state]}]
-  (let [user        (current-user ctx)
+  [ctx {:keys [result view-state]}]
+  (let [{:keys [request revision]} result
+        ctx'        (committed-ctx result)
+        user        (current-user ctx')
         view-state' (assoc view-state
                            :visible-revision revision)
-        fragments   (board-fragments ctx view-state')]
+        fragments   (board-fragments ctx' view-state')]
     (html
      (with-board-state-oob
-       ctx
+       ctx'
        view-state'
        (views/create-request-success
-        ctx
+        ctx'
         (merge
          {:user    user
           :request request}
@@ -524,21 +610,19 @@
          :values input
          :errors errors}))
 
-      (let [{:keys [request revision]}
+      (let [result
             (model/create-request!
              ctx
              {:user  user
               :input input})]
 
         (send-new-request-ui-safely!
-         request
-         revision
+         result
          user)
 
         (create-request-success-response
          ctx
-         {:request    request
-          :revision   revision
+         {:result     result
           :view-state view-state})))))
 
 ;; -----------------------------------------------------------------------------
@@ -600,25 +684,30 @@
       :request/rejected))
 
 (defn- notify-transition-safely!
-  [ctx {:keys [action request previous revision actor]}]
+  [result {:keys [action request previous revision actor]}]
   (try
     (notify!
-     ctx
-     (app-live/request-transition-change
-      {:action   action
-       :request  request
-       :previous previous
-       :revision revision
-       :actor    actor}))
+     (committed-ctx result)
+     (transaction-bound-change
+      result
+      (app-live/request-transition-change
+       {:action   action
+        :request  request
+        :previous previous
+        :revision revision
+        :actor    actor})))
     (catch Exception e
-      ;; Observer delivery must not convert an already-committed model mutation
-      ;; into an HTTP failure. The actor still receives its canonical settlement.
+      ;; The model transaction is already committed. Observer delivery must not
+      ;; convert that committed mutation into an HTTP/model failure. The emitted
+      ;; primary change is nevertheless bound to the exact commit progression so
+      ;; successful delivery drives progression-safe fragment refreshes.
       (println
        "[humanhelp] request transition notification failed"
-       {:message    (.getMessage e)
-        :action     action
-        :request/id (:request/id request)
-        :revision   revision}))))
+       {:message     (.getMessage e)
+        :action      action
+        :request/id  (:request/id request)
+        :revision    revision
+        :progression (get-in result [:transaction :progression])}))))
 
 (def optimistic-command-param
   "HTMX parameter installed by Gesso's protocol-v3 optimistic browser bridge."
@@ -713,7 +802,7 @@
                 :user       user})]
           (when (= :ok (:status result))
             (notify-transition-safely!
-             ctx
+             result
              {:action   action
               :request  (:request result)
               :previous (:previous result)
@@ -786,6 +875,12 @@
   (get-in settlement [:authoritative :projection]))
 
 (defn- lifecycle-response-extra
+  "Render only direct-settlement extras that do not compete with managed Live.
+
+   Successful lifecycle mutations publish progression-bound Live invalidations
+   from inside the trusted operation. Their toolbar/list canonical rendering is
+   therefore left to managed fragment refresh; the direct response carries only
+   board-state continuity and user feedback."
   [ctx {:keys [action view-state settlement]}]
   (let [request    (settlement-request settlement)
         resolution (:resolution settlement)]
@@ -796,7 +891,6 @@
        ctx
        {:action     action
         :request    request
-        :toolbar    (render-toolbar-node ctx view-state)
         :view-state view-state})
 
       (contains? #{:rejected :failed} resolution)
@@ -881,27 +975,24 @@
   [ctx]
   (let [user       (current-user ctx)
         result     (model/reset-demo-state! ctx)
+        ctx'       (committed-ctx result)
         view-state (assoc (request-view-state ctx)
                           :visible-revision
                           (:revision result))]
-    (notify!
-     ctx
-     (app-live/demo-reset-change
-      {:revision (:revision result)
-       :actor    user}))
+    (notify-reset-safely! result user)
 
     (send-reset-toast-safely!)
 
     (html
      (with-board-state-oob
-       ctx
+       ctx'
        view-state
        (views/reset-demo-result
         (merge
          {:user       user
           :result     result
           :view-state view-state}
-         (board-fragments ctx view-state)))))))
+         (board-fragments ctx' view-state)))))))
 
 ;; -----------------------------------------------------------------------------
 ;; Route handler map
