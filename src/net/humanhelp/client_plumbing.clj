@@ -25,6 +25,7 @@
    Feature-specific notification wording belongs in feature namespaces, e.g.
    net.humanhelp.humanhelp.live."
   (:require
+   [clojure.string :as str]
    [gesso.core :as g]
    [gesso.live.client :as live-client]
    [net.humanhelp.middleware :as mid]))
@@ -59,34 +60,64 @@
 ;; App identity
 ;; -----------------------------------------------------------------------------
 
+(defn- user-id-candidate
+  [ctx]
+  (some
+   (fn [[source value]]
+     (when (some? value)
+       {:source source
+        :value  value}))
+   [[:current-user/id (:current-user/id ctx)]
+    [:user/id (:user/id ctx)]
+    [[:user :xt/id] (get-in ctx [:user :xt/id])]
+    [[:session :uid] (get-in ctx [:session :uid])]
+    [[:session :user] (get-in ctx [:session :user])]]))
+
+(defn- canonical-user-id-value
+  [{:keys [source value]}]
+  (cond
+    (uuid? value)
+    (str value)
+
+    (and (string? value)
+         (not (str/blank? value)))
+    value
+
+    :else
+    (throw
+     (ex-info
+      "Connected HumanHelp client has an invalid authenticated user id."
+      {:error/type :net.humanhelp.client-plumbing/invalid-user-id
+       :identity/source source
+       :identity/value value}))))
+
 (defn current-user-id
   "Return the canonical authenticated user id used for client targeting.
 
    Connected-client scopes are an authority-sensitive routing boundary: the
    same authenticated user must resolve to the same key regardless of which
    display/profile fields happen to be present on ctx, and a malformed signed-in
-   request must never collapse into a shared demo identity.
+   request must never collapse into a shared or empty routing identity.
 
    Prefer explicit model/application identity, then Biff's authenticated session
-   uid. Legacy :session/:user is accepted as an id-shaped compatibility source.
+   uid. Legacy :session/:user is accepted only when it is itself id-shaped.
    Email addresses are deliberately not identity sources here.
 
-   Throws when no authenticated user id is available. Routes exposing this
-   adapter are already protected by wrap-signed-in, so reaching this failure is
-   a wiring/auth-context error rather than an anonymous-user mode."
+   UUIDs and non-blank strings are accepted. Once a higher-precedence identity
+   source is present, an invalid value fails closed instead of falling through to
+   a lower-precedence source that may be stale.
+
+   Throws when no authenticated user id is available or when the selected
+   identity source is malformed. Routes exposing this adapter are already
+   protected by wrap-signed-in, so either failure represents an auth-context or
+   wiring error rather than an anonymous-user mode."
   [ctx]
-  (let [user-id
-        (or (:current-user/id ctx)
-            (:user/id ctx)
-            (get-in ctx [:user :xt/id])
-            (get-in ctx [:session :uid])
-            (get-in ctx [:session :user]))]
-    (when-not (some? user-id)
-      (throw
-       (ex-info
-        "Connected HumanHelp client is missing an authenticated user id."
-        {:error/type :net.humanhelp.client-plumbing/missing-user-id})))
-    (str user-id)))
+  (if-let [candidate (user-id-candidate ctx)]
+    (canonical-user-id-value candidate)
+    (throw
+     (ex-info
+      "Connected HumanHelp client is missing an authenticated user id."
+      {:error/type :net.humanhelp.client-plumbing/missing-user-id}))))
 
 (defn current-user-email
   "Best-effort display email for app UI.
