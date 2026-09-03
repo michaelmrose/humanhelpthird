@@ -46,6 +46,7 @@
    Mutation authorization should use the dependency APIs."
   (:require
    [gesso.model.core :as model]
+   [gesso.model.tx :as model.tx]
    [net.humanhelp.site.model.membership.domain :as domain]
    [net.humanhelp.site.model.membership.fx :as membership.fx]
    [net.humanhelp.site.model.membership.graph :as membership.graph]
@@ -730,6 +731,49 @@
    scope))
 
 ;; =============================================================================
+;; Authoritative mutation commits
+;; =============================================================================
+
+(defn- transaction-plan
+  "Combines one Membership planner's transaction fragment and transaction
+   options into the complete plan consumed by gesso.model.tx/transact!.
+
+   Membership FX owns domain planning. gesso.model.tx owns the atomic commit
+   boundary. Keeping this assembly private prevents callers from depending on
+   Membership's transport/transaction representation."
+  [{:keys
+    [transaction-fragment
+     transaction-options]}]
+  (merge
+   transaction-fragment
+   transaction-options))
+
+(defn- commit-planned!
+  "Commits one already-planned Membership operation and returns its stable
+   semantic result plus commit status and authoritative progression."
+  [ctx {:keys [result]
+        :as planned}]
+  (let [transaction
+        (model.tx/transact!
+         ctx
+         (transaction-plan
+          planned))]
+    (cond->
+     (assoc
+      result
+      :commit/status
+      (:commit/status
+       transaction))
+
+      (contains?
+       transaction
+       :progression)
+      (assoc
+       :progression
+       (:progression
+        transaction)))))
+
+;; =============================================================================
 ;; Membership mutation planning
 ;; =============================================================================
 
@@ -738,6 +782,18 @@
   (membership.fx/plan-create-membership
    ctx
    input))
+
+(defn create-membership
+  "Authoritatively creates one durable User ↔ Organization Membership in one
+   atomic production-model transaction.
+
+   input is the same semantic input accepted by plan-create-membership."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-create-membership
+    ctx
+    input)))
 
 (defn plan-add-skill
   [ctx input]
@@ -778,6 +834,18 @@
   (membership.fx/plan-create-role-assignment
    ctx
    input))
+
+(defn create-role-assignment
+  "Authoritatively creates one role grant for an active Membership at an
+   operational Organization scope in one atomic production-model transaction.
+
+   input is the same semantic input accepted by plan-create-role-assignment."
+  [ctx input]
+  (commit-planned!
+   ctx
+   (plan-create-role-assignment
+    ctx
+    input)))
 
 (defn plan-revoke-role-assignment
   [ctx input]
