@@ -144,7 +144,7 @@
                  canonical
                  url)]
       [:link
-       {:ref
+       {:rel
         "canonical"
 
         :href
