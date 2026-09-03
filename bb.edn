@@ -125,25 +125,7 @@
           (shell "clj" "-M:dev" "dev")
 
           :local
-          (shell "clj" "-M:local-gesso:dev" "dev"))))
-
-    (defn split-local-test-arg
-      [args]
-      (let [args (vec args)]
-        {:local? (boolean (some #{"local"} args))
-         :args   (vec (remove #{"local"} args))}))
-
-    (defn run-tests!
-      [args]
-      (let [{:keys [local? args]}
-            (split-local-test-arg args)
-
-            alias
-            (if local?
-              "-M:local-gesso:test"
-              "-M:test")]
-        (apply shell
-               (into ["clj" alias] args)))))
+          (shell "clj" "-M:local-gesso:dev" "dev")))))
 
   to-template
   {:doc "Regenerate the deps-new template project from this repo."
@@ -196,6 +178,26 @@
    (start-dev! *command-line-args*)}
 
   test
-  {:doc "Run tests. A standalone 'local' token selects ../gesso; all other arguments are forwarded to clj -M:test."
+  {:doc "Run the full HumanHelp test gate. Pass 'local' to test against ../gesso."
    :task
-   (run-tests! *command-line-args*)}}}
+   (apply shell
+          (into ["bb"
+                 "script/humanhelp_test.clj"
+                 "all"]
+                *command-line-args*))}
+
+  test:jvm
+  {:doc "Run the HumanHelp JVM test gate. Pass 'local' to test against ../gesso. Included by `bb test`."
+   :task
+   (apply shell
+          (into ["bb"
+                 "script/humanhelp_test.clj"
+                 "jvm"]
+                *command-line-args*))}
+
+  test:integrity
+  {:doc "Verify namespace/path integrity. Included by `bb test` and `bb test:jvm`."
+   :task
+   (shell "bb"
+          "script/humanhelp_test.clj"
+          "integrity")}}}
