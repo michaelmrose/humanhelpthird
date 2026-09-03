@@ -10,6 +10,7 @@
    [gesso.core :as g]
    [com.biffweb.fx :as fx]
    [gesso.model.tx :as model.tx]
+   [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.middleware :as mid]
    [net.humanhelp.site.mock-data :as mock-data]
    [net.humanhelp.site.model.organization.core :as organization]
@@ -130,29 +131,36 @@
 ;; Current User
 ;; =============================================================================
 
-(defn- session-user-id
+(defn- authenticated-user-id
+  "Return the canonical authenticated HumanHelp User UUID.
+
+   Identity-source precedence is owned by client-plumbing/current-user-id so
+   production model reads and connected-client routing cannot disagree about
+   the principal represented by one request. The site User model requires UUID
+   identity, so a syntactically valid client identity that is not a UUID fails
+   here rather than being treated as a missing or lower-priority identity."
   [ctx]
-  (->uuid
-   (or
-    (:current-user/id ctx)
-    (:user/id ctx)
-    (get-in ctx [:user :xt/id])
-    (get-in ctx [:session :uid])
-    (get-in ctx [:session :user]))))
+  (let [canonical-id
+        (client-plumbing/current-user-id ctx)
+
+        user-id
+        (->uuid canonical-id)]
+    (or
+     user-id
+     (throw
+      (ex-info
+       "Signed-in HumanHelp request contained a non-UUID User id."
+       {:error/type
+        :site.app/invalid-user-id
+
+        :user/id
+        canonical-id})))))
 
 (defn- current-user
   [ctx]
-  (let [user-id
-        (or
-         (session-user-id ctx)
-         (throw
-          (ex-info
-           "Signed-in HumanHelp request did not contain a UUID User id."
-           {:error/type
-            :site.app/missing-user-id})))]
-    (user/require-user
-     ctx
-     user-id)))
+  (user/require-user
+   ctx
+   (authenticated-user-id ctx)))
 
 ;; =============================================================================
 ;; Temporary development Location source
