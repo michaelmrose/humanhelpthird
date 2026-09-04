@@ -1,11 +1,12 @@
 (ns net.humanhelp.app
   "Generic /app entrypoint.
 
-   HumanHelp points /app at the real site application. The removable example
-   app remains available under net.humanhelp.example.* for Gesso integration
-   work, but it is not the production application module."
+   During the Gesso/Choreo proving phase, HumanHelp deliberately points /app at
+   the example application. The example UI consumes the production site models
+   and model-owned choreographies, making it the richer immediate integration
+   surface while the production site UI remains unfinished."
   (:require
-   [net.humanhelp.site.app :as site]))
+   [net.humanhelp.example.app :as example]))
 
 (def module
-  site/module)
+  example/module)
