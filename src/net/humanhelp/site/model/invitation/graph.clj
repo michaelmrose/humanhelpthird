@@ -26,6 +26,7 @@
    No mutation, authorization, token generation, token hashing, or transaction
    composition belongs here."
   (:require
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.invitation.domain :as invitation]
@@ -114,7 +115,7 @@
 
 (defn- q
   [ctx query]
-  (model/q
+  (biff.xtdb/q
    (query-context! ctx)
    query))
 
