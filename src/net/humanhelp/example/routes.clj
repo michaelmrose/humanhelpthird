@@ -593,33 +593,6 @@
               {:request-id request-id
                :operation operation}))))
 
-(defn action-url
-  "Legacy adapter retained only for the retired example Request card namespace.
-
-   Active example code must call operation-url with a production semantic
-   operation. Delete this adapter together with the retired card rather than
-   extending it with new lifecycle semantics."
-  [request-id action]
-  (case action
-    :claim
-    (operation-url request-id :request/claim)
-
-    :unclaim
-    (operation-url request-id :request/unclaim)
-
-    :take-over
-    (operation-url request-id :request/mark-on-the-way)
-
-    :done
-    (operation-url request-id :request/complete)
-
-    :cancel
-    (operation-url request-id :request/cancel)
-
-    (throw
-     (ex-info "Unknown legacy Human Help request action."
-              {:request-id request-id
-               :action action}))))
 
 ;; -----------------------------------------------------------------------------
 ;; Dev/demo
