@@ -106,15 +106,6 @@
 (def reassign-request-id
   :humanhelp/reassign-request)
 
-;; Temporary source-compatibility aliases while app.clj/request-card are cut over
-;; in the immediately following revisions. These aliases do not create alternate
-;; semantic operations; both names resolve to the canonical production route id.
-(def take-over-request-id
-  mark-on-the-way-request-id)
-
-(def done-request-id
-  complete-request-id)
-
 (def cancel-request-id
   :humanhelp/cancel-request)
 
@@ -169,13 +160,6 @@
 
 (def reassign-request-route
   "/requests/:request-id/reassign")
-
-;; Temporary source-compatibility aliases for the old example code.
-(def take-over-request-route
-  mark-on-the-way-request-route)
-
-(def done-request-route
-  complete-request-route)
 
 (def cancel-request-route
   "/requests/:request-id/cancel")
@@ -578,13 +562,6 @@
   [request-id]
   (path (request-route reassign-request-route request-id)))
 
-;; Temporary source-compatibility aliases for the old example component.
-(def take-over-request-url
-  mark-on-the-way-request-url)
-
-(def done-request-url
-  complete-request-url)
-
 (defn cancel-request-url
   [request-id]
   (path (request-route cancel-request-route request-id)))
@@ -617,11 +594,11 @@
                :operation operation}))))
 
 (defn action-url
-  "Temporary old-example action adapter.
+  "Legacy adapter retained only for the retired example Request card namespace.
 
-   New code must call operation-url with the production semantic operation. This
-   function exists only so the currently installed request-card/app continue to
-   assemble during the next two whole-file cutovers."
+   Active example code must call operation-url with a production semantic
+   operation. Delete this adapter together with the retired card rather than
+   extending it with new lifecycle semantics."
   [request-id action]
   (case action
     :claim
@@ -640,7 +617,7 @@
     (operation-url request-id :request/cancel)
 
     (throw
-     (ex-info "Unknown temporary Human Help request action."
+     (ex-info "Unknown legacy Human Help request action."
               {:request-id request-id
                :action action}))))
 
