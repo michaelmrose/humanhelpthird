@@ -105,12 +105,9 @@
 (defn- create-request-input
   "Build the production Request create input from HTTP form params.
 
-   Production Request owns authenticated requestor identity and one fixed
-   Organization/Location-backed content shape.  The still-installed create form
-   uses the old transport name :area for one revision; interpret that value only
-   as production :location-detail.  :customer-name is deliberately ignored:
-   Requestor identity/display data belongs to the authenticated production User,
-   not to mutable Request form input."
+   The example form now speaks the public production Request content vocabulary
+   directly. Authenticated requestor identity remains server-owned and is never
+   accepted as editable form data."
   [ctx]
   {:organization-id
    mock-data/organization-id
@@ -127,43 +124,26 @@
      (param ctx :details)
 
      :location-detail
-     (or
-      (param ctx :location-detail)
-      (param ctx :area))})})
+     (param ctx :location-detail)})})
 
 (defn- create-request-view-values
-  "Return the temporary form-facing values for the currently installed create
-   dialog.
-
-   The production semantic input already uses :location-detail.  Until the next
-   view revision renames the old :area control and removes :customer-name, keep
-   only this transport-level projection at the HTTP/view boundary."
-  [ctx input]
+  "Return production-shaped values for create-request validation redisplay."
+  [input]
   {:title
    (get-in input [:content :title])
 
-   :area
+   :location-detail
    (get-in input [:content :location-detail])
 
    :details
-   (get-in input [:content :details])
-
-   :customer-name
-   (param ctx :customer-name)})
+   (get-in input [:content :details])})
 
 (defn- create-request-errors
-  "Return production Request content errors in the temporary current form key
-   vocabulary."
+  "Return public production Request content errors unchanged."
   [input]
-  (let [errors
-        (request/content-errors
-         (:content input))]
-    (not-empty
-     (cond-> errors
-       (contains? errors :location-detail)
-       (->
-        (assoc :area (:location-detail errors))
-        (dissoc :location-detail))))))
+  (not-empty
+   (request/content-errors
+    (:content input))))
 
 ;; -----------------------------------------------------------------------------
 ;; Current user
@@ -592,7 +572,6 @@
 
          :values
          (create-request-view-values
-          ctx
           input)
 
          :errors
