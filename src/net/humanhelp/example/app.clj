@@ -261,6 +261,22 @@
                 {:ctx-keys (when (map? ctx)
                              (set (keys ctx)))}))))
 
+(defn wrap-production-fixtures
+  "Ensure the fixed production Organization/Location fixtures exist before an
+   example-app handler runs.
+
+   The example app is the active proving surface for production models, so it
+   must not depend on the retired site UI having been visited first merely to
+   seed those production dependencies. mock-data/ensure! is idempotent for an
+   already-initialized database and, when it must commit fixture creation,
+   returns the progression-aware post-commit ctx that every downstream read or
+   mutation must use."
+  [handler]
+  (fn [ctx]
+    (let [{ctx' :ctx}
+          (mock-data/ensure! ctx)]
+      (handler ctx'))))
+
 (defn- board-render-options
   [ctx view-state]
   {:user       (current-user ctx)
@@ -314,10 +330,10 @@
            {:error/type :humanhelp.example/missing-request-progression
             :result-keys (when (map? result) (set (keys result)))})))]
     (live/with-progression
-      ctx
-      (progression/compose
-       (live/progression ctx)
-       committed-progression))))
+     ctx
+     (progression/compose
+      (live/progression ctx)
+      committed-progression))))
 
 ;; -----------------------------------------------------------------------------
 ;; HTML / OOB helpers
@@ -749,4 +765,5 @@
   {:live-rules app-live/live-rules
    :routes     (routes/route-table
                 handlers
-                {:middleware [mid/wrap-signed-in]})})
+                {:middleware [mid/wrap-signed-in
+                              wrap-production-fixtures]})})
