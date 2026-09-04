@@ -679,12 +679,6 @@
     :request/complete "Done"
     :request/cancel "Cancel"
     :request/reassign "Reassign"
-    ;; Temporary labels used only by the not-yet-cut-over app handlers.
-    :claim "Claim"
-    :unclaim "Unclaim"
-    :take-over "On the way"
-    :done "Done"
-    :cancel "Cancel"
     (-> action name (str/replace "-" " ") str/capitalize)))
 
 (defn- request-reference
@@ -697,19 +691,19 @@
   [action request]
   (let [reference (request-reference request)]
     (cond
-      (contains? #{:request/claim :claim} action)
+      (= :request/claim action)
       (str "Claimed request " reference ".")
 
-      (contains? #{:request/unclaim :unclaim} action)
+      (= :request/unclaim action)
       (str "Unclaimed request " reference ".")
 
-      (contains? #{:request/mark-on-the-way :take-over} action)
+      (= :request/mark-on-the-way action)
       (str "Marked request " reference " on the way.")
 
-      (contains? #{:request/complete :done} action)
+      (= :request/complete action)
       (str "Marked request " reference " done.")
 
-      (contains? #{:request/cancel :cancel} action)
+      (= :request/cancel action)
       (str "Cancelled request " reference ".")
 
       (= :request/reassign action)
