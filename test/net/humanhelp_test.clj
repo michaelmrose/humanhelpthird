@@ -7,6 +7,11 @@
    longer compiles against the current Gesso/Biff stack, loading this test
    namespace must fail before any assertion runs.
 
+   During the temporary HumanHelp proving-app cutover, both the unfinished site
+   UI module and the production-model-backed example module are loaded here so
+   the top-level /app switch can be made as a separate whole-file revision
+   without weakening application assembly checks.
+
    These tests do not start XTDB, Aleph, or Gesso Live. The heavier
    runtime/integration suites own those boundaries."
   (:require
@@ -16,6 +21,7 @@
    [net.humanhelp :as humanhelp]
    [net.humanhelp.app :as app]
    [net.humanhelp.client-plumbing :as client-plumbing]
+   [net.humanhelp.example.app :as example]
    [net.humanhelp.home :as home]
    [net.humanhelp.schema :as schema]
    [net.humanhelp.site.app :as site]
@@ -28,6 +34,12 @@
     #(identical? module %)
     humanhelp/modules)))
 
+(defn- supported-app-module?
+  [module]
+  (or
+   (identical? module site/module)
+   (identical? module example/module)))
+
 (deftest application-entrypoint-assembles-test
   (testing "the top-level Ring application is assembled without starting runtime components"
     (is (vector? humanhelp/modules))
@@ -36,10 +48,15 @@
     (is (seq humanhelp/routes))
     (is (ifn? humanhelp/handler)))
 
-  (testing "the production /app module is the real HumanHelp site module"
-    (is (identical?
-         site/module
-         app/module)))
+  (testing "the global /app module is one of the two explicit HumanHelp application surfaces during cutover"
+    (is (supported-app-module? app/module)))
+
+  (testing "the example proving module is structurally ready to become the global /app surface"
+    (is (map? example/module))
+    (is (vector? (:routes example/module)))
+    (is (seq (:routes example/module)))
+    (is (vector? (:live-rules example/module)))
+    (is (seq (:live-rules example/module))))
 
   (testing "the application modules required by the top-level entrypoint are registered"
     (is (contributes-module? app/module))
@@ -64,7 +81,7 @@
           humanhelp/initial-system)))))
 
 (deftest application-live-rules-assemble-test
-  (testing "Live rules are collected from the registered production modules"
+  (testing "Live rules are collected from the registered application modules"
     (let [expected-rules
           (vec
            (mapcat
@@ -77,10 +94,7 @@
       (is (= expected-rules
              actual-rules))))
 
-  (testing "an application with no production Live rules is a valid assembly state"
-    ;; The removable example application is no longer the production /app
-    ;; module. Until the real site explicitly contributes Live rules, an empty
-    ;; collection is correct and must not be mistaken for an assembly failure.
+  (testing "registered modules either omit Live rules or contribute a sequential rule collection"
     (is (every?
          #(or
            (nil? (:live-rules %))
