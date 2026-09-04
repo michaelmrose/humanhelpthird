@@ -90,11 +90,6 @@
                (str/includes? email "@"))
       email)))
 
-(defn account-email
-  "Backward-compatible name for create-request form defaults."
-  [user]
-  (user-email user))
-
 (defn muted
   [text]
   (g/muted-text
@@ -207,32 +202,38 @@
       :placeholder placeholder})}))
 
 (defn create-request-form
-  [ctx {:keys [user values errors]}]
-  (let [values (or values {})
-        errors (or errors {})]
+  [ctx {:keys [values errors]}]
+  (let [values
+        (or values {})
+
+        ;; Revision 517 still redisplays production :location-detail validation
+        ;; through the temporary :area key.  Accept that key only as a one-step
+        ;; view fallback while the submitted control itself already uses the
+        ;; production Request vocabulary.  The HTTP compatibility projection is
+        ;; removed in the following app revision.
+        location-detail
+        (or (:location-detail values)
+            (:area values)
+            "")
+
+        errors
+        (cond-> (or errors {})
+          (and (nil? (:location-detail errors))
+               (:area errors))
+          (assoc :location-detail (:area errors)))]
     (g/form
      ctx
      {:post  (routes/create-request-url)
       :swap  "none"
       :attrs {:hx-include (board-state-selector)}}
      (create-field
-      {:id        "humanhelp-create-customer-name"
-       :label     "Your name"
-       :name      "customer-name"
-       :value     (or (:customer-name values)
-                      (account-email user)
-                      "")
-       :errors    errors
-       :error-key :customer-name})
-
-     (create-field
-      {:id          "humanhelp-create-area"
-       :label       "Area"
-       :name        "area"
-       :value       (or (:area values) "")
+      {:id          "humanhelp-create-location-detail"
+       :label       "Location detail"
+       :name        "location-detail"
+       :value       location-detail
        :placeholder "Garden"
        :errors      errors
-       :error-key   :area})
+       :error-key   :location-detail})
 
      (create-field
       {:id          "humanhelp-create-title"
