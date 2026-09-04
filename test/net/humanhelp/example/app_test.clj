@@ -15,6 +15,7 @@
    [gesso.live.optimistic.protocol :as protocol]
    [gesso.live.ui :as live.ui]
    [net.humanhelp.example.app :as app]
+   [net.humanhelp.example.board :as board]
    [net.humanhelp.example.model :as model]
    [net.humanhelp.example.optimistic :as optimistic]
    [net.humanhelp.example.routes :as routes]
@@ -36,6 +37,13 @@
 
 (def execution-id
   (identity/execution-id "humanhelp-example-app-execution-508"))
+
+(def canonical-view-state
+  {:search ""
+   :created-order :newest
+   :mine-first? false
+   :unclaimed-first? false
+   :show-terminal? false})
 
 (def lifecycle-handlers
   [{:operation :request/claim
@@ -105,7 +113,8 @@
   [f]
   (with-redefs
    [model/parse-visible-revision (fn [_] nil)
-    model/normalize-view-state (fn [_ view-state] view-state)
+    model/normalize-view-state (fn [_ _] canonical-view-state)
+    board/normalize-view-state (fn [_] canonical-view-state)
     views/request-lifecycle-extras
     (fn [_ props]
       [:lifecycle-extra props])
@@ -169,13 +178,7 @@
                 [:lifecycle-extra
                  {:action operation
                   :request {:request/id request-id}
-                  :view-state
-                  {:search ""
-                   :visible-revision nil
-                   :created-order nil
-                   :mine-first? nil
-                   :unclaimed-first? nil
-                   :show-terminal? nil}}]]
+                  :view-state canonical-view-state}]]
                response))))))
 
 (deftest lifecycle-route-rejects-operation-substitution-before-authority-test
