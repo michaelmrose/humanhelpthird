@@ -3,8 +3,8 @@
 
    This namespace assembles HTTP handlers from the production-backed example
    board/Live/optimistic/view seams. net.humanhelp.example.model remains only as
-   temporary legacy support for create-request input/mutation and demo reset; it
-   no longer defines board state or Request lifecycle execution.
+   temporary legacy support for demo reset; production Request creation and
+   lifecycle execution now go through the public production Request model.
 
    It should not own generic Gesso Live plumbing. Human Help live panels,
    fragment rendering, stream responses, change constructors, and toast helpers
@@ -27,6 +27,8 @@
    [net.humanhelp.example.routes :as routes]
    [net.humanhelp.example.views :as views]
    [net.humanhelp.middleware :as mid]
+   [net.humanhelp.site.mock-data :as mock-data]
+   [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.model.user.core :as user])
   (:import
    [java.util UUID]))
@@ -101,16 +103,67 @@
   (board/normalize-view-state view-state))
 
 (defn- create-request-input
-  "Extract create-request form input from request params.
+  "Build the production Request create input from HTTP form params.
 
-   This deliberately uses the HTTP-boundary param helper so repeated browser
-   params are normalized before reaching the model parser."
+   Production Request owns authenticated requestor identity and one fixed
+   Organization/Location-backed content shape.  The still-installed create form
+   uses the old transport name :area for one revision; interpret that value only
+   as production :location-detail.  :customer-name is deliberately ignored:
+   Requestor identity/display data belongs to the authenticated production User,
+   not to mutable Request form input."
   [ctx]
-  (model/parse-create-request-input
-   {:title         (param ctx :title)
-    :area          (param ctx :area)
-    :details       (param ctx :details)
-    :customer-name (param ctx :customer-name)}))
+  {:organization-id
+   mock-data/organization-id
+
+   :location-id
+   mock-data/default-location-id
+
+   :content
+   (request/normalize-content
+    {:title
+     (param ctx :title)
+
+     :details
+     (param ctx :details)
+
+     :location-detail
+     (or
+      (param ctx :location-detail)
+      (param ctx :area))})})
+
+(defn- create-request-view-values
+  "Return the temporary form-facing values for the currently installed create
+   dialog.
+
+   The production semantic input already uses :location-detail.  Until the next
+   view revision renames the old :area control and removes :customer-name, keep
+   only this transport-level projection at the HTTP/view boundary."
+  [ctx input]
+  {:title
+   (get-in input [:content :title])
+
+   :area
+   (get-in input [:content :location-detail])
+
+   :details
+   (get-in input [:content :details])
+
+   :customer-name
+   (param ctx :customer-name)})
+
+(defn- create-request-errors
+  "Return production Request content errors in the temporary current form key
+   vocabulary."
+  [input]
+  (let [errors
+        (request/content-errors
+         (:content input))]
+    (not-empty
+     (cond-> errors
+       (contains? errors :location-detail)
+       (->
+        (assoc :area (:location-detail errors))
+        (dissoc :location-detail))))))
 
 ;; -----------------------------------------------------------------------------
 ;; Current user
@@ -307,22 +360,35 @@
       progression
       (assoc :progression progression))))
 
-(defn- receiver-ctx-after-commit
-  "Compose one committed transaction requirement into a receiver-specific ctx.
+(defn- production-result-ctx
+  "Compose one successful production model result's authoritative progression
+   into the incoming request context.
 
-   Connected-client callbacks have their own authenticated/request context, so
-   they cannot reuse the actor's transaction :ctx wholesale. Compose only the
-   authoritative progression requirement, preserving the receiver identity and
-   any earlier requirement it already carries."
-  [receiver-ctx result]
-  (let [commit-progression (:progression (committed-transaction result))]
-    (if commit-progression
-      (live/with-progression
-        receiver-ctx
-        (progression/compose
-         (live/progression receiver-ctx)
-         commit-progression))
-      receiver-ctx)))
+   Public model operations intentionally expose stable commit/progression
+   semantics rather than Gesso Live's internal transaction context.  A
+   dependent render therefore reconstructs only the justified observation
+   frontier through the public progression contract."
+  [ctx result]
+  (when-not
+   (= :committed (:commit/status result))
+    (throw
+     (ex-info
+      "Human Help production Request mutation did not report a committed result."
+      {:error/type :humanhelp.example/request-not-committed
+       :result result})))
+  (let [committed-progression
+        (or
+         (:progression result)
+         (throw
+          (ex-info
+           "Human Help committed production Request mutation is missing authoritative progression."
+           {:error/type :humanhelp.example/missing-request-progression
+            :result-keys (when (map? result) (set (keys result)))})))]
+    (live/with-progression
+     ctx
+     (progression/compose
+      (live/progression ctx)
+      committed-progression))))
 
 ;; -----------------------------------------------------------------------------
 ;; HTML / OOB helpers
@@ -378,53 +444,6 @@
 ;; -----------------------------------------------------------------------------
 ;; Receiver-specific connected-client side effects
 ;; -----------------------------------------------------------------------------
-
-(defn- receiver-view-state-for-new-request
-  "Return the receiving browser's normalized presentation state.
-
-   Freshness is carried by the committed Gesso progression composed into the
-   receiver context, not by an application-local visible revision."
-  [ctx]
-  (normalized-view-state
-   ctx
-   (request-view-state ctx)))
-
-(defn- new-request-client-oob
-  "Return a receiver-specific pending fragment for a newly-created request.
-
-   This renders only observer UI:
-   - stale toolbar/count/refresh affordance
-   - new-request toast
-
-   It deliberately does not replace the request list. Observers should not have
-   their visible list jump on another user's create. The receiver-specific read
-   context is conservatively composed with the creating transaction's
-   authoritative progression before the toolbar is rendered."
-  [result]
-  (let [{:keys [request]} result]
-    (fn [receiver-ctx]
-      (let [receiver-ctx' (receiver-ctx-after-commit receiver-ctx result)
-            view-state    (receiver-view-state-for-new-request receiver-ctx')
-            toolbar       (render-toolbar-node receiver-ctx' view-state)]
-        (views/oob-response
-         (views/replace-toolbar-oob toolbar)
-         (g/render-toast-oob
-          {:variant     :info
-           :duration    5000
-           :title       "New request received"
-           :description (app-live/request-toast-description request)}))))))
-
-(defn- send-new-request-ui-safely!
-  [result user]
-  (try
-    (client-plumbing/send-to-scope-except-user!
-     app-live/notification-scope
-     (:user/id user)
-     (new-request-client-oob result))
-    (catch Exception e
-      (println "[humanhelp] send-new-request-ui! failed"
-               {:message    (.getMessage e)
-                :request/id (get-in result [:request :request/id])}))))
 
 (defn- send-reset-toast-safely!
   []
@@ -523,7 +542,7 @@
    and closes/resets the dialog synchronously."
   [ctx {:keys [result view-state]}]
   (let [{:keys [request]} result
-        ctx'        (committed-ctx result)
+        ctx'        (production-result-ctx ctx result)
         user        (current-user ctx')
         view-state' (normalized-view-state ctx' view-state)
         fragments   (board-fragments ctx' view-state')]
@@ -539,49 +558,63 @@
          fragments))))))
 
 (defn create-request!
-  "Create a new request from the modal dialog.
+  "Create a production Request from the modal dialog.
 
-   Creator behavior:
-   - request is created
-   - dialog closes
-   - visible list refreshes immediately from the committed progression-aware
-     context
+   The HTTP boundary performs transport extraction and optional pre-validation
+   through the public Request content helpers.  Authoritative identity,
+   Organization/Location validity, Request construction, atomic commit, and
+   semantic Live publication all belong to request.core/create and its model
+   dependencies.
 
-   Other connected users:
-   - receive receiver-specific connected-client OOB, excluding the creator
-   - see stale toolbar/count/toast
-   - their list does not jump until they refresh.
-
-   Important: create does not submit the model-backed :request/created live
-   invalidation. That live graph wakes toolbar only, which is observer behavior
-   and can race the creator's POST response."
+   The creator rereads the production board from the committed progression.
+   Other connected browsers learn the new Request through the canonical
+   production :request Live change emitted by Request FX; this route does not
+   synthesize a second example-specific Request notification."
   [ctx]
-  (let [user       (current-user ctx)
-        view-state (request-view-state ctx)
-        input      (create-request-input ctx)
-        errors     (model/create-request-errors input)]
-    (if (seq errors)
+  (let [user
+        (current-user ctx)
+
+        view-state
+        (request-view-state ctx)
+
+        input
+        (create-request-input ctx)
+
+        errors
+        (create-request-errors input)]
+    (if
+     (seq errors)
       (html
        (views/create-request-validation-error
         ctx
-        {:user   user
-         :values input
-         :errors errors}))
+        {:user
+         user
 
-      (let [result
-            (model/create-request!
+         :values
+         (create-request-view-values
+          ctx
+          input)
+
+         :errors
+         errors}))
+
+      (let [actor-ctx
+            (assoc
              ctx
-             {:user  user
-              :input input})]
+             :current-user/id
+             (:user/id user))
 
-        (send-new-request-ui-safely!
-         result
-         user)
-
+            result
+            (request/create
+             actor-ctx
+             input)]
         (create-request-success-response
-         ctx
-         {:result     result
-          :view-state view-state})))))
+         actor-ctx
+         {:result
+          result
+
+          :view-state
+          view-state})))))
 
 ;; -----------------------------------------------------------------------------
 ;; Request list interactions
