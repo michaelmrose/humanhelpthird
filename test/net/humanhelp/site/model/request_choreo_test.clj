@@ -1,11 +1,13 @@
 (ns net.humanhelp.site.model.request-choreo-test
-  "Focused contract tests for HumanHelp's production Request claim choreography.
+  "Focused contract tests for HumanHelp's production Request lifecycle choreography.
 
-   These tests sit above request.core/claim. They verify that the model-owned
-   choreography is compiled from the intended Gesso optimistic program, that it
-   remains dependent only on Request's public model boundary, and that the
-   trusted authority adapter turns one committed Request claim into the exact
-   protocol-v3 authoritative settlement expected by the browser runtime.
+   These tests sit above the public Request lifecycle API. They verify that the
+   model-owned choreographies are compiled from the intended Gesso optimistic
+   programs, that they remain dependent only on Request's public model boundary,
+   and that the
+   trusted authority adapters turn committed Request lifecycle transitions into
+   the exact protocol-v3 authoritative settlements expected by the browser
+   runtime.
 
    Request policy itself is intentionally not duplicated here. Domain, FX, and
    request.core tests own authorization, aggregate planning, guards, and atomic
@@ -462,3 +464,434 @@
              error
              actual)
             "Request Choreo must never manufacture a generic settlement that hides whether authoritative mutation committed.")))))
+
+;; =============================================================================
+;; Complete production Request lifecycle choreography
+;; =============================================================================
+
+(def helper-b-id
+  (UUID/fromString
+   "40000000-0000-0000-0000-000000000003"))
+
+(def manager-id
+  (UUID/fromString
+   "40000000-0000-0000-0000-000000000004"))
+
+(def replacement-assignment-id
+  (UUID/fromString
+   "50000000-0000-0000-0000-000000000002"))
+
+(def collaborator-assignment-id
+  (UUID/fromString
+   "50000000-0000-0000-0000-000000000003"))
+
+(defn- open-request
+  []
+  (command/after
+   (request.domain/create-request-command
+    {:id request-id
+     :organization-id organization-id
+     :location-id location-id
+     :requestor
+     (request.domain/user-requestor requestor-id)
+     :content
+     {:title "Need help"
+      :details "Please help me find the right item."
+      :location-detail "Near the front desk"}
+     :now t0})))
+
+(defn- on-the-way-request
+  []
+  (command/after
+   (request.domain/mark-on-the-way-command
+    (claimed-request)
+    {:now t2})))
+
+(defn- done-request
+  []
+  (command/after
+   (request.domain/complete-request-command
+    (on-the-way-request)
+    {:now (.plusSeconds t2 60)})))
+
+(defn- cancelled-request
+  []
+  (command/after
+   (request.domain/cancel-request-command
+    (claimed-request)
+    {:now t2
+     :reason :request/test-cancelled})))
+
+(defn- active-assignment
+  [{:keys [id role source] :as options}]
+  (let [assignment-id' (or id assignment-id)
+        assignment-helper-id (or (:helper-id options) helper-id)
+        assignment-role (or role :primary)
+        assignment-source (or source :request/claim)]
+    (command/after
+     (request.domain/create-assignment-command
+      {:id assignment-id'
+       :request-id request-id
+       :helper-id assignment-helper-id
+       :role assignment-role
+       :source assignment-source
+       :actor-id assignment-helper-id
+       :now t1}))))
+
+(defn- ended-assignment
+  ([assignment]
+   (ended-assignment assignment :request/test-ended))
+  ([assignment reason]
+   (command/after
+    (request.domain/end-assignment-command
+     assignment
+     {:actor-id helper-id
+      :reason reason
+      :now t2}))))
+
+(defn- committed-result
+  [result]
+  (merge
+   {:commit/status :committed
+    :progression committed-progression}
+   result))
+
+(defn- lifecycle-server
+  []
+  (optimistic-server/server
+   {:principal-fn
+    (fn [ctx]
+      (:authenticated-principal ctx))
+    :operations request.choreo/operation-entries}))
+
+(defn- lifecycle-envelope
+  [operation arguments suffix]
+  (protocol/command
+   {:command-id
+    (identity/command-id
+     (str "humanhelp-request-" suffix "-command"))
+    :execution-id
+    (identity/execution-id
+     (str "humanhelp-request-" suffix "-execution"))
+    :operation operation
+    :arguments arguments
+    :observed-basis observed-basis
+    :scope [:request request-id]
+    :fact-versions {:request/revision 1}}))
+
+(defn- lifecycle-cases
+  []
+  (let [old-primary
+        (active-assignment {})
+        ended-primary
+        (ended-assignment
+         old-primary
+         :request/test-ended-primary)
+        old-collaborator
+        (active-assignment
+         {:id collaborator-assignment-id
+          :helper-id helper-b-id
+          :role :collaborator
+          :source :request/collaborator-added})
+        ended-collaborator
+        (ended-assignment
+         old-collaborator
+         :request/test-ended-collaborator)
+        replacement-primary
+        (active-assignment
+         {:id replacement-assignment-id
+          :helper-id helper-b-id
+          :role :primary
+          :source :request/reassignment})]
+    [{:label :unclaim
+      :operation request.choreo/unclaim-operation
+      :model-var #'request/unclaim
+      :arguments {:request-id request-id}
+      :result
+      (committed-result
+       {:request (open-request)
+        :assignments [ended-primary]})
+      :outcome :request/unclaimed
+      :status :open
+      :browser-role request.choreo/helper-role}
+
+     {:label :mark-on-the-way
+      :operation request.choreo/mark-on-the-way-operation
+      :model-var #'request/mark-on-the-way
+      :arguments {:request-id request-id}
+      :result
+      (committed-result
+       {:request (on-the-way-request)})
+      :outcome :request/on-the-way
+      :status :on-the-way
+      :browser-role request.choreo/helper-role}
+
+     {:label :complete
+      :operation request.choreo/complete-operation
+      :model-var #'request/complete
+      :arguments {:request-id request-id}
+      :result
+      (committed-result
+       {:request (done-request)
+        :assignments [ended-primary ended-collaborator]})
+      :outcome :request/completed
+      :status :done
+      :browser-role request.choreo/helper-role}
+
+     {:label :cancel
+      :operation request.choreo/cancel-operation
+      :model-var #'request/cancel
+      :arguments {:request-id request-id
+                  :reason :request/test-cancelled}
+      :result
+      (committed-result
+       {:request (cancelled-request)
+        :assignments [ended-primary]})
+      :outcome :request/cancelled
+      :status :cancelled
+      :browser-role request.choreo/requestor-role}
+
+     {:label :reassign
+      :operation request.choreo/reassign-operation
+      :model-var #'request/reassign
+      :arguments {:request-id request-id
+                  :helper-id helper-b-id}
+      :result
+      (committed-result
+       {:request (claimed-request)
+        :primary-assignment replacement-primary
+        :previous-primary-assignment ended-primary
+        :previous-collaborator-assignment ended-collaborator})
+      :outcome :request/reassigned
+      :status :claimed
+      :browser-role request.choreo/manager-role
+      :primary-helper helper-b-id}]))
+
+(deftest lifecycle-static-artifacts-cover-the-production-request-board-test
+  (let [expected-operations
+        #{request.choreo/claim-operation
+          request.choreo/unclaim-operation
+          request.choreo/mark-on-the-way-operation
+          request.choreo/complete-operation
+          request.choreo/cancel-operation
+          request.choreo/reassign-operation}
+        expected-roles
+        {request.choreo/claim-operation request.choreo/helper-role
+         request.choreo/unclaim-operation request.choreo/helper-role
+         request.choreo/mark-on-the-way-operation request.choreo/helper-role
+         request.choreo/complete-operation request.choreo/helper-role
+         request.choreo/cancel-operation request.choreo/requestor-role
+         request.choreo/reassign-operation request.choreo/manager-role}]
+    (testing "the public registries describe exactly the production lifecycle operations"
+      (is (= expected-operations
+             (set (keys request.choreo/capabilities))))
+      (is (= expected-operations
+             (set (keys request.choreo/browser-plans))))
+      (is (= expected-operations
+             (set (keys request.choreo/operation-entries))))
+      (is (= expected-operations
+             (set (keys request.choreo/authority-plans)))))
+
+    (doseq [operation expected-operations]
+      (testing (str operation " is represented only by canonical Gesso artifacts")
+        (let [capability (get request.choreo/capabilities operation)
+              browser-plan (get request.choreo/browser-plans operation)
+              operation-entry (get request.choreo/operation-entries operation)
+              authority-plan (get request.choreo/authority-plans operation)]
+          (is (capability/operation-capability? capability))
+          (is (= operation (:operation capability)))
+          (is (= operation (:plan-key capability)))
+          (is (machine/executable-plan? browser-plan))
+          (is (optimistic-server/operation? operation-entry))
+          (is (= (get expected-roles operation)
+                 (:browser-role operation-entry)))
+          (is (= request.choreo/request-authority-role
+                 (:authority-role operation-entry)))
+          (is (machine/executable-plan? authority-plan))
+          (is (= authority-plan
+                 (:authority-plan operation-entry))))))))
+
+(deftest each-production-lifecycle-entry-invokes-only-its-public-request-operation-test
+  (doseq [{:keys
+           [label operation model-var arguments result outcome status
+            browser-role primary-helper]}
+          (lifecycle-cases)]
+    (testing (name label)
+      (let [calls (atom [])
+            envelope (lifecycle-envelope operation arguments (name label))
+            prepared
+            (with-redefs-fn
+              {model-var
+               (fn [ctx actual-arguments]
+                 (swap! calls conj [ctx actual-arguments])
+                 result)}
+              #(optimistic-server/run-command
+                (lifecycle-server)
+                trusted-ctx
+                envelope))
+            settlement (:settlement prepared)
+            authoritative (:authoritative settlement)
+            projection (:projection authoritative)]
+        (is (= [[trusted-ctx arguments]]
+               @calls)
+            "Choreography protocol context must not leak into the semantic Request command.")
+        (is (optimistic-server/prepared-send? prepared))
+        (is (= operation (:operation prepared)))
+        (is (= (:command-id envelope)
+               (:command-id settlement)))
+        (is (= (:execution-id envelope)
+               (:execution-id settlement)))
+        (is (= :confirmed (:resolution settlement)))
+        (is (= outcome (:outcome settlement)))
+        (is (= :authoritative (:authority authoritative)))
+        (is (= :present (:presence authoritative)))
+        (is (= committed-basis (:basis authoritative)))
+        (is (not= observed-basis (:basis authoritative)))
+        (is (= request-id (:request/id projection)))
+        (is (= status (:request/status projection)))
+        (is (= (request/revision (:request result))
+               (:request/revision projection)))
+        (is (= {:request/revision
+                (request/revision (:request result))}
+               (select-keys (:fact-versions authoritative)
+                            [:request/revision])))
+        (is (= browser-role
+               (:browser-role
+                (get request.choreo/operation-entries operation))))
+        (if primary-helper
+          (do
+            (is (= primary-helper
+                   (get-in projection
+                           [:request/primary-assignment
+                            :request-assignment/helper])))
+            (is (= :active
+                   (get-in projection
+                           [:request/primary-assignment
+                            :request-assignment/status])))
+            (is (= :request/reassignment
+                   (get-in projection
+                           [:request/primary-assignment
+                            :request-assignment/source])))
+            (is (contains? (:fact-versions authoritative)
+                           :request-assignment/revision)))
+          (is (not (contains? projection
+                              :request/primary-assignment))
+              "Ended or absent assignments are not projected as current primary authority."))))))
+
+(deftest lifecycle-operations-fail-closed-without-transaction-established-progression-test
+  (doseq [{:keys [label operation model-var arguments result]}
+          (lifecycle-cases)]
+    (testing (name label)
+      (let [error
+            (with-redefs-fn
+              {model-var
+               (fn [_ctx _arguments]
+                 (dissoc result :progression))}
+              #(thrown
+                (fn []
+                  (optimistic-server/run-command
+                   (lifecycle-server)
+                   trusted-ctx
+                   (lifecycle-envelope operation arguments (str (name label) "-no-progression"))))))]
+        (is (instance? clojure.lang.ExceptionInfo error))
+        (is (= :net.humanhelp.site.model.request.choreo/error
+               (:error/type (ex-data error))))
+        (is (= :missing-commit-progression
+               (:error/kind (ex-data error))))))))
+
+(deftest lifecycle-operations-reject-authoritative-request-state-that-does-not-match-the-operation-test
+  (doseq [{:keys [label operation model-var arguments result]}
+          (lifecycle-cases)]
+    (testing (name label)
+      (let [wrong-request
+            (if (= :open (request/status (:request result)))
+              (claimed-request)
+              (open-request))
+            error
+            (with-redefs-fn
+              {model-var
+               (fn [_ctx _arguments]
+                 (assoc result :request wrong-request))}
+              #(thrown
+                (fn []
+                  (optimistic-server/run-command
+                   (lifecycle-server)
+                   trusted-ctx
+                   (lifecycle-envelope operation arguments (str (name label) "-wrong-state"))))))]
+        (is (= :unexpected-authoritative-request-state
+               (:error/kind (ex-data error))))))))
+
+(deftest assignment-ending-lifecycle-results-reject-still-active-assignments-test
+  (doseq [{:keys [label operation model-var arguments result]}
+          (filter
+           #(contains? #{:unclaim :complete :cancel} (:label %))
+           (lifecycle-cases))]
+    (testing (name label)
+      (let [error
+            (with-redefs-fn
+              {model-var
+               (fn [_ctx _arguments]
+                 (assoc result
+                        :assignments
+                        [(active-assignment {})]))}
+              #(thrown
+                (fn []
+                  (optimistic-server/run-command
+                   (lifecycle-server)
+                   trusted-ctx
+                   (lifecycle-envelope operation arguments (str (name label) "-active-assignment"))))))]
+        (is (= :unexpected-authoritative-assignment-state
+               (:error/kind (ex-data error))))))))
+
+(deftest reassign-requires-ended-old-primary-before-publishing-the-replacement-test
+  (let [{:keys [operation model-var arguments result]}
+        (first
+         (filter #(= :reassign (:label %))
+                 (lifecycle-cases)))
+        error
+        (with-redefs-fn
+          {model-var
+           (fn [_ctx _arguments]
+             (assoc result
+                    :previous-primary-assignment
+                    (active-assignment {})))}
+          #(thrown
+            (fn []
+              (optimistic-server/run-command
+               (lifecycle-server)
+               trusted-ctx
+               (lifecycle-envelope operation arguments "reassign-active-old-primary")))))]
+    (is (= :unexpected-authoritative-assignment-state
+           (:error/kind (ex-data error))))))
+
+(deftest every-lifecycle-operation-preserves-model-errors-exactly-test
+  (doseq [{:keys [label operation model-var arguments]}
+          (lifecycle-cases)
+          [phase error]
+          [[:pre-commit
+            (ex-info
+             "Request operation rejected before commit."
+             {:error/type :request/not-authorized
+              :operation operation})]
+           [:post-commit
+            (ex-info
+             "Request committed but delivery failed."
+             {:error/type :gesso.live/post-commit-delivery-failure
+              :operation operation
+              :commit/status :committed
+              :progression committed-progression})]]]
+    (testing (str (name label) " / " (name phase))
+      (let [actual
+            (with-redefs-fn
+              {model-var
+               (fn [_ctx _arguments]
+                 (throw error))}
+              #(thrown
+                (fn []
+                  (optimistic-server/run-command
+                   (lifecycle-server)
+                   trusted-ctx
+                   (lifecycle-envelope operation arguments (str (name label) "-" (name phase)))))))]
+        (is (identical? error actual)
+            "Choreo must not reinterpret whether the authoritative Request transition committed.")))))
+
