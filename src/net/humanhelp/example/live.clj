@@ -14,9 +14,7 @@
    - Request change -> fragment invalidation routing;
    - fragment query/render descriptors;
    - fragment panel/response/stream helpers;
-   - client-only continuity;
-   - temporary demo-reset/toast helpers kept only until the remaining old
-     example.app setup handlers are removed.
+   - client-only continuity.
 
    Domain truth, lifecycle transitions, persistence, authorization, Choreo
    capabilities, and Request read composition live in production model/Choreo
@@ -361,31 +359,6 @@
      (merge
       {:flow-options {:relieve? true}}
       options)))))
-
-;; =============================================================================
-;; Temporary demo-reset compatibility
-;; =============================================================================
-;;
-;; Production Request lifecycle mutations no longer pass through example.live:
-;; Request FX publishes the canonical :request change directly.  The reset
-;; constructor remains only while example.app still owns its old demo reset
-;; handler.  It is intentionally not a Request lifecycle transition adapter.
-
-(defn demo-reset-change
-  "Temporary wake-up used only by the old demo reset handler."
-  [{:keys [revision actor]}]
-  (cond->
-   {:topic :request
-    :id location-id
-    :change/kind :updated
-    :request/operation :request/demo-reset
-    :request/id location-id
-    :request/location-id location-id}
-    revision
-    (assoc :request/revision revision)
-
-    (:user/id actor)
-    (assoc :actor/id (:user/id actor))))
 
 (defn- request-id-value
   [request-document]
