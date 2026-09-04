@@ -206,21 +206,11 @@
   (let [values
         (or values {})
 
-        ;; Revision 517 still redisplays production :location-detail validation
-        ;; through the temporary :area key.  Accept that key only as a one-step
-        ;; view fallback while the submitted control itself already uses the
-        ;; production Request vocabulary.  The HTTP compatibility projection is
-        ;; removed in the following app revision.
         location-detail
-        (or (:location-detail values)
-            (:area values)
-            "")
+        (or (:location-detail values) "")
 
         errors
-        (cond-> (or errors {})
-          (and (nil? (:location-detail errors))
-               (:area errors))
-          (assoc :location-detail (:area errors)))]
+        (or errors {})]
     (g/form
      ctx
      {:post  (routes/create-request-url)
