@@ -583,24 +583,6 @@
                    "Create a request with the plus button to start the demo.")
     :icon        (g/empty-state-icon)}))
 
-(defn- legacy-request-card
-  "Temporary compatibility render used only while example.live/app still emit the
-   former demo :requests shape.
-
-   The production path below never resolves this Var. Remove this helper as soon
-   as example.live is cut over to :rows. Keeping the dependency dynamic prevents
-   the production view graph from acquiring a static edge back to example.model."
-  [ctx opts]
-  (let [request-card-var
-        (or
-         (requiring-resolve
-          'net.humanhelp.example.components.request-card.core/request-card)
-         (throw
-          (ex-info
-           "Could not resolve temporary legacy HumanHelp request card."
-           {})))]
-    (request-card-var ctx opts)))
-
 (defn request-card-node
   "Render one production Request board row.
 
@@ -616,54 +598,33 @@
     :open? (boolean open?)}))
 
 (defn request-accordion
-  [{:keys [ctx viewer rows requests user view-state]}]
+  [{:keys [ctx viewer rows]}]
   (apply
    g/accordion
    {:type         :single
     :collapsible? true
     :class        "content-stack-theme shadow-none"
     :attrs        {:data-humanhelp-request-accordion true}}
-   (if (some? rows)
-     (map
-      (fn [row]
-        (request-card-node
-         ctx
-         {:row row
-          :viewer viewer}))
-      rows)
-     ;; Transitional only: the currently installed example.live still returns
-     ;; :requests.  The following revision removes this path by making Live query
-     ;; production board rows directly.
-     (map
-      (fn [request]
-        (legacy-request-card
-         ctx
-         {:request request
-          :user user
-          :view-state view-state
-          :board-state-selector (board-state-selector)
-          :open? false}))
-      requests))))
+   (map
+    (fn [row]
+      (request-card-node
+       ctx
+       {:row row
+        :viewer viewer}))
+    rows)))
 
 (defn request-list-fragment
-  [{:keys [ctx viewer rows user view-state requests latest-revision]}]
-  (let [production? (some? rows)
-        items (if production? rows requests)]
-    [:div {:id                      request-list-dom-id
-           :data-humanhelp-fragment "request-list"
-           :data-latest-revision    latest-revision
-           :class                   "content-stack-theme"}
-     (if (seq items)
-       (request-accordion
-        (if production?
-          {:ctx ctx
-           :viewer viewer
-           :rows rows}
-          {:ctx ctx
-           :user user
-           :view-state view-state
-           :requests requests}))
-       (empty-request-list {:view-state view-state}))]))
+  [{:keys [ctx viewer rows view-state latest-revision]}]
+  [:div {:id                      request-list-dom-id
+         :data-humanhelp-fragment "request-list"
+         :data-latest-revision    latest-revision
+         :class                   "content-stack-theme"}
+   (if (seq rows)
+     (request-accordion
+      {:ctx ctx
+       :viewer viewer
+       :rows rows})
+     (empty-request-list {:view-state view-state}))])
 
 ;; -----------------------------------------------------------------------------
 ;; Page
