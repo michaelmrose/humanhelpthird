@@ -3,18 +3,13 @@
    example app.
 
    Request rendering consumes the :rows emitted by example.live/example.board.
-   During the request-card namespace consolidation this test deliberately stubs
-   both the canonical request-card.core var and the temporary
-   request-card.production var so the repository stays green before and after
-   the source-side require is switched. Once the temporary production namespace
-   is deleted, requiring it here should be removed as part of that deletion
-   cleanup; the semantic contract is the canonical example Request card, not a
-   separate production component."
+   Request rendering uses the canonical example request-card.core component.
+   The component consumes production models and Choreo, but remains an example
+   application component rather than a parallel production component namespace."
   (:require
    [clojure.test :refer [deftest is testing]]
    [net.humanhelp.example.board :as board]
    [net.humanhelp.example.components.request-card.core :as request-card]
-   [net.humanhelp.example.components.request-card.production :as temporary-production-card]
    [net.humanhelp.example.views :as views])
   (:import
    [java.util UUID]))
@@ -57,16 +52,9 @@
    (tree-elements markup)))
 
 (defn- with-request-card-stub
-  "Run f while both the canonical and temporary Request-card vars point at stub.
-
-   This is intentionally migration-only support for the namespace consolidation:
-   the currently installed views namespace may still call the temporary var,
-   while the immediately following source revision will call request-card.core.
-   It does not imply two semantic component implementations."
   [stub f]
   (with-redefs-fn
-    {#'request-card/request-card stub
-     #'temporary-production-card/request-card stub}
+    {#'request-card/request-card stub}
     f))
 
 (deftest request-views-have-one-example-request-card-dependency-test
@@ -74,16 +62,11 @@
         (->> (ns-aliases 'net.humanhelp.example.views)
              vals
              (map ns-name)
-             set)
-        card-dependencies
-        (select-keys
-         (zipmap dependencies (repeat true))
-         ['net.humanhelp.example.components.request-card.core
-          'net.humanhelp.example.components.request-card.production])]
+             set)]
     (is (contains? dependencies 'net.humanhelp.example.board))
-    (is (not (contains? dependencies 'net.humanhelp.example.model)))
-    (is (= 1 (count card-dependencies))
-        "During the one-file-at-a-time consolidation, views must depend on exactly one Request-card implementation, never both.")))
+    (is (contains? dependencies 'net.humanhelp.example.components.request-card.core))
+    (is (not (contains? dependencies 'net.humanhelp.example.components.request-card.production)))
+    (is (not (contains? dependencies 'net.humanhelp.example.model)))))
 
 (deftest request-card-node-delegates-production-row-without-translation-test
   (let [calls (atom [])
