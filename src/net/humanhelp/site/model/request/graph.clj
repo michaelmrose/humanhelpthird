@@ -19,6 +19,7 @@
    public cores to Request FX."
   (:require
    [com.biffweb.graph :as graph]
+   [com.biffweb.xtdb :as biff.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.request.domain :as request]
@@ -98,7 +99,7 @@
      descriptor
      ctx
      %)
-   (model/q
+   (biff.xtdb/q
     ctx
     query)))
 
