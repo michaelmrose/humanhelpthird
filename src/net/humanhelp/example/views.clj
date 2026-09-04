@@ -812,15 +812,3 @@
                      (:message result)
                      (:reason result)
                      "That request action could not be completed.")}))
-
-(defn reset-demo-result
-  [{:keys [toolbar request-list]}]
-  (oob-response
-   (fragments-oob
-    {:toolbar      toolbar
-     :request-list request-list})
-   (g/render-toast-oob
-    {:variant     :info
-     :duration    5000
-     :title       "Demo reset"
-     :description "The Human Help request board was reset."})))
