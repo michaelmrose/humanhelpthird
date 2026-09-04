@@ -1,12 +1,10 @@
 (ns net.humanhelp.example.app
   "HTTP boundary for the removable Human Help analogue app.
 
-   This namespace assembles HTTP handlers from:
-
-   - net.humanhelp.example.live
-   - net.humanhelp.example.model
-   - net.humanhelp.example.routes
-   - net.humanhelp.example.views
+   This namespace assembles HTTP handlers from the production-backed example
+   board/Live/optimistic/view seams. net.humanhelp.example.model remains only as
+   temporary legacy support for create-request input/mutation and demo reset; it
+   no longer defines board state or Request lifecycle execution.
 
    It should not own generic Gesso Live plumbing. Human Help live panels,
    fragment rendering, stream responses, change constructors, and toast helpers
@@ -22,6 +20,7 @@
    [gesso.live.progression :as progression]
    [gesso.live.ui :as live.ui]
    [net.humanhelp.client-plumbing :as client-plumbing]
+   [net.humanhelp.example.board :as board]
    [net.humanhelp.example.live :as app-live]
    [net.humanhelp.example.model :as model]
    [net.humanhelp.example.optimistic :as optimistic]
@@ -84,23 +83,22 @@
   (param ctx :request-id))
 
 (defn- request-view-state
-  "Extract request-board view state from request params.
+  "Extract request-board presentation state from request params.
 
-   app.clj owns HTTP parameter extraction only. It does not validate sort/filter
-   values or decide their semantics; model/normalize-view-state fills defaults
-   and normalizes option values against current persisted Human Help data."
+   app.clj owns HTTP parameter extraction only. Production example-board
+   normalization owns the presentation vocabulary. There is intentionally no
+   demo :visible-revision here: Gesso Live/XTDB progression is the authority
+   frontier for the production-backed board."
   [ctx]
   {:search           (or (param ctx routes/search-param) "")
-   :visible-revision (model/parse-visible-revision
-                      (param ctx routes/visible-revision-param))
    :created-order    (param ctx routes/created-order-param)
    :mine-first?      (param ctx routes/mine-first-param)
    :unclaimed-first? (param ctx routes/unclaimed-first-param)
    :show-terminal?   (param ctx routes/show-terminal-param)})
 
 (defn- normalized-view-state
-  [ctx view-state]
-  (model/normalize-view-state ctx view-state))
+  [_ctx view-state]
+  (board/normalize-view-state view-state))
 
 (defn- create-request-input
   "Extract create-request form input from request params.
@@ -381,27 +379,15 @@
 ;; Receiver-specific connected-client side effects
 ;; -----------------------------------------------------------------------------
 
-(defn- previous-revision
-  [revision]
-  (when (number? revision)
-    (max 0 (dec revision))))
-
 (defn- receiver-view-state-for-new-request
-  "Return the receiving browser's view-state for a new-request notification.
+  "Return the receiving browser's normalized presentation state.
 
-   The pending client-plumbing request normally includes #humanhelp-board-state,
-   so this uses the receiver browser's own q/visible-revision/options state.
-
-   If visible-revision is absent, fall back to a definitely-stale revision so
-   the receiver gets the stale toolbar affordance instead of accidentally
-   rendering as current."
-  [ctx revision]
-  (let [view-state (request-view-state ctx)]
-    (normalized-view-state
-     ctx
-     (cond-> view-state
-       (nil? (:visible-revision view-state))
-       (assoc :visible-revision (previous-revision revision))))))
+   Freshness is carried by the committed Gesso progression composed into the
+   receiver context, not by an application-local visible revision."
+  [ctx]
+  (normalized-view-state
+   ctx
+   (request-view-state ctx)))
 
 (defn- new-request-client-oob
   "Return a receiver-specific pending fragment for a newly-created request.
@@ -415,12 +401,10 @@
    context is conservatively composed with the creating transaction's
    authoritative progression before the toolbar is rendered."
   [result]
-  (let [{:keys [request revision]} result]
+  (let [{:keys [request]} result]
     (fn [receiver-ctx]
       (let [receiver-ctx' (receiver-ctx-after-commit receiver-ctx result)
-            view-state    (receiver-view-state-for-new-request
-                           receiver-ctx'
-                           revision)
+            view-state    (receiver-view-state-for-new-request receiver-ctx')
             toolbar       (render-toolbar-node receiver-ctx' view-state)]
         (views/oob-response
          (views/replace-toolbar-oob toolbar)
@@ -533,20 +517,15 @@
 (defn- create-request-success-response
   "Return the creator's authoritative post-create board update.
 
-   This is the refresh-equivalent actor path:
-   - advance visible-revision to the create revision
-   - render toolbar from the model
-   - render list from the model
-   - close/reset the dialog through views/create-request-success
-
-   This is intentionally synchronous in the POST response so it cannot race a
-   separate client-side refresh request."
+   The committed transaction context carries the new Gesso progression. The
+   board presentation state therefore needs no application-local revision
+   advancement. The response renders toolbar/list from that committed context
+   and closes/resets the dialog synchronously."
   [ctx {:keys [result view-state]}]
-  (let [{:keys [request revision]} result
+  (let [{:keys [request]} result
         ctx'        (committed-ctx result)
         user        (current-user ctx')
-        view-state' (assoc view-state
-                           :visible-revision revision)
+        view-state' (normalized-view-state ctx' view-state)
         fragments   (board-fragments ctx' view-state')]
     (html
      (with-board-state-oob
@@ -565,8 +544,8 @@
    Creator behavior:
    - request is created
    - dialog closes
-   - visible list refreshes immediately to include the new request
-   - visible revision advances to the create revision
+   - visible list refreshes immediately from the committed progression-aware
+     context
 
    Other connected users:
    - receive receiver-specific connected-client OOB, excluding the creator
@@ -609,11 +588,9 @@
 ;; -----------------------------------------------------------------------------
 
 (defn refresh-requests!
-  "Commit the visible request board to the latest revision."
+  "Refresh the visible request board from the request's current Live context."
   [ctx]
-  (let [view-state (assoc (request-view-state ctx)
-                          :visible-revision
-                          (model/latest-revision ctx))]
+  (let [view-state (normalized-view-state ctx (request-view-state ctx))]
     (html
      (with-board-state-oob
        ctx
@@ -629,9 +606,9 @@
 (defn apply-board-options
   "Apply request-board sort/filter options without mutating persisted state.
 
-   The board-options dialog submits current search/revision from the stable
-   board-state form plus its own visible option controls. The response replaces
-   board state first, then toolbar and request list, so subsequent requests
+   The board-options dialog submits current search/presentation state from the
+   stable board-state form plus its own visible option controls. The response
+   replaces board state first, then toolbar and request list, so subsequent requests
    preserve the newly-applied options."
   [ctx]
   (let [view-state (normalized-view-state ctx (request-view-state ctx))]
@@ -813,9 +790,7 @@
   (let [user       (current-user ctx)
         result     (model/reset-demo-state! ctx)
         ctx'       (committed-ctx result)
-        view-state (assoc (request-view-state ctx)
-                          :visible-revision
-                          (:revision result))]
+        view-state (normalized-view-state ctx' (request-view-state ctx))]
     (notify-reset-safely! result user)
 
     (send-reset-toast-safely!)
