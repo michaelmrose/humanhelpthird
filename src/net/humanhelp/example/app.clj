@@ -321,10 +321,10 @@
   (let [commit-progression (:progression (committed-transaction result))]
     (if commit-progression
       (live/with-progression
-       receiver-ctx
-       (progression/compose
-        (live/progression receiver-ctx)
-        commit-progression))
+        receiver-ctx
+        (progression/compose
+         (live/progression receiver-ctx)
+         commit-progression))
       receiver-ctx)))
 
 ;; -----------------------------------------------------------------------------

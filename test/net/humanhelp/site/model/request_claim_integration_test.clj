@@ -182,8 +182,8 @@
            live-system))))))
 
 (use-fixtures
- :each
- with-runtime)
+  :each
+  with-runtime)
 
 ;; =============================================================================
 ;; Fixture seed
@@ -335,8 +335,8 @@
            (:progression
             claim-result)]
     (live/with-progression
-     ctx
-     progression)
+      ctx
+      progression)
 
     ctx))
 
@@ -365,13 +365,13 @@
 
     (let [claim-result
           (with-request-authority
-           #(request/claim
-             (claim-ctx
-              ctx
-              claimed-at)
+            #(request/claim
+              (claim-ctx
+               ctx
+               claimed-at)
 
-             {:request-id
-              request-id}))
+              {:request-id
+               request-id}))
 
           read-ctx
           (progression-read-ctx
@@ -479,13 +479,13 @@
 
         first-result
         (with-request-authority
-         #(request/claim
-           (claim-ctx
-            ctx
-            claimed-at)
+          #(request/claim
+            (claim-ctx
+             ctx
+             claimed-at)
 
-           {:request-id
-            request-id}))
+            {:request-id
+             request-id}))
 
         read-ctx
         (progression-read-ctx
@@ -499,15 +499,15 @@
 
         retry-error
         (with-request-authority
-         #(error-from
-           (fn []
-             (request/claim
-              (claim-ctx
-               read-ctx
-               retry-at)
+          #(error-from
+            (fn []
+              (request/claim
+               (claim-ctx
+                read-ctx
+                retry-at)
 
-              {:request-id
-               request-id}))))
+               {:request-id
+                request-id}))))
 
         after-retry
         (request/require-request-snapshot

@@ -78,15 +78,15 @@
 
         result
         (with-redefs
-          [request/plan-claim-request
-           (fn [ctx input]
-             (swap! planner-calls conj [ctx input])
-             (planned-claim))
+         [request/plan-claim-request
+          (fn [ctx input]
+            (swap! planner-calls conj [ctx input])
+            (planned-claim))
 
-           model.tx/transact!
-           (fn [ctx plan]
-             (swap! transaction-calls conj [ctx plan])
-             transaction-result)]
+          model.tx/transact!
+          (fn [ctx plan]
+            (swap! transaction-calls conj [ctx plan])
+            transaction-result)]
 
           (request/claim
            sample-ctx
@@ -123,13 +123,13 @@
 (deftest claim-does-not-invent-progression-when-transaction-does-not-produce-one-test
   (let [result
         (with-redefs
-          [request/plan-claim-request
-           (fn [_ctx _input]
-             (planned-claim))
+         [request/plan-claim-request
+          (fn [_ctx _input]
+            (planned-claim))
 
-           model.tx/transact!
-           (fn [_ctx _plan]
-             {:commit/status :committed})]
+          model.tx/transact!
+          (fn [_ctx _plan]
+            {:commit/status :committed})]
 
           (request/claim
            sample-ctx
@@ -151,14 +151,14 @@
         actual
         (try
           (with-redefs
-            [request/plan-claim-request
-             (fn [_ctx _input]
-               (throw planner-error))
+           [request/plan-claim-request
+            (fn [_ctx _input]
+              (throw planner-error))
 
-             model.tx/transact!
-             (fn [_ctx _plan]
-               (swap! transaction-calls inc)
-               :impossible)]
+            model.tx/transact!
+            (fn [_ctx _plan]
+              (swap! transaction-calls inc)
+              :impossible)]
 
             (request/claim
              sample-ctx
@@ -183,14 +183,14 @@
         actual
         (try
           (with-redefs
-            [request/plan-claim-request
-             (fn [_ctx _input]
-               (planned-claim))
+           [request/plan-claim-request
+            (fn [_ctx _input]
+              (planned-claim))
 
-             model.tx/transact!
-             (fn [_ctx _plan]
-               (swap! transaction-calls inc)
-               (throw transaction-error))]
+            model.tx/transact!
+            (fn [_ctx _plan]
+              (swap! transaction-calls inc)
+              (throw transaction-error))]
 
             (request/claim
              sample-ctx
@@ -215,14 +215,14 @@
         actual
         (try
           (with-redefs
-            [request/plan-claim-request
-             (fn [_ctx _input]
-               (planned-claim))
+           [request/plan-claim-request
+            (fn [_ctx _input]
+              (planned-claim))
 
-             model.tx/transact!
-             (fn [_ctx _plan]
-               (swap! transaction-calls inc)
-               (throw committed-error))]
+            model.tx/transact!
+            (fn [_ctx _plan]
+              (swap! transaction-calls inc)
+              (throw committed-error))]
 
             (request/claim
              sample-ctx

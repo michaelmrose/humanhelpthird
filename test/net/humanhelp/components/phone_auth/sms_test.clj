@@ -97,9 +97,9 @@
 (deftest successful-verification-consumes-challenge-test
   (reset! (challenges-atom)
           {"2065550123" {:code "123456"
-                          :length 6
-                          :attempts 0
-                          :expires-at 5000}})
+                         :length 6
+                         :attempts 0
+                         :expires-at 5000}})
   (with-provider-stubs
     {:now 1000}
     (fn []
@@ -121,9 +121,9 @@
 (deftest expired-verification-consumes-challenge-test
   (reset! (challenges-atom)
           {"2065550123" {:code "123456"
-                          :length 6
-                          :attempts 0
-                          :expires-at 999}})
+                         :length 6
+                         :attempts 0
+                         :expires-at 999}})
   (with-provider-stubs
     {:now 1000}
     (fn []
@@ -139,9 +139,9 @@
 (deftest wrong-codes-advance-attempt-count-test
   (reset! (challenges-atom)
           {"2065550123" {:code "123456"
-                          :length 6
-                          :attempts 0
-                          :expires-at 5000}})
+                         :length 6
+                         :attempts 0
+                         :expires-at 5000}})
   (with-provider-stubs
     {:now 1000}
     (fn []
@@ -186,9 +186,9 @@
 (deftest concurrent-success-consumes-code-once-test
   (reset! (challenges-atom)
           {"2065550123" {:code "123456"
-                          :length 6
-                          :attempts 0
-                          :expires-at 5000}})
+                         :length 6
+                         :attempts 0
+                         :expires-at 5000}})
   (with-provider-stubs
     {:now 1000}
     (fn []
