@@ -97,11 +97,23 @@
 (def unclaim-request-id
   :humanhelp/unclaim-request)
 
+(def mark-on-the-way-request-id
+  :humanhelp/mark-on-the-way-request)
+
+(def complete-request-id
+  :humanhelp/complete-request)
+
+(def reassign-request-id
+  :humanhelp/reassign-request)
+
+;; Temporary source-compatibility aliases while app.clj/request-card are cut over
+;; in the immediately following revisions. These aliases do not create alternate
+;; semantic operations; both names resolve to the canonical production route id.
 (def take-over-request-id
-  :humanhelp/take-over-request)
+  mark-on-the-way-request-id)
 
 (def done-request-id
-  :humanhelp/done-request)
+  complete-request-id)
 
 (def cancel-request-id
   :humanhelp/cancel-request)
@@ -149,11 +161,21 @@
 (def unclaim-request-route
   "/requests/:request-id/unclaim")
 
+(def mark-on-the-way-request-route
+  "/requests/:request-id/mark-on-the-way")
+
+(def complete-request-route
+  "/requests/:request-id/complete")
+
+(def reassign-request-route
+  "/requests/:request-id/reassign")
+
+;; Temporary source-compatibility aliases for the old example code.
 (def take-over-request-route
-  "/requests/:request-id/take-over")
+  mark-on-the-way-request-route)
 
 (def done-request-route
-  "/requests/:request-id/done")
+  complete-request-route)
 
 (def cancel-request-route
   "/requests/:request-id/cancel")
@@ -214,17 +236,21 @@
     :method :post
     :route  unclaim-request-route}
 
-   {:id     take-over-request-id
+   {:id     mark-on-the-way-request-id
     :method :post
-    :route  take-over-request-route}
+    :route  mark-on-the-way-request-route}
 
-   {:id     done-request-id
+   {:id     complete-request-id
     :method :post
-    :route  done-request-route}
+    :route  complete-request-route}
 
    {:id     cancel-request-id
     :method :post
     :route  cancel-request-route}
+
+   {:id     reassign-request-id
+    :method :post
+    :route  reassign-request-route}
 
    {:id     reset-demo-id
     :method :post
@@ -280,10 +306,18 @@
    apply-board-options-id
    claim-request-id
    unclaim-request-id
-   take-over-request-id
-   done-request-id
+   mark-on-the-way-request-id
+   complete-request-id
    cancel-request-id
    reset-demo-id])
+
+(def optional-route-ids
+  "Production Request routes whose UI is not yet a required part of the example.
+
+   Reassign needs a selected target helper, so it remains optional until the
+   manager affordance is added. Optional means only route assembly is optional;
+   when present it still executes the production Request choreography."
+  [reassign-request-id])
 
 (defn route-table
   "Return a Reitit route table for Human Help.
@@ -311,9 +345,13 @@
            (assoc :middleware middleware))]
      [(into
        [base-path base-options]
-       (map
-        #(route-entry handlers (route-spec %))
-        required-route-ids))])))
+       (concat
+        (map
+         #(route-entry handlers (route-spec %))
+         required-route-ids)
+        (for [route-id optional-route-ids
+              :when (contains? handlers route-id)]
+          (route-entry handlers (route-spec route-id)))))])))
 
 ;; -----------------------------------------------------------------------------
 ;; URL helpers
@@ -528,40 +566,83 @@
   [request-id]
   (path (request-route unclaim-request-route request-id)))
 
-(defn take-over-request-url
+(defn mark-on-the-way-request-url
   [request-id]
-  (path (request-route take-over-request-route request-id)))
+  (path (request-route mark-on-the-way-request-route request-id)))
 
-(defn done-request-url
+(defn complete-request-url
   [request-id]
-  (path (request-route done-request-route request-id)))
+  (path (request-route complete-request-route request-id)))
+
+(defn reassign-request-url
+  [request-id]
+  (path (request-route reassign-request-route request-id)))
+
+;; Temporary source-compatibility aliases for the old example component.
+(def take-over-request-url
+  mark-on-the-way-request-url)
+
+(def done-request-url
+  complete-request-url)
 
 (defn cancel-request-url
   [request-id]
   (path (request-route cancel-request-route request-id)))
 
+(defn operation-url
+  "Return the HTTP endpoint for one production Request semantic operation."
+  [request-id operation]
+  (case operation
+    :request/claim
+    (claim-request-url request-id)
+
+    :request/unclaim
+    (unclaim-request-url request-id)
+
+    :request/mark-on-the-way
+    (mark-on-the-way-request-url request-id)
+
+    :request/complete
+    (complete-request-url request-id)
+
+    :request/cancel
+    (cancel-request-url request-id)
+
+    :request/reassign
+    (reassign-request-url request-id)
+
+    (throw
+     (ex-info "Unknown production HumanHelp Request operation."
+              {:request-id request-id
+               :operation operation}))))
+
 (defn action-url
+  "Temporary old-example action adapter.
+
+   New code must call operation-url with the production semantic operation. This
+   function exists only so the currently installed request-card/app continue to
+   assemble during the next two whole-file cutovers."
   [request-id action]
   (case action
     :claim
-    (claim-request-url request-id)
+    (operation-url request-id :request/claim)
 
     :unclaim
-    (unclaim-request-url request-id)
+    (operation-url request-id :request/unclaim)
 
     :take-over
-    (take-over-request-url request-id)
+    (operation-url request-id :request/mark-on-the-way)
 
     :done
-    (done-request-url request-id)
+    (operation-url request-id :request/complete)
 
     :cancel
-    (cancel-request-url request-id)
+    (operation-url request-id :request/cancel)
 
     (throw
-     (ex-info "Unknown Human Help request action."
+     (ex-info "Unknown temporary Human Help request action."
               {:request-id request-id
-               :action     action}))))
+               :action action}))))
 
 ;; -----------------------------------------------------------------------------
 ;; Dev/demo
