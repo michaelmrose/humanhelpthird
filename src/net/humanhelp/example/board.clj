@@ -38,6 +38,7 @@
    [clojure.string :as str]
    [gesso.live.consistency.xtdb :as xtdb-live]
    [gesso.live.core :as live]
+   [net.humanhelp.site.model.organization.core :as organization]
    [net.humanhelp.site.model.request.choreo :as request.choreo]
    [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.model.user.core :as user])
@@ -228,7 +229,18 @@
      :primary-helper-user primary-helper-user}))
 
 (defn request-rows-for-location
-  "Read all production Requests for one production Location and compose rows."
+  "Read all production Requests for one production Location and compose rows.
+
+   Request's public collection read deliberately requires both Organization and
+   Location identity because those are persisted Request ownership facts. The
+   example board starts from a Location scope, so it derives the owning
+   Organization through the public Organization model rather than guessing,
+   hard-coding a fixture Organization, or bypassing Request's public API.
+
+   Terminal Requests are included in the authoritative read because hiding or
+   showing terminal rows is board presentation state. Query-time omission would
+   make :show-terminal? incapable of revealing them and would undercount the
+   board's terminal population."
   [ctx location-id]
   (when-not
    (uuid? location-id)
@@ -236,11 +248,21 @@
      (ex-info
       "HumanHelp example board requires a production Location UUID."
       {:location-id location-id})))
-  (mapv
-   #(request-row ctx %)
-   (request/requests-for-location
-    ctx
-    location-id)))
+  (let [location-document
+        (organization/require-location
+         ctx
+         location-id)
+
+        organization-id
+        (organization/location-organization-id
+         location-document)]
+    (mapv
+     #(request-row ctx %)
+     (request/requests-for-location
+      ctx
+      {:organization-id organization-id
+       :location-id location-id
+       :include-terminal? true}))))
 
 ;; =============================================================================
 ;; Row facts used only for presentation
