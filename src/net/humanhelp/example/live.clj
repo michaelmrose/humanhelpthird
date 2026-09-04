@@ -15,8 +15,8 @@
    - fragment query/render descriptors;
    - fragment panel/response/stream helpers;
    - client-only continuity;
-   - a few temporary app-facing change/toast helpers kept only until the old
-     example.app mutation handlers are removed.
+   - temporary demo-reset/toast helpers kept only until the remaining old
+     example.app setup handlers are removed.
 
    Domain truth, lifecycle transitions, persistence, authorization, Choreo
    capabilities, and Request read composition live in production model/Choreo
@@ -363,90 +363,13 @@
       options)))))
 
 ;; =============================================================================
-;; Temporary app-facing semantic change helpers
+;; Temporary demo-reset compatibility
 ;; =============================================================================
 ;;
-;; Production Request FX already emits :request changes.  These constructors are
-;; retained only so the not-yet-replaced example.app demo mutation handlers keep
-;; loading between revisions.  They deliberately emit the same production
-;; :request topic/location routing shape, and can be deleted with those handlers.
-
-(defn- canonical-operation
-  [action]
-  (case action
-    :claim :request/claim
-    :unclaim :request/unclaim
-    :take-over :request/mark-on-the-way
-    :done :request/complete
-    :cancel :request/cancel
-    :request/claim :request/claim
-    :request/unclaim :request/unclaim
-    :request/mark-on-the-way :request/mark-on-the-way
-    :request/complete :request/complete
-    :request/cancel :request/cancel
-    :request/reassign :request/reassign
-    action))
-
-(defn- request-id-value
-  [request-document]
-  (or (:xt/id request-document)
-      (:request/id request-document)))
-
-(defn- request-status-value
-  [request-document]
-  (:request/status request-document))
-
-(defn- request-change-base
-  [request-document operation]
-  {:topic :request
-   :id (request-id-value request-document)
-   :request/operation (canonical-operation operation)
-   :request/id (request-id-value request-document)
-   :request/location-id location-id
-   :request/status (request-status-value request-document)})
-
-(defn request-created-change
-  [{:keys [request revision actor]}]
-  (cond->
-   (assoc
-    (request-change-base request :request/create)
-    :change/kind :created)
-    revision
-    (assoc :request/revision revision)
-
-    (:user/id actor)
-    (assoc :actor/id (:user/id actor))))
-
-(defn request-transition-topic
-  "Return the production Choreo outcome keyword for one lifecycle action.
-
-   Legacy unqualified action names are accepted only until example.app is cut
-   over; callers should use production :request/* operation identities."
-  [action]
-  (case (canonical-operation action)
-    :request/claim :request/claimed
-    :request/unclaim :request/unclaimed
-    :request/mark-on-the-way :request/on-the-way
-    :request/complete :request/completed
-    :request/cancel :request/cancelled
-    :request/reassign :request/reassigned
-    (throw
-     (ex-info
-      "Unknown HumanHelp Request transition operation."
-      {:action action}))))
-
-(defn request-transition-change
-  [{:keys [action request previous revision actor]}]
-  (cond->
-   (merge
-    (request-change-base request action)
-    {:change/kind :updated
-     :request/previous-status (request-status-value previous)})
-    revision
-    (assoc :request/revision revision)
-
-    (:user/id actor)
-    (assoc :actor/id (:user/id actor))))
+;; Production Request lifecycle mutations no longer pass through example.live:
+;; Request FX publishes the canonical :request change directly.  The reset
+;; constructor remains only while example.app still owns its old demo reset
+;; handler.  It is intentionally not a Request lifecycle transition adapter.
 
 (defn demo-reset-change
   "Temporary wake-up used only by the old demo reset handler."
@@ -463,6 +386,11 @@
 
     (:user/id actor)
     (assoc :actor/id (:user/id actor))))
+
+(defn- request-id-value
+  [request-document]
+  (or (:xt/id request-document)
+      (:request/id request-document)))
 
 ;; =============================================================================
 ;; Page-global notifications
