@@ -17,7 +17,7 @@
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.example.components.refresh-button.core :refer [refresh-button]]
    [net.humanhelp.example.board :as board]
-   [net.humanhelp.example.components.request-card.production :as production-card]
+   [net.humanhelp.example.components.request-card.core :as request-card]
    [net.humanhelp.example.routes :as routes]
    [net.humanhelp.ui :as ui]))
 
@@ -591,7 +591,7 @@
    :viewer is the authenticated production User document. The card receives the
    stable board-state include selector but no example-model Request projection."
   [ctx {:keys [row viewer open?]}]
-  (production-card/request-card
+  (request-card/request-card
    ctx
    {:row row
     :viewer viewer
