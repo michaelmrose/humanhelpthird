@@ -127,18 +127,14 @@
   (doseq [{:keys [route-id handler]} lifecycle-handlers]
     (is (identical? handler (get app/handlers route-id))
         (str route-id " must route to its production lifecycle handler.")))
-  (is (= routes/mark-on-the-way-request-id
-         routes/take-over-request-id)
-      "The temporary take-over symbol is only an alias of the production route id.")
-  (is (= routes/complete-request-id
-         routes/done-request-id)
-      "The temporary done symbol is only an alias of the production route id.")
-  (is (identical? app/mark-on-the-way-request!
-                  (get app/handlers routes/take-over-request-id))
-      "The alias resolves to the canonical production handler, not a second path.")
-  (is (identical? app/complete-request!
-                  (get app/handlers routes/done-request-id))
-      "The alias resolves to the canonical production handler, not a second path."))
+  (is (= #{routes/claim-request-id
+           routes/unclaim-request-id
+           routes/mark-on-the-way-request-id
+           routes/complete-request-id
+           routes/cancel-request-id
+           routes/reassign-request-id}
+         (set (map :route-id lifecycle-handlers)))
+      "The lifecycle contract names only canonical production route identities."))
 
 (deftest every-lifecycle-route-binds-exact-operation-and-request-id-test
   (doseq [{:keys [operation handler]} lifecycle-handlers]
