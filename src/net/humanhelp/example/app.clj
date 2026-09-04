@@ -17,15 +17,14 @@
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
-   [gesso.choreo.identity :as choreo.identity]
    [gesso.core :as g]
    [gesso.live.core :as live]
-   [gesso.live.optimistic.protocol :as optimistic.protocol]
    [gesso.live.progression :as progression]
    [gesso.live.ui :as live.ui]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.example.live :as app-live]
    [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.optimistic :as optimistic]
    [net.humanhelp.example.routes :as routes]
    [net.humanhelp.example.views :as views]
    [net.humanhelp.middleware :as mid]
@@ -647,48 +646,6 @@
 ;; Request lifecycle actions
 ;; -----------------------------------------------------------------------------
 
-(defn- lifecycle-transition
-  [action]
-  (keyword "request" (name action)))
-
-(defn- request-revision
-  [request]
-  (or (:request/updated-revision request)
-      (:request/created-revision request)))
-
-(defn- rejection-reason
-  [result]
-  (or (get-in result [:error :error/type])
-      (get-in result [:error :message])
-      (:reason result)
-      :request/rejected))
-
-(defn- notify-transition-safely!
-  [result {:keys [action request previous revision actor]}]
-  (try
-    (notify!
-     (committed-ctx result)
-     (transaction-bound-change
-      result
-      (app-live/request-transition-change
-       {:action   action
-        :request  request
-        :previous previous
-        :revision revision
-        :actor    actor})))
-    (catch Exception e
-      ;; The model transaction is already committed. Observer delivery must not
-      ;; convert that committed mutation into an HTTP/model failure. The emitted
-      ;; primary change is nevertheless bound to the exact commit progression so
-      ;; successful delivery drives progression-safe fragment refreshes.
-      (println
-       "[humanhelp] request transition notification failed"
-       {:message     (.getMessage e)
-        :action      action
-        :request/id  (:request/id request)
-        :revision    revision
-        :progression (get-in result [:transaction :progression])}))))
-
 (def optimistic-command-param
   "HTMX parameter installed by Gesso's protocol-v3 optimistic browser bridge."
   "__gesso_live_optimistic_command")
@@ -696,10 +653,11 @@
 (defn- optimistic-command-wire
   "Read one protocol-v3 optimistic command wire value from the HTMX request.
 
-   The browser bridge encodes portable EDN into a normal request parameter.
-   EDN parsing establishes only shape. Authentication, operation resolution,
-   authorization, current-state reread, and mutation remain trusted server/model
-   responsibilities."
+   The browser bridge serializes one portable command envelope as EDN in a
+   normal request parameter. EDN parsing establishes only transport shape;
+   example.optimistic/decode-command performs the protocol-v3 validation and
+   example.optimistic/run-command establishes authenticated production
+   authority."
   [ctx]
   (let [encoded (param ctx optimistic-command-param)]
     (when-not (and (string? encoded)
@@ -717,138 +675,21 @@
           {:parameter optimistic-command-param}
           e))))))
 
-(defn- lifecycle-authoritative
-  "Build the trusted protocol-v3 authoritative observation for one demo request.
+(defn- route-request-id!
+  "Return the production Request UUID selected by the concrete HTTP route.
 
-   The removable example uses its monotonic store revision as the authority
-   basis. The projection is the authoritative request value itself; Gesso treats
-   that projection as opaque application data and never infers authorization
-   from it."
-  [request revision]
-  (when request
-    (optimistic.protocol/authoritative
-     {:presence      :present
-      :basis         revision
-      :projection    request
-      :fact-versions {:request/revision (request-revision request)}})))
-
-(defn- lifecycle-operation-result
-  [ctx action result]
-  (case (:status result)
-    :ok
-    {:resolution    :confirmed
-     :authoritative (lifecycle-authoritative
-                     (:request result)
-                     (:revision result))
-     :outcome       (app-live/request-transition-topic action)}
-
-    :error
-    (let [request  (:request result)
-          revision (model/latest-revision ctx)]
-      (cond->
-       {:resolution :rejected
-        :reason     (rejection-reason result)}
-        request
-        (assoc :authoritative
-               (lifecycle-authoritative request revision))))
-
-    (throw
-     (ex-info
-      "Human Help lifecycle transition returned an unsupported result status."
-      {:action action
-       :status (:status result)
-       :result result}))))
-
-(defn- lifecycle-operation
-  "Construct one trusted protocol-v3 optimistic operation for the removable
-   example.
-
-   Browser arguments remain untrusted. The operation derives the actor from the
-   trusted Ring/Biff context, rereads current demo state through the public demo
-   model transition, and only then classifies the semantic settlement."
-  [action transition-fn]
-  (let [operation (lifecycle-transition action)]
-    (live/optimistic-operation
-     {:name      (keyword "humanhelp.example.optimistic" (name action))
-      :operation operation
-      :execute!
-      (fn [{:keys [ctx arguments]}]
-        (let [user       (current-user ctx)
-              request-id (:request-id arguments)
-              result
-              (transition-fn
-               ctx
-               {:request-id request-id
-                :user       user})]
-          (when (= :ok (:status result))
-            (notify-transition-safely!
-             result
-             {:action   action
-              :request  (:request result)
-              :previous (:previous result)
-              :revision (:revision result)
-              :actor    user}))
-          (lifecycle-operation-result ctx action result)))})))
-
-(def optimistic-server
-  "Trusted protocol-v3 server registry for the removable example's lifecycle
-   actions.
-
-   Rendering an optimistic affordance does not grant authority. Principal is
-   reconstructed from trusted request/session context on every command, and a
-   browser can select only operations present in this registry."
-  (live/optimistic-server
-   {:principal-fn
-    (fn [ctx]
-      (let [user-id (:user/id (current-user ctx))]
-        (when-not user-id
-          (throw
-           (ex-info
-            "Human Help optimistic lifecycle action requires an authenticated user."
-            {})))
-        (choreo.identity/principal user-id)))
-
-    :operations
-    {:request/claim
-     (lifecycle-operation :claim model/claim-request!)
-
-     :request/unclaim
-     (lifecycle-operation :unclaim model/unclaim-request!)
-
-     :request/take-over
-     (lifecycle-operation :take-over model/take-over-request!)
-
-     :request/done
-     (lifecycle-operation :done model/mark-request-done!)
-
-     :request/cancel
-     (lifecycle-operation :cancel model/cancel-request!)}}))
-
-(defn- require-route-command!
-  "Fail closed when browser command semantics do not match the HTTP route.
-
-   The browser is allowed to propose a semantic command, but it may not turn a
-   /claim endpoint into some other registered operation or retarget the route to
-   a different request id by rewriting the optimistic command parameter."
-  [ctx action command]
-  (let [expected-operation (lifecycle-transition action)
-        expected-request-id (request-id ctx)
-        actual-operation (:operation command)
-        actual-request-id (get-in command [:arguments :request-id])]
-    (when-not (= expected-operation actual-operation)
-      (throw
-       (ex-info
-        "Human Help optimistic command does not match the lifecycle route operation."
-        {:expected-operation expected-operation
-         :actual-operation   actual-operation})))
-    (when-not (= expected-request-id actual-request-id)
-      (throw
-       (ex-info
-        "Human Help optimistic command request id does not match the lifecycle route."
-        {:expected-request-id expected-request-id
-         :actual-request-id   actual-request-id
-         :operation           actual-operation})))
-    command))
+   Route strings are transport data. Production Request choreography and model
+   operations are UUID based, so malformed ids fail at the HTTP boundary rather
+   than being compared later against a typed command id."
+  [ctx]
+  (let [raw (request-id ctx)]
+    (or
+     (->uuid raw)
+     (throw
+      (ex-info
+       "Human Help Request lifecycle route requires a UUID Request id."
+       {:error/type :humanhelp.example/invalid-request-id
+        :request-id raw})))))
 
 (defn- settlement-request
   [settlement]
@@ -857,11 +698,11 @@
 (defn- lifecycle-response-extra
   "Render only direct-settlement extras that do not compete with managed Live.
 
-   Successful lifecycle mutations publish progression-bound Live invalidations
-   from inside the trusted operation. Their toolbar/list canonical rendering is
-   therefore left to managed fragment refresh; the direct response carries only
-   board-state continuity and user feedback."
-  [ctx {:keys [action view-state settlement]}]
+   Production request.core operations already commit and publish their semantic
+   Request changes through gesso.model.tx/transact! -> Live. The direct HTTP
+   response therefore carries only board-state continuity and user feedback;
+   canonical Request rendering belongs to the progression-safe Live refresh."
+  [ctx {:keys [operation view-state settlement]}]
   (let [request    (settlement-request settlement)
         resolution (:resolution settlement)]
     (cond
@@ -869,7 +710,7 @@
                  resolution)
       (views/request-lifecycle-extras
        ctx
-       {:action     action
+       {:action     operation
         :request    request
         :view-state view-state})
 
@@ -882,35 +723,47 @@
       (throw
        (ex-info
         "Human Help optimistic lifecycle response received an unsupported settlement resolution."
-        {:action     action
+        {:operation  operation
          :settlement settlement})))))
 
 (defn- lifecycle-action!
-  "Run one request lifecycle endpoint through Gesso Live optimistic protocol v3.
+  "Execute one production Request choreography selected by an HTTP route.
 
-   The browser supplies only an encoded semantic command. This route binds that
-   command to the route's operation and request id before the trusted Gesso
-   server registry authenticates principal, resolves the operation, invokes the
-   demo model transition, and constructs the settlement.
+   The route owns transport binding only:
 
-   The HTTP response carries one inert settlement marker plus actor-specific OOB
-   extras. Canonical card installation/reconciliation belongs to the ordinary
-   Live/HTMX authoritative refresh path, not to a server-supplied Hiccup payload
-   embedded inside the settlement."
-  [ctx action]
+     browser EDN command
+       -> protocol-v3 decode
+       -> bind semantic operation + Request UUID to this concrete route
+       -> example.optimistic/run-command
+       -> production request.choreo operation entry
+       -> request.core authoritative operation
+
+   No Request policy, principal selection, settlement construction, mutation,
+   notification, or authoritative basis construction is implemented here.
+   Production Request FX/Gesso model transactions already publish progression-
+   bound Live changes after commit, so this route must not emit a duplicate
+   application-level lifecycle notification."
+  [ctx operation]
   (let [view-state
         (normalized-view-state
          ctx
          (request-view-state ctx))
 
+        request-id
+        (route-request-id! ctx)
+
         command
-        (->> (optimistic-command-wire ctx)
-             live/decode-optimistic-command
-             (require-route-command! ctx action))
+        (optimistic/decode-command
+         (optimistic-command-wire ctx))
+
+        command
+        (optimistic/require-request-command!
+         command
+         {:operation operation
+          :request-id request-id})
 
         prepared
-        (live/run-optimistic-command
-         optimistic-server
+        (optimistic/run-command
          ctx
          command)
 
@@ -920,7 +773,7 @@
         extra
         (lifecycle-response-extra
          ctx
-         {:action     action
+         {:operation  operation
           :view-state view-state
           :settlement settlement})]
     (optimistic-html
@@ -929,23 +782,27 @@
 
 (defn claim-request!
   [ctx]
-  (lifecycle-action! ctx :claim))
+  (lifecycle-action! ctx :request/claim))
 
 (defn unclaim-request!
   [ctx]
-  (lifecycle-action! ctx :unclaim))
+  (lifecycle-action! ctx :request/unclaim))
 
-(defn take-over-request!
+(defn mark-on-the-way-request!
   [ctx]
-  (lifecycle-action! ctx :take-over))
+  (lifecycle-action! ctx :request/mark-on-the-way))
 
-(defn mark-request-done!
+(defn complete-request!
   [ctx]
-  (lifecycle-action! ctx :done))
+  (lifecycle-action! ctx :request/complete))
 
 (defn cancel-request!
   [ctx]
-  (lifecycle-action! ctx :cancel))
+  (lifecycle-action! ctx :request/cancel))
+
+(defn reassign-request!
+  [ctx]
+  (lifecycle-action! ctx :request/reassign))
 
 ;; -----------------------------------------------------------------------------
 ;; Dev/demo reset
@@ -993,11 +850,12 @@
    routes/search-requests-id     search-requests
    routes/apply-board-options-id apply-board-options
 
-   routes/claim-request-id     claim-request!
-   routes/unclaim-request-id   unclaim-request!
-   routes/take-over-request-id take-over-request!
-   routes/done-request-id      mark-request-done!
-   routes/cancel-request-id    cancel-request!
+   routes/claim-request-id           claim-request!
+   routes/unclaim-request-id         unclaim-request!
+   routes/mark-on-the-way-request-id mark-on-the-way-request!
+   routes/complete-request-id        complete-request!
+   routes/cancel-request-id          cancel-request!
+   routes/reassign-request-id        reassign-request!
 
    routes/reset-demo-id reset-demo!})
 
