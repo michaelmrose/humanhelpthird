@@ -48,13 +48,6 @@
        (sort-by str)
        vec))
 
-(defn- file-namespaces
-  [path]
-  (->> (re-seq namespace-declaration-pattern (slurp (str path)))
-       (map second)
-       (map symbol)
-       vec))
-
 (defn- relative-path
   [repo-root path]
   (-> (fs/relativize repo-root path)
@@ -89,34 +82,45 @@
 (defn- inspect-file
   [repo-root path]
   (let [relative (relative-path repo-root path)
-        namespaces (file-namespaces path)]
-    (cond
-      (not= 1 (count namespaces))
+        contents (slurp (str path))]
+    (if (str/blank? contents)
       {:file relative
-       :problems
-       [(str "cannot determine exactly one namespace for " relative
-             " (found " (count namespaces) ")")]}
+       :warnings
+       [(str "empty source placeholder: " relative)]
+       :problems []}
+      (let [namespaces (->> (re-seq namespace-declaration-pattern contents)
+                            (map second)
+                            (map symbol)
+                            vec)]
+        (cond
+          (not= 1 (count namespaces))
+          {:file relative
+           :warnings []
+           :problems
+           [(str "cannot determine exactly one namespace for " relative
+                 " (found " (count namespaces) ")")]}
 
-      :else
-      (let [namespace (first namespaces)
-            tree (file-tree relative)
-            extension (file-extension relative)
-            expected (canonical-path tree namespace extension)]
-        {:file relative
-         :namespace namespace
-         :problems
-         (cond-> []
-           (not= relative expected)
-           (conj
-            (str "namespace/path mismatch: " relative
-                 " declares " namespace
-                 "; canonical path is " expected))
+          :else
+          (let [namespace (first namespaces)
+                tree (file-tree relative)
+                extension (file-extension relative)
+                expected (canonical-path tree namespace extension)]
+            {:file relative
+             :namespace namespace
+             :warnings []
+             :problems
+             (cond-> []
+               (not= relative expected)
+               (conj
+                (str "namespace/path mismatch: " relative
+                     " declares " namespace
+                     "; canonical path is " expected))
 
-           (and (= tree "src")
-                (test-namespace? namespace))
-           (conj
-            (str "test namespace is installed under src/: " relative
-                 " declares " namespace)))}))))
+               (and (= tree "src")
+                    (test-namespace? namespace))
+               (conj
+                (str "test namespace is installed under src/: " relative
+                     " declares " namespace)))}))))))
 
 (defn- duplicate-namespace-problems
   [inspections]
@@ -162,6 +166,7 @@
                  (inspect-file repo-root path)
                  (catch Throwable error
                    {:file (relative-path repo-root path)
+                    :warnings []
                     :problems
                     [(str "cannot read namespace for "
                           (relative-path repo-root path)
@@ -169,10 +174,16 @@
                           (ex-message error))]})))
              files)
 
+            warnings
+            (vec (mapcat :warnings inspections))
+
             problems
             (into
              (vec (mapcat :problems inspections))
              (duplicate-namespace-problems inspections))]
+        (binding [*out* *err*]
+          (doseq [warning warnings]
+            (println (str "repo-integrity: WARNING — " warning))))
         (if (seq problems)
           (do
             (binding [*out* *err*]
@@ -181,13 +192,17 @@
               (println
                (str "repo-integrity: FAIL — "
                     (count problems)
-                    " problem(s) across "
+                    " problem(s), "
+                    (count warnings)
+                    " warning(s) across "
                     (count files)
-                    " namespace file(s)")))
+                    " source file(s)")))
             (System/exit 1))
           (println
            (str "repo-integrity: PASS — "
                 (count files)
-                " namespace file(s)")))))))
+                " source file(s), "
+                (count warnings)
+                " warning(s)")))))))
 
 (run!)
