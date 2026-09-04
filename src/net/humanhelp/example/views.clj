@@ -9,14 +9,15 @@
    - Ring route tables
    - lifecycle mutation
 
-   Data comes in from app/live/model boundary namespaces."
+   Production Request board data comes from net.humanhelp.example.board; HTTP/live
+   boundary namespaces supply already-composed render inputs."
   (:require
    [clojure.string :as str]
    [gesso.core :as g]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.example.components.refresh-button.core :refer [refresh-button]]
-   [net.humanhelp.example.components.request-card.core :refer [request-card]]
-   [net.humanhelp.example.model :as model]
+   [net.humanhelp.example.board :as board]
+   [net.humanhelp.example.components.request-card.production :as production-card]
    [net.humanhelp.example.routes :as routes]
    [net.humanhelp.ui :as ui]))
 
@@ -115,7 +116,7 @@
 (defn created-order-param-value
   [view-state]
   (name (or (:created-order view-state)
-            model/default-created-order
+            board/default-created-order
             :newest)))
 
 (defn board-state-option-hidden-inputs
@@ -296,6 +297,43 @@
     :errors errors
     :open?  open?}))
 
+(defn- created-order-options
+  [active-created-order]
+  (let [active (board/normalize-created-order active-created-order)]
+    [{:id :newest
+      :label "Newest first"
+      :description "Show the newest requests first."
+      :active? (= :newest active)}
+     {:id :oldest
+      :label "Oldest first"
+      :description "Show the oldest requests first."
+      :active? (= :oldest active)}]))
+
+(defn- board-option-metadata
+  [view-state]
+  (let [view-state (board/normalize-view-state view-state)]
+    {:created-order-options
+     (created-order-options (:created-order view-state))
+
+     :priority-sort-options
+     [{:id :mine-first
+       :label "Mine first"
+       :description "Prioritize requests you made or are helping with."
+       :enabled-key :mine-first?
+       :checked? (:mine-first? view-state)}
+      {:id :unclaimed-first
+       :label "Unclaimed first"
+       :description "Prioritize requests that are still available to claim."
+       :enabled-key :unclaimed-first?
+       :checked? (:unclaimed-first? view-state)}]
+
+     :terminal-visibility-option
+     {:id :show-terminal
+      :label "Show done and cancelled"
+      :description "Include closed requests instead of showing only active requests."
+      :enabled-key :show-terminal?
+      :checked? (:show-terminal? view-state)}}))
+
 ;; -----------------------------------------------------------------------------
 ;; Board options dialog
 ;; -----------------------------------------------------------------------------
@@ -322,7 +360,7 @@
   (let [active-id (or (some (fn [{:keys [id active?]}]
                               (when active? id))
                             created-order-options)
-                      model/default-created-order)]
+                      board/default-created-order)]
     (g/field
      {:for        "humanhelp-created-order"
       :label-text "Sort order"
@@ -362,7 +400,7 @@
                created-order-options
                priority-sort-options
                terminal-visibility-option]}]
-  (let [metadata                   (model/board-option-metadata (or view-state {}))
+  (let [metadata                   (board-option-metadata (or view-state {}))
         created-order-options      (or created-order-options
                                        (:created-order-options metadata))
         priority-sort-options      (or priority-sort-options
@@ -537,59 +575,95 @@
 (defn empty-request-list
   [{:keys [view-state]}]
   (g/empty-state
-   {:title       (if (model/present? (:search view-state))
+   {:title       (if (board/present? (:search view-state))
                    "No matching requests"
                    "No requests yet")
-    :description (if (model/present? (:search view-state))
+    :description (if (board/present? (:search view-state))
                    "Try fewer words or a different person, area, request, or status."
                    "Create a request with the plus button to start the demo.")
     :icon        (g/empty-state-icon)}))
 
-(defn request-card-node
-  "Render one authoritative request card with the stable board-state include.
+(defn- legacy-request-card
+  "Temporary compatibility render used only while example.live/app still emit the
+   former demo :requests shape.
 
-   This helper centralizes the canonical server-rendered card shape used by the
-   board. Protocol-v3 provisional DOM is derived by Gesso in the browser; this
-   view renders authoritative application state only."
-  [ctx {:keys [request user view-state open?]}]
-  (request-card
+   The production path below never resolves this Var. Remove this helper as soon
+   as example.live is cut over to :rows. Keeping the dependency dynamic prevents
+   the production view graph from acquiring a static edge back to example.model."
+  [ctx opts]
+  (let [request-card-var
+        (or
+         (requiring-resolve
+          'net.humanhelp.example.components.request-card.core/request-card)
+         (throw
+          (ex-info
+           "Could not resolve temporary legacy HumanHelp request card."
+           {})))]
+    (request-card-var ctx opts)))
+
+(defn request-card-node
+  "Render one production Request board row.
+
+   :row is the production-backed shape from net.humanhelp.example.board and
+   :viewer is the authenticated production User document. The card receives the
+   stable board-state include selector but no example-model Request projection."
+  [ctx {:keys [row viewer open?]}]
+  (production-card/request-card
    ctx
-   {:request              request
-    :user                 user
-    :view-state           view-state
+   {:row row
+    :viewer viewer
     :board-state-selector (board-state-selector)
-    :open?                (boolean open?)}))
+    :open? (boolean open?)}))
 
 (defn request-accordion
-  [{:keys [ctx user view-state requests]}]
+  [{:keys [ctx viewer rows requests user view-state]}]
   (apply
    g/accordion
    {:type         :single
     :collapsible? true
     :class        "content-stack-theme shadow-none"
     :attrs        {:data-humanhelp-request-accordion true}}
-   (map
-    (fn [request]
-      (request-card-node
-       ctx
-       {:request    request
-        :user       user
-        :view-state view-state}))
-    requests)))
+   (if (some? rows)
+     (map
+      (fn [row]
+        (request-card-node
+         ctx
+         {:row row
+          :viewer viewer}))
+      rows)
+     ;; Transitional only: the currently installed example.live still returns
+     ;; :requests.  The following revision removes this path by making Live query
+     ;; production board rows directly.
+     (map
+      (fn [request]
+        (legacy-request-card
+         ctx
+         {:request request
+          :user user
+          :view-state view-state
+          :board-state-selector (board-state-selector)
+          :open? false}))
+      requests))))
 
 (defn request-list-fragment
-  [{:keys [ctx user view-state requests latest-revision]}]
-  [:div {:id                      request-list-dom-id
-         :data-humanhelp-fragment "request-list"
-         :data-latest-revision    latest-revision
-         :class                   "content-stack-theme"}
-   (if (seq requests)
-     (request-accordion
-      {:ctx        ctx
-       :user       user
-       :view-state view-state
-       :requests   requests})
-     (empty-request-list {:view-state view-state}))])
+  [{:keys [ctx viewer rows user view-state requests latest-revision]}]
+  (let [production? (some? rows)
+        items (if production? rows requests)]
+    [:div {:id                      request-list-dom-id
+           :data-humanhelp-fragment "request-list"
+           :data-latest-revision    latest-revision
+           :class                   "content-stack-theme"}
+     (if (seq items)
+       (request-accordion
+        (if production?
+          {:ctx ctx
+           :viewer viewer
+           :rows rows}
+          {:ctx ctx
+           :user user
+           :view-state view-state
+           :requests requests}))
+       (empty-request-list {:view-state view-state}))]))
 
 ;; -----------------------------------------------------------------------------
 ;; Page
@@ -634,6 +708,54 @@
       {:view-state            view-state
        :request-toolbar-panel request-toolbar-panel
        :request-list-panel    request-list-panel})])))
+
+(defn- request-action-label
+  [action]
+  (case action
+    :request/claim "Claim"
+    :request/unclaim "Unclaim"
+    :request/mark-on-the-way "On the way"
+    :request/complete "Done"
+    :request/cancel "Cancel"
+    :request/reassign "Reassign"
+    ;; Temporary labels used only by the not-yet-cut-over app handlers.
+    :claim "Claim"
+    :unclaim "Unclaim"
+    :take-over "On the way"
+    :done "Done"
+    :cancel "Cancel"
+    (-> action name (str/replace "-" " ") str/capitalize)))
+
+(defn- request-reference
+  [request]
+  (or (:request/number request)
+      (:request/id request)
+      ""))
+
+(defn- request-action-result-message
+  [action request]
+  (let [reference (request-reference request)]
+    (cond
+      (contains? #{:request/claim :claim} action)
+      (str "Claimed request " reference ".")
+
+      (contains? #{:request/unclaim :unclaim} action)
+      (str "Unclaimed request " reference ".")
+
+      (contains? #{:request/mark-on-the-way :take-over} action)
+      (str "Marked request " reference " on the way.")
+
+      (contains? #{:request/complete :done} action)
+      (str "Marked request " reference " done.")
+
+      (contains? #{:request/cancel :cancel} action)
+      (str "Cancelled request " reference ".")
+
+      (= :request/reassign action)
+      (str "Reassigned request " reference ".")
+
+      :else
+      (str "Updated request " reference "."))))
 
 ;; -----------------------------------------------------------------------------
 ;; OOB / response helpers
@@ -731,8 +853,8 @@
      (g/render-toast-oob
       {:variant     :success
        :duration    2500
-       :title       (model/action-label action)
-       :description (model/action-result-message action request)}))))
+       :title       (request-action-label action)
+       :description (request-action-result-message action request)}))))
 
 (defn request-action-error
   [{:keys [result]}]
