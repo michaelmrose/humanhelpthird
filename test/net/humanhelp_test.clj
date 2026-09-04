@@ -7,10 +7,11 @@
    longer compiles against the current Gesso/Biff stack, loading this test
    namespace must fail before any assertion runs.
 
-   During the temporary HumanHelp proving-app cutover, both the unfinished site
-   UI module and the production-model-backed example module are loaded here so
-   the top-level /app switch can be made as a separate whole-file revision
-   without weakening application assembly checks.
+   During the temporary HumanHelp proving-app phase, the global /app module is
+   intentionally the production-model-backed example application. This is a
+   deliberate integration boundary: the example UI is the active proving
+   surface while production site.model.* namespaces remain the semantic source
+   of truth.
 
    These tests do not start XTDB, Aleph, or Gesso Live. The heavier
    runtime/integration suites own those boundaries."
@@ -24,7 +25,6 @@
    [net.humanhelp.example.app :as example]
    [net.humanhelp.home :as home]
    [net.humanhelp.schema :as schema]
-   [net.humanhelp.site.app :as site]
    [net.humanhelp.ui :as ui]))
 
 (defn- contributes-module?
@@ -34,12 +34,6 @@
     #(identical? module %)
     humanhelp/modules)))
 
-(defn- supported-app-module?
-  [module]
-  (or
-   (identical? module site/module)
-   (identical? module example/module)))
-
 (deftest application-entrypoint-assembles-test
   (testing "the top-level Ring application is assembled without starting runtime components"
     (is (vector? humanhelp/modules))
@@ -48,8 +42,8 @@
     (is (seq humanhelp/routes))
     (is (ifn? humanhelp/handler)))
 
-  (testing "the global /app module is one of the two explicit HumanHelp application surfaces during cutover"
-    (is (supported-app-module? app/module)))
+  (testing "the global /app module is the production-model-backed example proving application"
+    (is (identical? example/module app/module)))
 
   (testing "the example proving module is structurally ready to become the global /app surface"
     (is (map? example/module))
