@@ -109,8 +109,6 @@
 (def cancel-request-id
   :humanhelp/cancel-request)
 
-(def reset-demo-id
-  :humanhelp/reset-demo)
 
 ;; -----------------------------------------------------------------------------
 ;; Relative route fragments for Reitit nesting under base-path
@@ -164,8 +162,6 @@
 (def cancel-request-route
   "/requests/:request-id/cancel")
 
-(def reset-demo-route
-  "/demo/reset")
 
 ;; -----------------------------------------------------------------------------
 ;; Route specs
@@ -235,10 +231,7 @@
    {:id     reassign-request-id
     :method :post
     :route  reassign-request-route}
-
-   {:id     reset-demo-id
-    :method :post
-    :route  reset-demo-route}])
+])
 
 (def route-spec-by-id
   (into {}
@@ -298,11 +291,9 @@
   "Production Request routes whose UI is not yet a required part of the example.
 
    Reassign needs a selected target helper, so it remains optional until the
-   manager affordance is added. Demo reset is also temporarily optional while
-   its last example.model-backed handler is retired. Optional means only route
-   assembly is optional; when present, the route still binds normally."
-  [reassign-request-id
-   reset-demo-id])
+   manager affordance is added. Optional means only route assembly is optional;
+   when present, the route still binds normally."
+  [reassign-request-id])
 
 (defn route-table
   "Return a Reitit route table for Human Help.
@@ -594,11 +585,3 @@
               {:request-id request-id
                :operation operation}))))
 
-
-;; -----------------------------------------------------------------------------
-;; Dev/demo
-;; -----------------------------------------------------------------------------
-
-(defn reset-demo-url
-  []
-  (path reset-demo-route))
