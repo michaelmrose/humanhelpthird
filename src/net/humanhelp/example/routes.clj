@@ -109,7 +109,6 @@
 (def cancel-request-id
   :humanhelp/cancel-request)
 
-
 ;; -----------------------------------------------------------------------------
 ;; Relative route fragments for Reitit nesting under base-path
 ;; -----------------------------------------------------------------------------
@@ -161,7 +160,6 @@
 
 (def cancel-request-route
   "/requests/:request-id/cancel")
-
 
 ;; -----------------------------------------------------------------------------
 ;; Route specs
@@ -230,8 +228,7 @@
 
    {:id     reassign-request-id
     :method :post
-    :route  reassign-request-route}
-])
+    :route  reassign-request-route}])
 
 (def route-spec-by-id
   (into {}

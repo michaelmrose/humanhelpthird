@@ -129,7 +129,7 @@
       (into [:oob] nodes))
     g/html-response identity
     live/complete-optimistic-send (fn [_] nil)]
-   (f)))
+    (f)))
 
 (deftest handlers-register-the-production-request-lifecycle-test
   (is (= 6 (count lifecycle-handlers)))
@@ -163,9 +163,9 @@
                  (fn [request-ctx decoded-command]
                    (reset! seen [request-ctx decoded-command])
                    prepared)]
-                (handler
-                 (ctx request-id
-                      (encoded-command operation)))))]
+                 (handler
+                  (ctx request-id
+                       (encoded-command operation)))))]
         (is (= operation
                (get-in @seen [1 :operation])))
         (is (= request-id
@@ -190,11 +190,11 @@
              (fn [& _]
                (swap! run-count inc)
                (throw (ex-info "must not run" {})))]
-            (thrown
-             (fn []
-               (app/claim-request!
-                (ctx request-id
-                     (encoded-command :request/cancel)))))))]
+             (thrown
+              (fn []
+                (app/claim-request!
+                 (ctx request-id
+                      (encoded-command :request/cancel)))))))]
     (is (= 0 @run-count))
     (is (= :net.humanhelp.example.optimistic/route-operation-mismatch
            (:error/type (ex-data error))))
@@ -212,12 +212,12 @@
              (fn [& _]
                (swap! run-count inc)
                (throw (ex-info "must not run" {})))]
-            (thrown
-             (fn []
-               (app/claim-request!
-                (ctx request-id
-                     (encoded-command :request/claim
-                                      other-request-id)))))))]
+             (thrown
+              (fn []
+                (app/claim-request!
+                 (ctx request-id
+                      (encoded-command :request/claim
+                                       other-request-id)))))))]
     (is (= 0 @run-count))
     (is (= :net.humanhelp.example.optimistic/route-request-mismatch
            (:error/type (ex-data error))))
@@ -240,13 +240,13 @@
              (fn [& _]
                (swap! run-count inc)
                (throw (ex-info "must not run" {})))]
-            (thrown
-             (fn []
-               (app/claim-request!
-                {:path-params {:request-id "not-a-uuid"}
-                 :form-params
-                 {app/optimistic-command-param
-                  (encoded-command :request/claim)}})))))]
+             (thrown
+              (fn []
+                (app/claim-request!
+                 {:path-params {:request-id "not-a-uuid"}
+                  :form-params
+                  {app/optimistic-command-param
+                   (encoded-command :request/claim)}})))))]
     (is (= 0 @decode-count))
     (is (= 0 @run-count))
     (is (= :humanhelp.example/invalid-request-id
@@ -261,11 +261,11 @@
               [optimistic/run-command
                (fn [& _]
                  (swap! run-count inc))]
-              (thrown
-               (fn []
-                 (app/claim-request!
-                  {:path-params
-                   {:request-id (str request-id)}})))))]
+               (thrown
+                (fn []
+                  (app/claim-request!
+                   {:path-params
+                    {:request-id (str request-id)}})))))]
       (is (= 0 @run-count))
       (is (instance? clojure.lang.ExceptionInfo error))))
 
@@ -277,10 +277,10 @@
               [optimistic/run-command
                (fn [& _]
                  (swap! run-count inc))]
-              (thrown
-               (fn []
-                 (app/claim-request!
-                  (ctx request-id "[not valid edn"))))))]
+               (thrown
+                (fn []
+                  (app/claim-request!
+                   (ctx request-id "[not valid edn"))))))]
       (is (= 0 @run-count))
       (is (instance? clojure.lang.ExceptionInfo error)))))
 
@@ -304,12 +304,12 @@
          model/mark-request-done! legacy-call
          model/cancel-request! legacy-call
          optimistic/run-command (fn [_ _] prepared)]
-        (doseq [{:keys [operation handler]} lifecycle-handlers]
-          (is (some?
-               (handler
-                (ctx request-id
-                     (encoded-command operation))))
-              (str operation " must bypass the legacy example model.")))))))
+         (doseq [{:keys [operation handler]} lifecycle-handlers]
+           (is (some?
+                (handler
+                 (ctx request-id
+                      (encoded-command operation))))
+               (str operation " must bypass the legacy example model.")))))))
 
 (deftest settlement-resolution-is-presentation-only-at-the-http-boundary-test
   (testing "rejection renders feedback without constructing replacement authority"
@@ -320,9 +320,9 @@
           (with-lifecycle-shell
             #(with-redefs
               [optimistic/run-command (fn [_ _] prepared)]
-              (app/claim-request!
-               (ctx request-id
-                    (encoded-command :request/claim)))))]
+               (app/claim-request!
+                (ctx request-id
+                     (encoded-command :request/claim)))))]
       (is (= [:oob
               [:settlement-marker settlement]
               [:lifecycle-error
@@ -335,11 +335,11 @@
           (with-lifecycle-shell
             #(with-redefs
               [optimistic/run-command (fn [_ _] prepared)]
-              (thrown
-               (fn []
-                 (app/claim-request!
-                  (ctx request-id
-                       (encoded-command :request/claim)))))))]
+               (thrown
+                (fn []
+                  (app/claim-request!
+                   (ctx request-id
+                        (encoded-command :request/claim)))))))]
       (is (instance? clojure.lang.ExceptionInfo error))
       (is (= :request/claim
              (:operation (ex-data error)))))))

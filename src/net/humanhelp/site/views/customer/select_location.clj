@@ -1,4 +1,4 @@
-(ns net.humanhelp.site.views.get-help.select-location
+(ns net.humanhelp.site.views.customer.select-location
   (:require
    [gesso.core :as g]
    [net.humanhelp.site.components.glow.core :as glow]
@@ -120,4 +120,3 @@
           :text    "Continue"
           :attrs
           {:type "submit"}})]]])))
-

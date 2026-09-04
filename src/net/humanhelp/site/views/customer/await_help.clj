@@ -1,4 +1,4 @@
-(ns net.humanhelp.site.views.get-help.await-help
+(ns net.humanhelp.site.views.customer.await-help
   (:require
    [gesso.core :as g]
    [net.humanhelp.site.model.request.core :as request]

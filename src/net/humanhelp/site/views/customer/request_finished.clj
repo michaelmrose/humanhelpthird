@@ -1,4 +1,4 @@
-(ns net.humanhelp.site.views.get-help.request-finished
+(ns net.humanhelp.site.views.customer.request-finished
   (:require
    [gesso.core :as g]
    [net.humanhelp.site.model.request.core :as request]

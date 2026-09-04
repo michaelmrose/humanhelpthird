@@ -218,7 +218,7 @@
             (swap! reads conj [read-ctx user-id])
             {:xt/id user-id
              :user/status :active})]
-         (optimistic/production-context ctx))]
+          (optimistic/production-context ctx))]
     (is (= [[ctx helper-id]] @reads))
     (is (= helper-id (:current-user/id result)))
     (is (= :preserved (:request/sentinel result)))
@@ -231,21 +231,21 @@
        [user/require-user
         (fn [_ctx _user-id]
           (throw missing))]
-       (is (identical?
-            missing
-            (thrown
-             #(optimistic/production-context
-               {:current-user/id helper-id})))))))
+        (is (identical?
+             missing
+             (thrown
+              #(optimistic/production-context
+                {:current-user/id helper-id})))))))
 
   (testing "the production document must agree on a UUID model identity"
     (with-redefs
      [user/require-user
       (fn [_ctx _user-id]
         {:xt/id "not-a-uuid"})]
-     (is (= :net.humanhelp.example.optimistic/invalid-production-user
-            (error-type
-             #(optimistic/production-context
-               {:current-user/id helper-id})))))))
+      (is (= :net.humanhelp.example.optimistic/invalid-production-user
+             (error-type
+              #(optimistic/production-context
+                {:current-user/id helper-id})))))))
 
 ;; =============================================================================
 ;; Route binding / forgery rejection
@@ -315,9 +315,9 @@
           (fn [ctx arguments]
             (swap! request-calls conj [ctx arguments])
             (committed-claim-result))]
-         (optimistic/run-command
-          original-ctx
-          (claim-command)))
+          (optimistic/run-command
+           original-ctx
+           (claim-command)))
         settlement (:settlement prepared)
         authoritative (:authoritative settlement)
         [model-ctx model-arguments] (first @request-calls)]
@@ -380,9 +380,9 @@
       (fn [ctx arguments]
         (swap! request-calls conj [ctx arguments])
         (committed-claim-result))]
-     (optimistic/run-command
-      {:current-user/id helper-id}
-      command))
+      (optimistic/run-command
+       {:current-user/id helper-id}
+       command))
 
     (let [[model-ctx arguments] (first @request-calls)]
       (is (= helper-id (:current-user/id model-ctx))

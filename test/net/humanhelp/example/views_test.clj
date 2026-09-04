@@ -118,7 +118,7 @@
                  (count
                   (filter
                    #(and (map? (second %))
-                          (contains? (second %) :data-test-request-id))
+                         (contains? (second %) :data-test-request-id))
                    (tree-elements markup))))))))))
 
 (deftest request-list-fragment-preserves-live-basis-and-production-row-contract-test

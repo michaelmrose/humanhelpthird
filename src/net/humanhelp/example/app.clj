@@ -314,10 +314,10 @@
            {:error/type :humanhelp.example/missing-request-progression
             :result-keys (when (map? result) (set (keys result)))})))]
     (live/with-progression
-     ctx
-     (progression/compose
-      (live/progression ctx)
-      committed-progression))))
+      ctx
+      (progression/compose
+       (live/progression ctx)
+       committed-progression))))
 
 ;; -----------------------------------------------------------------------------
 ;; HTML / OOB helpers
