@@ -292,16 +292,17 @@
    unclaim-request-id
    mark-on-the-way-request-id
    complete-request-id
-   cancel-request-id
-   reset-demo-id])
+   cancel-request-id])
 
 (def optional-route-ids
   "Production Request routes whose UI is not yet a required part of the example.
 
    Reassign needs a selected target helper, so it remains optional until the
-   manager affordance is added. Optional means only route assembly is optional;
-   when present it still executes the production Request choreography."
-  [reassign-request-id])
+   manager affordance is added. Demo reset is also temporarily optional while
+   its last example.model-backed handler is retired. Optional means only route
+   assembly is optional; when present, the route still binds normally."
+  [reassign-request-id
+   reset-demo-id])
 
 (defn route-table
   "Return a Reitit route table for Human Help.
