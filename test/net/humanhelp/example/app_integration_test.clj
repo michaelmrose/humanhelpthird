@@ -20,9 +20,12 @@
      5. reread the Request through public production APIs at the correct
         Organization/Location only;
      6. project the persisted Request's requestor through the production User
-        model when the real example board/fragment renders; and
+        model when the real example board/fragment renders;
      7. drive a claimed Request back to open through the production unclaim
-        choreography and prove the authoritative post-commit reread.
+        choreography and prove the authoritative post-commit reread; and
+     8. drive a claimed Request through on-the-way to done, preserving the
+        primary assignment across the intermediate transition and ending it
+        atomically at completion.
 
    This is intentionally the integration seam that should catch a proving app
    which appears to work while discarding authoritative progression, querying a
@@ -104,6 +107,22 @@
 (def unclaim-execution-id
   (identity/execution-id
    "humanhelp-example-app-integration-unclaim-execution-550"))
+
+(def mark-on-the-way-command-id
+  (identity/command-id
+   "humanhelp-example-app-integration-mark-on-the-way-command-551"))
+
+(def mark-on-the-way-execution-id
+  (identity/execution-id
+   "humanhelp-example-app-integration-mark-on-the-way-execution-551"))
+
+(def complete-command-id
+  (identity/command-id
+   "humanhelp-example-app-integration-complete-command-551"))
+
+(def complete-execution-id
+  (identity/execution-id
+   "humanhelp-example-app-integration-complete-execution-551"))
 
 (defn- user-command
   []
@@ -232,6 +251,24 @@
    {:command-id unclaim-command-id
     :execution-id unclaim-execution-id
     :operation request.choreo/unclaim-operation}))
+
+(defn- mark-on-the-way-command-wire
+  [ctx request-document]
+  (lifecycle-command-wire
+   ctx
+   request-document
+   {:command-id mark-on-the-way-command-id
+    :execution-id mark-on-the-way-execution-id
+    :operation request.choreo/mark-on-the-way-operation}))
+
+(defn- complete-command-wire
+  [ctx request-document]
+  (lifecycle-command-wire
+   ctx
+   request-document
+   {:command-id complete-command-id
+    :execution-id complete-execution-id
+    :operation request.choreo/complete-operation}))
 
 (defn- result-read-ctx
   "Compose one public production result's transaction progression onto ctx.
@@ -1173,6 +1210,407 @@
 
               (is (not
                    (str/includes? body "claimed by you"))))))
+
+        (finally
+          (live/close!
+           live-system))))))
+
+(deftest globally-selected-example-app-progresses-on-the-way-through-completion-test
+  (with-open
+   [node
+    (xtn/start-node
+     {})]
+
+    (let [live-system
+          (live/create
+           {:rules
+            (humanhelp/gesso-live-rules)
+
+            :dispatch-options
+            {:threads 1
+             :queue-size 32}})
+
+          initial-ctx
+          (base-ctx
+           node
+           live-system)
+
+          handler
+          (selected-handler)]
+
+      (try
+        (let [user-transaction
+              (seed-authenticated-user!
+               initial-ctx)
+
+              seeded-ctx
+              (:ctx user-transaction)
+
+              fixture-result
+              (mock-data/ensure!
+               seeded-ctx)
+
+              fixture-ctx
+              (:ctx fixture-result)
+
+              helper-transaction
+              (seed-helper-authority!
+               fixture-ctx)
+
+              helper-ctx
+              (:ctx helper-transaction)
+
+              create-result
+              (request/create
+               (assoc helper-ctx :current-user/id user-id)
+               {:organization-id mock-data/organization-id
+                :location-id mock-data/default-location-id
+                :content {:title request-title
+                          :details request-details
+                          :location-detail request-location-detail}})
+
+              post-create-ctx
+              (result-read-ctx
+               helper-ctx
+               create-result)
+
+              open-request
+              (first
+               (requests-at
+                post-create-ctx
+                mock-data/default-location-id))
+
+              request-id
+              (request/request-id
+               open-request)
+
+              claim-result
+              (request/claim
+               (assoc post-create-ctx :current-user/id user-id)
+               {:request-id request-id})
+
+              post-claim-ctx
+              (result-read-ctx
+               post-create-ctx
+               claim-result)
+
+              claimed-request
+              (:request claim-result)
+
+              mark-command-wire
+              (mark-on-the-way-command-wire
+               post-claim-ctx
+               claimed-request)
+
+              real-mark-on-the-way
+              request/mark-on-the-way
+
+              mark-call
+              (atom nil)
+
+              mark-response
+              (with-redefs
+               [request/mark-on-the-way
+                (fn [actual-ctx input]
+                  (let [result
+                        (real-mark-on-the-way
+                         actual-ctx
+                         input)]
+                    (reset!
+                     mark-call
+                     {:ctx actual-ctx
+                      :input input
+                      :result result})
+                    result))]
+
+                (handler
+                 (assoc
+                  (signed-in-request
+                   post-claim-ctx
+                   :post
+                   (routes/mark-on-the-way-request-url request-id))
+                  :form-params
+                  {example.app/optimistic-command-param
+                   mark-command-wire})))
+
+              mark-result
+              (:result @mark-call)
+
+              mark-ctx
+              (:ctx @mark-call)
+
+              post-mark-ctx
+              (result-read-ctx
+               mark-ctx
+               mark-result)
+
+              on-the-way-request
+              (:request mark-result)
+
+              primary-after-mark
+              (request/active-primary-assignment-for-request
+               post-mark-ctx
+               request-id)
+
+              mark-body
+              (str (:body mark-response))
+
+              mark-fragment-response
+              (handler
+               (signed-in-request
+                post-mark-ctx
+                :get
+                "/app/fragments/requests"))
+
+              mark-fragment-body
+              (str (:body mark-fragment-response))
+
+              complete-command-wire
+              (complete-command-wire
+               post-mark-ctx
+               on-the-way-request)
+
+              real-complete
+              request/complete
+
+              complete-call
+              (atom nil)
+
+              complete-response
+              (with-redefs
+               [request/complete
+                (fn [actual-ctx input]
+                  (let [result
+                        (real-complete
+                         actual-ctx
+                         input)]
+                    (reset!
+                     complete-call
+                     {:ctx actual-ctx
+                      :input input
+                      :result result})
+                    result))]
+
+                (handler
+                 (assoc
+                  (signed-in-request
+                   post-mark-ctx
+                   :post
+                   (routes/complete-request-url request-id))
+                  :form-params
+                  {example.app/optimistic-command-param
+                   complete-command-wire})))
+
+              complete-result
+              (:result @complete-call)
+
+              complete-ctx
+              (:ctx @complete-call)
+
+              post-complete-ctx
+              (result-read-ctx
+               complete-ctx
+               complete-result)
+
+              completed-request
+              (:request complete-result)
+
+              ended-assignments
+              (:assignments complete-result)
+
+              active-primary-after-complete
+              (request/active-primary-assignment-for-request
+               post-complete-ctx
+               request-id)
+
+              completed-requests
+              (requests-at
+               post-complete-ctx
+               mock-data/default-location-id)
+
+              complete-body
+              (str (:body complete-response))
+
+              default-fragment-response
+              (handler
+               (signed-in-request
+                post-complete-ctx
+                :get
+                "/app/fragments/requests"))
+
+              default-fragment-body
+              (str (:body default-fragment-response))
+
+              terminal-fragment-response
+              (handler
+               (assoc
+                (signed-in-request
+                 post-complete-ctx
+                 :get
+                 "/app/fragments/requests")
+                :query-params
+                {routes/show-terminal-param
+                 "true"}))
+
+              terminal-fragment-body
+              (str (:body terminal-fragment-response))]
+
+          (testing "the claimed setup carries an active primary helper into the lifecycle route"
+            (is (= :committed
+                   (:commit/status claim-result)))
+
+            (is (= :claimed
+                   (request/status claimed-request)))
+
+            (is (some?
+                 (request/active-primary-assignment-for-request
+                  post-claim-ctx
+                  request-id))))
+
+          (testing "the browser-shaped mark-on-the-way command crosses the concrete HTTP and Choreo boundary"
+            (is (= 200
+                   (:status mark-response)))
+
+            (is (str/includes?
+                 mark-body
+                 "data-gesso-live-optimistic-settlement"))
+
+            (is (not
+                 (str/includes?
+                  mark-body
+                  "data-humanhelp-request-card"))
+                "The direct settlement response must leave canonical card ownership to managed Live.")
+
+            (is (= {:request-id request-id}
+                   (:input @mark-call)))
+
+            (is (= user-id
+                   (:current-user/id mark-ctx)))
+
+            (is (= (live/progression post-claim-ctx)
+                   (live/progression mark-ctx))))
+
+          (testing "mark-on-the-way commits the Request transition without ending its primary assignment"
+            (is (= :committed
+                   (:commit/status mark-result)))
+
+            (is (some? (:progression mark-result)))
+
+            (is (= :on-the-way
+                   (request/status on-the-way-request)))
+
+            (is (some? primary-after-mark))
+
+            (is (= user-id
+                   (request/assignment-helper-id
+                    primary-after-mark)))
+
+            (is (request/active-primary-assignment?
+                 primary-after-mark))
+
+            (is (= (progression/compose
+                    (live/progression mark-ctx)
+                    (:progression mark-result))
+                   (live/progression post-mark-ctx))))
+
+          (testing "the managed fragment reread installs the authoritative on-the-way card and completion affordance"
+            (is (= 200
+                   (:status mark-fragment-response)))
+
+            (is (str/includes?
+                 mark-fragment-body
+                 request-title))
+
+            (is (str/includes?
+                 mark-fragment-body
+                 "On the way"))
+
+            (is (str/includes?
+                 mark-fragment-body
+                 "Done")))
+
+          (testing "the browser-shaped complete command binds to the concrete route at the post-mark progression"
+            (is (= 200
+                   (:status complete-response)))
+
+            (is (str/includes?
+                 complete-body
+                 "data-gesso-live-optimistic-settlement"))
+
+            (is (not
+                 (str/includes?
+                  complete-body
+                  "data-humanhelp-request-card"))
+                "Completion settlement must not race managed Live with a canonical card.")
+
+            (is (= {:request-id request-id}
+                   (:input @complete-call)))
+
+            (is (= user-id
+                   (:current-user/id complete-ctx)))
+
+            (is (= (live/progression post-mark-ctx)
+                   (live/progression complete-ctx))))
+
+          (testing "completion atomically marks the Request done and ends every active assignment"
+            (is (= :committed
+                   (:commit/status complete-result)))
+
+            (is (some? (:progression complete-result)))
+
+            (is (= request-id
+                   (request/request-id completed-request)))
+
+            (is (= :done
+                   (request/status completed-request)))
+
+            (is (= 1
+                   (count ended-assignments)))
+
+            (is (every?
+                 request/assignment-ended?
+                 ended-assignments))
+
+            (is (every?
+                 #(= :request/completed
+                     (request/assignment-end-reason %))
+                 ended-assignments))
+
+            (is (= (progression/compose
+                    (live/progression complete-ctx)
+                    (:progression complete-result))
+                   (live/progression post-complete-ctx))))
+
+          (testing "authoritative post-completion reads contain the terminal Request and no stale primary assignment"
+            (is (nil?
+                 active-primary-after-complete))
+
+            (is (= 1
+                   (count completed-requests)))
+
+            (is (= :done
+                   (request/status
+                    (first completed-requests)))))
+
+          (testing "normal board filtering hides terminal Requests while an explicit terminal reread renders Done"
+            (is (= 200
+                   (:status default-fragment-response)))
+
+            (is (not
+                 (str/includes?
+                  default-fragment-body
+                  request-title)))
+
+            (is (= 200
+                   (:status terminal-fragment-response)))
+
+            (is (str/includes?
+                 terminal-fragment-body
+                 request-title))
+
+            (is (str/includes?
+                 terminal-fragment-body
+                 "Done"))))
 
         (finally
           (live/close!
