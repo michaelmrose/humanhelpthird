@@ -330,10 +330,10 @@
            {:error/type :humanhelp.example/missing-request-progression
             :result-keys (when (map? result) (set (keys result)))})))]
     (live/with-progression
-     ctx
-     (progression/compose
-      (live/progression ctx)
-      committed-progression))))
+      ctx
+      (progression/compose
+       (live/progression ctx)
+       committed-progression))))
 
 ;; -----------------------------------------------------------------------------
 ;; HTML / OOB helpers
@@ -376,6 +376,67 @@
 ;; Page props
 ;; -----------------------------------------------------------------------------
 
+(defn- hiccup-element-id
+  [node]
+  (when (and (vector? node)
+             (map? (second node)))
+    (:id (second node))))
+
+(defn- install-initial-fragment
+  "Install one authoritative server-rendered fragment into its managed Live
+   panel's replaceable target.
+
+   Gesso managed fragments intentionally do not issue an unmanaged `load` GET.
+   Their stable root waits for adapter-admitted `gesso:live-refresh` events.
+   Initial page content therefore has to be ordinary server-rendered HTML.
+
+   The panel shape itself remains Gesso-owned.  This helper searches by the
+   fragment's framework-owned DOM id instead of depending on a positional
+   child index, then replaces only that empty target.  The stable SSE root and
+   invalidation listener remain untouched."
+  [panel fragment-node]
+  (let [target-id (hiccup-element-id fragment-node)]
+    (when-not (and (string? target-id)
+                   (not (str/blank? target-id)))
+      (throw
+       (ex-info
+        "Initial HumanHelp Live fragment must have a non-blank DOM id."
+        {:error/type ::invalid-initial-fragment
+         :fragment fragment-node})))
+    (letfn [(install [node]
+              (cond
+                (and (vector? node)
+                     (= target-id (hiccup-element-id node)))
+                fragment-node
+
+                (vector? node)
+                (mapv install node)
+
+                :else
+                node))]
+      (let [installed (install panel)]
+        (when (= installed panel)
+          (throw
+           (ex-info
+            "Managed HumanHelp Live panel does not contain its fragment target."
+            {:error/type ::missing-initial-fragment-target
+             :target-id target-id})))
+        installed))))
+
+(defn- initial-page-panels
+  [ctx view-state]
+  (let [{:keys [request-toolbar-panel request-list-panel]}
+        (app-live/page-panels view-state)]
+    {:request-toolbar-panel
+     (install-initial-fragment
+      request-toolbar-panel
+      (render-toolbar-node ctx view-state))
+
+     :request-list-panel
+     (install-initial-fragment
+      request-list-panel
+      (render-list-node ctx view-state))}))
+
 (defn- page-props
   [ctx]
   (let [view-state (normalized-view-state
@@ -384,7 +445,7 @@
     (merge
      {:user       (current-user ctx)
       :view-state view-state}
-     (app-live/page-panels view-state))))
+     (initial-page-panels ctx view-state))))
 
 ;; -----------------------------------------------------------------------------
 ;; Receiver-specific connected-client side effects
