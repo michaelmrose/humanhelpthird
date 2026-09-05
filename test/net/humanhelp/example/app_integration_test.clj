@@ -18,9 +18,11 @@
      4. use that Request commit progression for the route's immediate
         read-your-writes success rendering;
      5. reread the Request through public production APIs at the correct
-        Organization/Location only; and
+        Organization/Location only;
      6. project the persisted Request's requestor through the production User
-        model when the real example board/fragment renders.
+        model when the real example board/fragment renders; and
+     7. drive a claimed Request back to open through the production unclaim
+        choreography and prove the authoritative post-commit reread.
 
    This is intentionally the integration seam that should catch a proving app
    which appears to work while discarding authoritative progression, querying a
@@ -94,6 +96,14 @@
 (def claim-execution-id
   (identity/execution-id
    "humanhelp-example-app-integration-claim-execution-545"))
+
+(def unclaim-command-id
+  (identity/command-id
+   "humanhelp-example-app-integration-unclaim-command-550"))
+
+(def unclaim-execution-id
+  (identity/execution-id
+   "humanhelp-example-app-integration-unclaim-execution-550"))
 
 (defn- user-command
   []
@@ -185,22 +195,43 @@
      {:commands [membership-command role-command]
       :emit false})))
 
-(defn- claim-command-wire
-  [ctx request-document]
-  (let [basis
+(defn- lifecycle-command-wire
+  [ctx request-document {:keys [command-id execution-id operation]}]
+  (let [request-id
+        (request/request-id request-document)
+
+        basis
         (live.xtdb/strongest-required-basis
          (live/progression ctx))]
     (pr-str
      (optimistic.protocol/command->wire
       (optimistic.protocol/command
-       {:command-id claim-command-id
-        :execution-id claim-execution-id
-        :operation request.choreo/claim-operation
-        :arguments {:request-id (request/request-id request-document)}
+       {:command-id command-id
+        :execution-id execution-id
+        :operation operation
+        :arguments {:request-id request-id}
         :observed-basis basis
-        :scope [:request (request/request-id request-document)]
+        :scope [:request request-id]
         :fact-versions {:request/revision
                         (request/revision request-document)}})))))
+
+(defn- claim-command-wire
+  [ctx request-document]
+  (lifecycle-command-wire
+   ctx
+   request-document
+   {:command-id claim-command-id
+    :execution-id claim-execution-id
+    :operation request.choreo/claim-operation}))
+
+(defn- unclaim-command-wire
+  [ctx request-document]
+  (lifecycle-command-wire
+   ctx
+   request-document
+   {:command-id unclaim-command-id
+    :execution-id unclaim-execution-id
+    :operation request.choreo/unclaim-operation}))
 
 (defn- result-read-ctx
   "Compose one public production result's transaction progression onto ctx.
@@ -213,10 +244,10 @@
   (if-let [committed-progression
            (:progression result)]
     (live/with-progression
-     ctx
-     (progression/compose
-      (live/progression ctx)
-      committed-progression))
+      ctx
+      (progression/compose
+       (live/progression ctx)
+       committed-progression))
     ctx))
 
 (defn- requests-at
@@ -876,6 +907,272 @@
               (is (str/includes? body "Claimed"))
 
               (is (str/includes? body "claimed by you")))))
+
+        (finally
+          (live/close!
+           live-system))))))
+
+(deftest globally-selected-example-app-unclaims-through-production-choreo-test
+  (with-open
+   [node
+    (xtn/start-node
+     {})]
+
+    (let [live-system
+          (live/create
+           {:rules
+            (humanhelp/gesso-live-rules)
+
+            :dispatch-options
+            {:threads 1
+             :queue-size 32}})
+
+          initial-ctx
+          (base-ctx
+           node
+           live-system)
+
+          handler
+          (selected-handler)]
+
+      (try
+        (let [user-transaction
+              (seed-authenticated-user!
+               initial-ctx)
+
+              seeded-ctx
+              (:ctx user-transaction)
+
+              fixture-result
+              (mock-data/ensure!
+               seeded-ctx)
+
+              fixture-ctx
+              (:ctx fixture-result)
+
+              helper-transaction
+              (seed-helper-authority!
+               fixture-ctx)
+
+              helper-ctx
+              (:ctx helper-transaction)
+
+              create-result
+              (request/create
+               (assoc helper-ctx :current-user/id user-id)
+               {:organization-id mock-data/organization-id
+                :location-id mock-data/default-location-id
+                :content {:title request-title
+                          :details request-details
+                          :location-detail request-location-detail}})
+
+              post-create-ctx
+              (result-read-ctx
+               helper-ctx
+               create-result)
+
+              open-request
+              (first
+               (requests-at
+                post-create-ctx
+                mock-data/default-location-id))
+
+              request-id
+              (request/request-id
+               open-request)
+
+              claim-result
+              (request/claim
+               (assoc post-create-ctx :current-user/id user-id)
+               {:request-id request-id})
+
+              post-claim-ctx
+              (result-read-ctx
+               post-create-ctx
+               claim-result)
+
+              claimed-request
+              (:request claim-result)
+
+              reread-primary-assignment
+              (request/active-primary-assignment-for-request
+               post-claim-ctx
+               request-id)
+
+              command-wire
+              (unclaim-command-wire
+               post-claim-ctx
+               claimed-request)
+
+              real-unclaim
+              request/unclaim
+
+              unclaim-call
+              (atom nil)
+
+              unclaim-response
+              (with-redefs
+               [request/unclaim
+                (fn [actual-ctx input]
+                  (let [result
+                        (real-unclaim
+                         actual-ctx
+                         input)]
+                    (reset!
+                     unclaim-call
+                     {:ctx actual-ctx
+                      :input input
+                      :result result})
+                    result))]
+
+                (handler
+                 (assoc
+                  (signed-in-request
+                   post-claim-ctx
+                   :post
+                   (routes/unclaim-request-url request-id))
+                  :form-params
+                  {example.app/optimistic-command-param
+                   command-wire})))
+
+              unclaim-result
+              (:result @unclaim-call)
+
+              unclaim-ctx
+              (:ctx @unclaim-call)
+
+              post-unclaim-ctx
+              (result-read-ctx
+               unclaim-ctx
+               unclaim-result)
+
+              unclaimed-request
+              (:request unclaim-result)
+
+              ended-assignments
+              (:assignments unclaim-result)
+
+              active-primary-after-unclaim
+              (request/active-primary-assignment-for-request
+               post-unclaim-ctx
+               request-id)
+
+              rows
+              (board/request-rows-for-location
+               post-unclaim-ctx
+               mock-data/default-location-id)
+
+              row
+              (first rows)
+
+              unclaim-body
+              (str (:body unclaim-response))]
+
+          (testing "the claimed setup is visible at the composed post-commit progression"
+            (is (= :committed
+                   (:commit/status claim-result)))
+
+            (is (= :claimed
+                   (request/status claimed-request)))
+
+            (is (some? reread-primary-assignment)
+                "A dependent relationship read must observe the committed primary assignment.")
+
+            (is (= user-id
+                   (request/assignment-helper-id
+                    reread-primary-assignment)))
+
+            (is (request/active-primary-assignment?
+                 reread-primary-assignment)))
+
+          (testing "the browser-shaped protocol-v3 unclaim is bound to the concrete HTTP route"
+            (is (= 200
+                   (:status unclaim-response)))
+
+            (is (str/includes?
+                 unclaim-body
+                 "data-gesso-live-optimistic-settlement"))
+
+            (is (not
+                 (str/includes?
+                  unclaim-body
+                  "data-humanhelp-request-card"))
+                "The direct settlement response must not compete with managed Live for canonical card ownership.")
+
+            (is (= {:request-id request-id}
+                   (:input @unclaim-call)))
+
+            (is (= user-id
+                   (:current-user/id unclaim-ctx)))
+
+            (is (= (live/progression post-claim-ctx)
+                   (live/progression unclaim-ctx))))
+
+          (testing "production Request Choreo atomically returns the Request to open and ends its assignment"
+            (is (= :committed
+                   (:commit/status unclaim-result)))
+
+            (is (some? (:progression unclaim-result)))
+
+            (is (= request-id
+                   (request/request-id unclaimed-request)))
+
+            (is (= :open
+                   (request/status unclaimed-request)))
+
+            (is (= 1
+                   (count ended-assignments)))
+
+            (is (every?
+                 request/assignment-ended?
+                 ended-assignments))
+
+            (is (every?
+                 #(= :request/unclaimed
+                     (request/assignment-end-reason %))
+                 ended-assignments))
+
+            (is (= (progression/compose
+                    (live/progression unclaim-ctx)
+                    (:progression unclaim-result))
+                   (live/progression post-unclaim-ctx))))
+
+          (testing "the authoritative post-unclaim relationship and board reads contain no stale primary assignment"
+            (is (nil? active-primary-after-unclaim))
+
+            (is (= 1 (count rows)))
+
+            (is (= request-id
+                   (board/row-request-id row)))
+
+            (is (= :open
+                   (request/status
+                    (board/row-request row))))
+
+            (is (nil?
+                 (board/row-primary-assignment row))))
+
+          (testing "the next managed fragment reread installs the authoritative open card"
+            (let [response
+                  (handler
+                   (signed-in-request
+                    post-unclaim-ctx
+                    :get
+                    "/app/fragments/requests"))
+
+                  body
+                  (str (:body response))]
+
+              (is (= 200 (:status response)))
+
+              (is (str/includes? body request-title))
+
+              (is (str/includes? body "Open"))
+
+              (is (str/includes? body "Claim"))
+
+              (is (not
+                   (str/includes? body "claimed by you"))))))
 
         (finally
           (live/close!
