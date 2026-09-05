@@ -167,12 +167,19 @@
      selected-app/module))))
 
 (defn- signed-in-request
+  "Build a browser-shaped authenticated request context.
+
+   Deliberately remove deterministic fixture FX inputs here. Real Ring requests
+   do not carry :biff.fx/now or :biff.fx/seed; application mutation boundaries
+   must acquire those through Biff FX execution rather than accidentally relying
+   on test fixture context."
   [ctx method uri]
-  (assoc
-   ctx
-   :request-method method
-   :uri uri
-   :session {:uid user-id}))
+  (-> ctx
+      (dissoc :biff.fx/now :biff.fx/seed)
+      (assoc
+       :request-method method
+       :uri uri
+       :session {:uid user-id})))
 
 (defn- seed-authenticated-user!
   [ctx]
