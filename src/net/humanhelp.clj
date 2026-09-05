@@ -9,6 +9,7 @@
    [com.biffweb.graph :as biff.graph]
    [com.biffweb.xtdb :as biff.xtdb]
    [gesso.live.core :as live]
+   [gesso.model.tx :as model.tx]
    [malli.core :as malc]
    [malli.registry :as malr]
    [net.humanhelp.app :as app]
@@ -37,6 +38,7 @@
    (biff.fx/module)
    (biff.graph/module)
    (biff.xtdb/module)
+   (model.tx/module)
    app/module
    client-plumbing/module
    home/module
@@ -55,7 +57,7 @@
      :routes
      modules)]])
 
-(defn- error-handler
+(defn- http-error-handler
   [status]
   (fn [ctx]
     (ui/on-error
@@ -67,15 +69,15 @@
 (def default-handler
   (reitit-ring/create-default-handler
    {:not-found
-    (error-handler
+    (http-error-handler
      404)
 
     :method-not-allowed
-    (error-handler
+    (http-error-handler
      405)
 
     :not-acceptable
-    (error-handler
+    (http-error-handler
      406)}))
 
 (def handler
