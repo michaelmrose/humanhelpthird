@@ -35,6 +35,7 @@
 
    There is deliberately no dependency on net.humanhelp.example.model."
   (:require
+   [com.biffweb.fx :as fx]
    [gesso.choreo.identity :as choreo.identity]
    [gesso.live.core :as live]
    [net.humanhelp.client-plumbing :as client-plumbing]
@@ -163,7 +164,7 @@
    integration seam is run-command."
   (live/optimistic-server
    {:principal-fn principal
-    :operations   operation-entries}))
+    :operations operation-entries}))
 
 ;; =============================================================================
 ;; HTTP-route command binding
@@ -192,7 +193,7 @@
       {:error/type
        :net.humanhelp.example.optimistic/invalid-command
 
-       :command  command
+       :command command
        :expected expected})))
 
   (when-not (contains? supported-operations operation)
@@ -202,7 +203,7 @@
       {:error/type
        :net.humanhelp.example.optimistic/unsupported-route-operation
 
-       :operation            operation
+       :operation operation
        :supported-operations supported-operations})))
 
   (when-not (= operation (:operation command))
@@ -213,7 +214,7 @@
        :net.humanhelp.example.optimistic/route-operation-mismatch
 
        :expected-operation operation
-       :actual-operation   (:operation command)})))
+       :actual-operation (:operation command)})))
 
   (when-not (= request-id
                (get-in command [:arguments :request-id]))
@@ -224,14 +225,27 @@
        :net.humanhelp.example.optimistic/route-request-mismatch
 
        :expected-request-id request-id
-       :actual-request-id   (get-in command [:arguments :request-id])
-       :operation           operation})))
+       :actual-request-id (get-in command [:arguments :request-id])
+       :operation operation})))
 
   command)
 
 ;; =============================================================================
 ;; Execution facade
 ;; =============================================================================
+
+(def run-command-machine
+  (fx/machine
+   ::run-command-machine
+   :start
+   (fn [{::keys [command]
+         :as ctx}]
+     {:biff.fx/return
+      (live/run-optimistic-command
+       server
+       (production-context
+        (dissoc ctx ::command))
+       command)})))
 
 (defn decode-command
   "Decode and validate one protocol-v3 browser command wire value."
@@ -246,7 +260,8 @@
    The returned value is Gesso's prepared settlement send; this namespace does
    not render HTTP or reinterpret settlement meaning."
   [ctx command]
-  (live/run-optimistic-command
-   server
-   (production-context ctx)
-   command))
+  (run-command-machine
+   (assoc
+    ctx
+    ::command
+    command)))
