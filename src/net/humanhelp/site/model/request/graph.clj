@@ -20,6 +20,7 @@
   (:require
    [com.biffweb.graph :as graph]
    [com.biffweb.xtdb :as biff.xtdb]
+   [gesso.live.consistency.xtdb :as live.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.request.domain :as request]
@@ -92,16 +93,74 @@
       (malli-options
        ctx)})))
 
+(defn- read-query-options
+  "Build XTDB query options for a production model relationship read.
+
+   Biff installs :biff.xtdb/snapshot-token at the beginning of a request. That
+   token is a useful baseline, but it may predate a model mutation performed
+   later in the same request. Gesso progression is an authoritative minimum
+   read requirement and must therefore win when both are present.
+
+   gesso.live.consistency.xtdb/read-query-opts applies explicit Gesso
+   consistency first and progression last. We feed Biff's request snapshot in
+   as the baseline consistency, then remove it from the ctx passed to
+   biff.xtdb/q so Biff cannot overwrite the stronger computed option after the
+   fact."
+  [ctx]
+  (live.xtdb/read-query-opts
+   (merge
+    (when-some
+     [snapshot-token
+      (:biff.xtdb/snapshot-token ctx)]
+      {:snapshot-token snapshot-token})
+
+    (live.xtdb/consistency-from ctx))
+
+   (live.xtdb/progression-from ctx)))
+
 (defn- rows
   [descriptor ctx query]
-  (mapv
-   #(normalize-loaded-document
-     descriptor
-     ctx
-     %)
-   (biff.xtdb/q
-    ctx
-    query)))
+  (let [query-options
+        (read-query-options
+         ctx)
+
+        snapshot-token
+        (:snapshot-token
+         query-options)
+
+        query-context
+        (cond->
+         (dissoc
+          ctx
+          :biff.xtdb/snapshot-token)
+
+          snapshot-token
+          (assoc
+           :biff.xtdb/snapshot-token
+           snapshot-token))
+
+        extra-query-options
+        (dissoc
+         query-options
+         :snapshot-token)
+
+        documents
+        (if
+         (empty?
+          extra-query-options)
+          (biff.xtdb/q
+           query-context
+           query)
+          (biff.xtdb/q
+           query-context
+           query
+           extra-query-options))]
+    (mapv
+     #(normalize-loaded-document
+       descriptor
+       ctx
+       %)
+     documents)))
 
 ;; =============================================================================
 ;; Ordinary Request-owned documents
