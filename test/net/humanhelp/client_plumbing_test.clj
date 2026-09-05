@@ -127,22 +127,22 @@
   (is (= "explicit-user"
          (plumbing/current-user-id
           {:current-user/id "explicit-user"
-           :user/id "model-user"
-           :user/email "profile@example.com"
-           :session {:uid "session-user"
-                     :email "session@example.com"}})))
+           :user/id         "model-user"
+           :user/email      "profile@example.com"
+           :session         {:uid   "session-user"
+                             :email "session@example.com"}})))
 
   (is (= "model-user"
          (plumbing/current-user-id
-          {:user/id "model-user"
+          {:user/id    "model-user"
            :user/email "profile@example.com"
-           :session {:uid "session-user"
-                     :email "session@example.com"}})))
+           :session    {:uid   "session-user"
+                        :email "session@example.com"}})))
 
   (is (= "xt-user"
          (plumbing/current-user-id
-          {:user {:xt/id "xt-user"
-                  :email "profile@example.com"}
+          {:user    {:xt/id "xt-user"
+                     :email "profile@example.com"}
            :session {:uid "session-user"}})))
 
   (is (= "legacy-user"
@@ -170,7 +170,7 @@
             [:session :uid]
             "   "]
            [{:current-user/id ""
-             :session {:uid "valid-session-user"}}
+             :session         {:uid "valid-session-user"}}
             :current-user/id
             ""]
            [{:user/id 42
@@ -223,7 +223,7 @@
   (try
     (plumbing/current-client
      {:current-user/id ""
-      :session {:uid "valid-session-user"}})
+      :session         {:uid "valid-session-user"}})
     (is false "Expected malformed high-precedence identity to fail closed.")
     (catch clojure.lang.ExceptionInfo e
       (let [data (ex-data e)]

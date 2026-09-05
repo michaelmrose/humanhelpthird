@@ -34,10 +34,10 @@
   (user-document existing-user-id :deleted))
 
 (def unavailable-result
-  {:ok?          false
-   :phone        "2065550123"
+  {:ok?           false
+   :phone         "2065550123"
    :phone-display "206-555-0123"
-   :error        "This account is not available for sign-in."})
+   :error         "This account is not available for sign-in."})
 
 (deftest phone-boundary-normalization-test
   (testing "provider-facing phone values normalize to exactly 10 US digits"
@@ -68,11 +68,11 @@
                     {:phone "+1 (206) 555-0123"})]
         (is (= [[ctx "+12065550123"]]
                @lookup))
-        (is (= {:ok?          true
-                :user-id      existing-user-id
-                :phone        "2065550123"
+        (is (= {:ok?           true
+                :user-id       existing-user-id
+                :phone         "2065550123"
                 :phone-display "206-555-0123"
-                :new-user?    false}
+                :new-user?     false}
                result))))))
 
 (deftest unavailable-existing-user-signin-test
@@ -141,11 +141,11 @@
                 :phone-verified? true}
                (:net.humanhelp.auth.phone/create-user-input
                 @machine-input)))
-        (is (= {:ok?          true
-                :user-id      created-user-id
-                :phone        "2065550123"
+        (is (= {:ok?           true
+                :user-id       created-user-id
+                :phone         "2065550123"
                 :phone-display "206-555-0123"
-                :new-user?    true}
+                :new-user?     true}
                result))))))
 
 (deftest invalid-phone-fails-before-user-access-test
@@ -156,7 +156,7 @@
       (fn [& _]
         (swap! lookups inc)
         (throw (ex-info "unexpected lookup" {})))]
-      (is (= {:ok?  false
+      (is (= {:ok?   false
               :error "Missing or invalid phone number."}
              (phone/complete-phone-signin!
               {}

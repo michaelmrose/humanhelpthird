@@ -412,7 +412,7 @@
    by the successful commit. Raw transaction plans, transaction ctx, and XTDB
    consistency internals remain private to the model."
   [ctx {:keys [result]
-        :as planned}]
+        :as   planned}]
   (let [transaction
         (model.tx/transact!
          ctx

@@ -55,8 +55,8 @@
   [request-document]
   (g/status-pill
    {:status (status-pill-status request-document)
-    :text (status-label request-document)
-    :dot? true}))
+    :text   (status-label request-document)
+    :dot?   true}))
 
 (defn action-label
   [operation]
@@ -89,7 +89,7 @@
 
 (defn- action-button-attrs
   [operation]
-  {:class (action-button-class operation)
+  {:class                            (action-button-class operation)
    :data-humanhelp-request-operation (name operation)})
 
 ;; =============================================================================
@@ -114,21 +114,21 @@
 (defn action-button
   [ctx row {:keys [operation capability arguments]} board-state-selector]
   (let [target-id (request-target-id row)
-        binding (board/optimistic-binding
-                 ctx
-                 row
-                 operation
-                 arguments
-                 target-id)
-        binding' (capability-binding binding)]
+        binding   (board/optimistic-binding
+                   ctx
+                   row
+                   operation
+                   arguments
+                   target-id)
+        binding'  (capability-binding binding)]
     (live/post-button
      ctx
      (cond->
-      {:to (routes/operation-url (board/row-request-id row) operation)
-       :swap "none"
+      {:to      (routes/operation-url (board/row-request-id row) operation)
+       :swap    "none"
        :include board-state-selector
        :form-attrs
-       {:class "inline-flex"
+       {:class                              "inline-flex"
         :data-humanhelp-request-action-form true}
        :button-attrs
        (action-button-attrs operation)
@@ -199,21 +199,21 @@
 
      (when (seq location-detail)
        (g/muted-text
-        {:as :span
+        {:as    :span
          :class "text-xs-theme"
-         :text location-detail}))
+         :text  location-detail}))
 
      (when (seq location-detail)
        (g/muted-text
-        {:as :span
+        {:as    :span
          :class "text-xs-theme"
-         :text "·"}))
+         :text  "·"}))
 
      (when-let [elapsed (elapsed-label (request/created-at request-document))]
        (g/muted-text
-        {:as :span
+        {:as    :span
          :class "text-xs-theme"
-         :text (str "waiting " elapsed)}))]))
+         :text  (str "waiting " elapsed)}))]))
 
 (defn request-card-actions
   [ctx row viewer-id board-state-selector]
@@ -232,7 +232,7 @@
 (defn request-summary
   [row viewer-id open?]
   (let [request-document (board/row-request row)
-        {:keys [title]} (request/content request-document)]
+        {:keys [title]}  (request/content request-document)]
     [:summary (attr/summary-attrs)
      [:div (attr/header-stack-attrs)
       [:h3 (attr/title-attrs)
@@ -242,19 +242,19 @@
 
       [:div (attr/customer-row-attrs)
        (g/text
-        {:as :span
+        {:as      :span
          :variant :small
-         :class "weight-medium-theme"
-         :text (requestor-label row)})
+         :class   "weight-medium-theme"
+         :text    (requestor-label row)})
 
        (when-let [claimed-by (helper-label row viewer-id)]
          (g/muted-text
-          {:as :span
+          {:as    :span
            :class "text-xs-theme leading-body"
-           :text (str "claimed by " claimed-by)}))]]
+           :text  (str "claimed by " claimed-by)}))]]
 
      (g/icon "chevron-down"
-             {:size :sm
+             {:size  :sm
               :class "shrink-0 transition-transform duration-200 ease-in-out"
               :attrs (attr/chevron-attrs open?)})]))
 
@@ -265,10 +265,10 @@
      (attr/details-attrs)
      (when (seq details)
        (g/text
-        {:as :p
+        {:as      :p
          :variant :small
-         :class "leading-body"
-         :text details}))
+         :class   "leading-body"
+         :text    details}))
      (request-card-actions
       ctx
       row
@@ -282,11 +282,11 @@
 (defn- item-attrs
   [row open?]
   (let [request-document (board/row-request row)]
-    {:id (request-target-id row)
-     :data-humanhelp-request-card true
+    {:id                              (request-target-id row)
+     :data-humanhelp-request-card     true
      :data-humanhelp-request-selected (when open? "true")
      :data-humanhelp-request-terminal (when (request/terminal? request-document) "true")
-     :style (attr/card-style request-document)}))
+     :style                           (attr/card-style request-document)}))
 
 (defn request-card
   "Render one production HumanHelp Request board row.
@@ -308,9 +308,9 @@
    the same action remains an ordinary HTMX POST and optimism is omitted rather
    than fabricating an observed basis."
   [ctx {:keys [row viewer board-state-selector open?]
-        :or {open? false}}]
+        :or   {open? false}}]
   (let [request-document (board/row-request row)
-        viewer-id (user/user-id viewer)]
+        viewer-id        (user/user-id viewer)]
     (when-not (request/request-document? request-document)
       (throw
        (ex-info
@@ -320,7 +320,7 @@
       (throw
        (ex-info
         "HumanHelp example request card requires a production User viewer."
-        {:viewer viewer
+        {:viewer    viewer
          :viewer-id viewer-id})))
     (g/accordion-item
      {:value (board/row-request-id row)

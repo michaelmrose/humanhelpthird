@@ -87,9 +87,9 @@
     (throw
      (ex-info
       "Connected HumanHelp client has an invalid authenticated user id."
-      {:error/type :net.humanhelp.client-plumbing/invalid-user-id
+      {:error/type      :net.humanhelp.client-plumbing/invalid-user-id
        :identity/source source
-       :identity/value value}))))
+       :identity/value  value}))))
 
 (defn current-user-id
   "Return the canonical authenticated user id used for client targeting.

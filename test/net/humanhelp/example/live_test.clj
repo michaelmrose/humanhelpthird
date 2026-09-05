@@ -80,10 +80,10 @@
 
 (deftest production-request-change-expands-to-exact-fragment-scopes-test
   (let [change
-        {:topic :request
-         :request/id request-id
+        {:topic               :request
+         :request/id          request-id
          :request/location-id app-live/location-id
-         :request/operation :request/claim}
+         :request/operation   :request/claim}
 
         expanded
         (live/expand-change
@@ -92,9 +92,9 @@
          change)]
     (is (= 2 (count expanded)))
     (is (= [{:topic :humanhelp/request-toolbar
-             :id app-live/location-id}
+             :id    app-live/location-id}
             {:topic :humanhelp/request-list
-             :id app-live/location-id}]
+             :id    app-live/location-id}]
            (mapv
             #(select-keys % [:topic :id])
             expanded)))
@@ -103,9 +103,9 @@
            (set
             (map :gesso.live/scope expanded))))
     (is (= #{{:topic :humanhelp/request-toolbar
-              :id app-live/location-id}
+              :id    app-live/location-id}
              {:topic :humanhelp/request-list
-              :id app-live/location-id}}
+              :id    app-live/location-id}}
            (set
             (map
              #(select-keys % [:topic :id])
@@ -119,11 +119,11 @@
         (progression/requirement basis)
 
         change
-        {:topic :request
-         :request/id request-id
+        {:topic               :request
+         :request/id          request-id
          :request/location-id app-live/location-id
-         :request/operation :request/complete
-         :progression requirement}
+         :request/operation   :request/complete
+         :progression         requirement}
 
         expanded
         (invalidation/expand
@@ -151,31 +151,31 @@
         {:xtdb/tx-id 77}
 
         rows
-        [{:request {:xt/id request-id
+        [{:request {:xt/id          request-id
                     :request/status :open}}]
 
         expected-board-data
-        {:location-id app-live/location-id
-         :viewer viewer
-         :viewer-id (:xt/id viewer)
-         :view-state {:search "needle"
-                      :created-order :oldest
-                      :mine-first? true
-                      :unclaimed-first? false
-                      :show-terminal? true}
+        {:location-id    app-live/location-id
+         :viewer         viewer
+         :viewer-id      (:xt/id viewer)
+         :view-state     {:search           "needle"
+                          :created-order    :oldest
+                          :mine-first?      true
+                          :unclaimed-first? false
+                          :show-terminal?   true}
          :observed-basis basis
-         :rows rows
-         :total-count 1
-         :active-count 1
+         :rows           rows
+         :total-count    1
+         :active-count   1
          :terminal-count 0}
 
         ctx
         {:test/context :request-list
          render-context-key
-         {:viewer viewer
-          :view-state {:search "  needle  "
-                       :created-order "oldest"
-                       :mine-first? "on"
+         {:viewer     viewer
+          :view-state {:search         "  needle  "
+                       :created-order  "oldest"
+                       :mine-first?    "on"
                        :show-terminal? "true"}}}]
     (with-redefs
      [board/board-data
@@ -191,13 +191,13 @@
         (is (= ctx
                (ffirst @calls)))
         (is (= {:location-id app-live/location-id
-                :viewer viewer
+                :viewer      viewer
                 :view-state
-                {:search "needle"
-                 :created-order :oldest
-                 :mine-first? true
+                {:search           "needle"
+                 :created-order    :oldest
+                 :mine-first?      true
                  :unclaimed-first? false
-                 :show-terminal? true}}
+                 :show-terminal?   true}}
                (second
                 (first @calls))))
         (is (= rows
@@ -222,7 +222,7 @@
         ctx
         {:test/context :toolbar
          render-context-key
-         {:viewer viewer
+         {:viewer     viewer
           :view-state {:created-order :newest}}}]
     (with-redefs
      [board/board-data
@@ -231,14 +231,14 @@
                (:location-id input)))
         (is (= viewer
                (:viewer input)))
-        {:viewer viewer
-         :view-state (board/normalize-view-state
-                      (:view-state input))
+        {:viewer         viewer
+         :view-state     (board/normalize-view-state
+                          (:view-state input))
          :observed-basis basis
-         :active-count 3
-         :total-count 5
+         :active-count   3
+         :total-count    5
          :terminal-count 2
-         :rows []})]
+         :rows           []})]
 
       (let [actual
             (app-live/request-toolbar-query

@@ -44,12 +44,12 @@
         (str "Expected unsigned context: " (pr-str ctx)))))
 
 (deftest wrap-signed-in-allows-valid-session-test
-  (let [calls (atom [])
+  (let [calls    (atom [])
         response {:status 200 :body "ok"}
-        handler (mid/wrap-signed-in
-                 (recording-handler calls response))
-        ctx {:session {:uid "user-1"}
-             :request/id "request-1"}]
+        handler  (mid/wrap-signed-in
+                  (recording-handler calls response))
+        ctx      {:session    {:uid "user-1"}
+                  :request/id "request-1"}]
     (is (= response (handler ctx)))
     (is (= [ctx] @calls))))
 
@@ -60,20 +60,20 @@
                {:session {:uid "   "}}
                {:session {:uid 42}}
                {:session {:uid {:id "user-1"}}}]]
-    (let [calls (atom [])
+    (let [calls   (atom [])
           handler (mid/wrap-signed-in
                    (recording-handler calls {:status 200}))]
-      (is (= {:status 303
+      (is (= {:status  303
               :headers {"location" "/signin?error=not-signed-in"}}
              (handler ctx))
           (str "Expected sign-in redirect for: " (pr-str ctx)))
       (is (empty? @calls)))))
 
 (deftest wrap-redirect-signed-in-redirects-valid-session-test
-  (let [calls (atom [])
+  (let [calls   (atom [])
         handler (mid/wrap-redirect-signed-in
                  (recording-handler calls {:status 200}))]
-    (is (= {:status 303
+    (is (= {:status  303
             :headers {"location" "/app"}}
            (handler {:session {:uid "user-1"}})))
     (is (empty? @calls))))
@@ -85,10 +85,10 @@
                {:session {:uid "   "}}
                {:session {:uid 42}}
                {:session {:uid {:id "user-1"}}}]]
-    (let [calls (atom [])
+    (let [calls    (atom [])
           response {:status 200 :body "signin"}
-          handler (mid/wrap-redirect-signed-in
-                   (recording-handler calls response))]
+          handler  (mid/wrap-redirect-signed-in
+                    (recording-handler calls response))]
       (is (= response (handler ctx))
           (str "Expected sign-in page for: " (pr-str ctx)))
       (is (= [ctx] @calls)))))

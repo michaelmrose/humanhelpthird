@@ -40,10 +40,10 @@
   [id display-name]
   (command/after
    (user.domain/create-user-command
-    {:id id
+    {:id           id
      :display-name display-name
-     :email (str (str/lower-case display-name) "@example.test")
-     :now created-at})))
+     :email        (str (str/lower-case display-name) "@example.test")
+     :now          created-at})))
 
 (def requestor-user
   (production-user requestor-id "Requestor"))
@@ -53,25 +53,25 @@
 (def open-request
   (command/after
    (request.domain/create-request-command
-    {:id request-id
+    {:id              request-id
      :organization-id organization-id
-     :location-id location-id
-     :requestor (request.domain/user-requestor requestor-id)
-     :content {:title "Need groceries"
-               :details "Please pick up milk."
-               :location-detail "Front desk"}
-     :now created-at})))
+     :location-id     location-id
+     :requestor       (request.domain/user-requestor requestor-id)
+     :content         {:title           "Need groceries"
+                       :details         "Please pick up milk."
+                       :location-detail "Front desk"}
+     :now             created-at})))
 
 (def open-row
-  {:request open-request
-   :primary-assignment nil
-   :requestor-user requestor-user
+  {:request             open-request
+   :primary-assignment  nil
+   :requestor-user      requestor-user
    :primary-helper-user nil})
 
 (def claim-affordance
-  {:operation request.choreo/claim-operation
+  {:operation  request.choreo/claim-operation
    :capability request.choreo/claim-capability
-   :arguments {:request-id request-id}})
+   :arguments  {:request-id request-id}})
 
 (defn- elements
   [markup]
@@ -142,15 +142,15 @@
       (is (nil? (decoded-optimistic-action markup))))))
 
 (deftest optimistic-action-separates-production-capability-from-closed-binding-test
-  (let [basis {:tx-id 81
-               :system-time "2026-09-03T20:00:01Z"}
+  (let [basis    {:tx-id       81
+                  :system-time "2026-09-03T20:00:01Z"}
         revision (request/revision open-request)
-        binding {:arguments {:request-id request-id}
-                 :observed-basis basis
-                 :scope [:request request-id]
-                 :fact-versions {:request/revision revision}
-                 :target-id (card/request-target-id open-row)
-                 :capability request.choreo/claim-capability}]
+        binding  {:arguments      {:request-id request-id}
+                  :observed-basis basis
+                  :scope          [:request request-id]
+                  :fact-versions  {:request/revision revision}
+                  :target-id      (card/request-target-id open-row)
+                  :capability     request.choreo/claim-capability}]
     (with-redefs [board/optimistic-binding
                   (fn [_ctx row operation arguments target-id]
                     (is (= request-id (board/row-request-id row)))
@@ -184,12 +184,12 @@
                   (fn [row viewer-id]
                     (swap! calls conj [row viewer-id])
                     [claim-affordance])
-                  board/optimistic-binding (constantly nil)]
+                  board/optimistic-binding    (constantly nil)]
       (let [markup
             (card/request-card
              {:anti-forgery-token "token"}
-             {:row open-row
-              :viewer helper-user
+             {:row                  open-row
+              :viewer               helper-user
               :board-state-selector "#humanhelp-board-state"})
             button
             (button-attrs markup)]
@@ -205,9 +205,9 @@
          #"requires a production Request document"
          (card/request-card
           {}
-          {:row {:request {:id request-id
-                           :status :open}}
-           :viewer helper-user
+          {:row                  {:request {:id     request-id
+                                            :status :open}}
+           :viewer               helper-user
            :board-state-selector "#humanhelp-board-state"}))))
 
   (testing "viewer identity must be a production User UUID"
@@ -217,6 +217,6 @@
          (with-redefs [user/user-id (constantly "not-a-uuid")]
            (card/request-card
             {}
-            {:row open-row
-             :viewer helper-user
+            {:row                  open-row
+             :viewer               helper-user
              :board-state-selector "#humanhelp-board-state"}))))))

@@ -291,14 +291,14 @@
 (defn- created-order-options
   [active-created-order]
   (let [active (board/normalize-created-order active-created-order)]
-    [{:id :newest
-      :label "Newest first"
+    [{:id          :newest
+      :label       "Newest first"
       :description "Show the newest requests first."
-      :active? (= :newest active)}
-     {:id :oldest
-      :label "Oldest first"
+      :active?     (= :newest active)}
+     {:id          :oldest
+      :label       "Oldest first"
       :description "Show the oldest requests first."
-      :active? (= :oldest active)}]))
+      :active?     (= :oldest active)}]))
 
 (defn- board-option-metadata
   [view-state]
@@ -307,23 +307,23 @@
      (created-order-options (:created-order view-state))
 
      :priority-sort-options
-     [{:id :mine-first
-       :label "Mine first"
+     [{:id          :mine-first
+       :label       "Mine first"
        :description "Prioritize requests you made or are helping with."
        :enabled-key :mine-first?
-       :checked? (:mine-first? view-state)}
-      {:id :unclaimed-first
-       :label "Unclaimed first"
+       :checked?    (:mine-first? view-state)}
+      {:id          :unclaimed-first
+       :label       "Unclaimed first"
        :description "Prioritize requests that are still available to claim."
        :enabled-key :unclaimed-first?
-       :checked? (:unclaimed-first? view-state)}]
+       :checked?    (:unclaimed-first? view-state)}]
 
      :terminal-visibility-option
-     {:id :show-terminal
-      :label "Show done and cancelled"
+     {:id          :show-terminal
+      :label       "Show done and cancelled"
       :description "Include closed requests instead of showing only active requests."
       :enabled-key :show-terminal?
-      :checked? (:show-terminal? view-state)}}))
+      :checked?    (:show-terminal? view-state)}}))
 
 ;; -----------------------------------------------------------------------------
 ;; Board options dialog
@@ -583,10 +583,10 @@
   [ctx {:keys [row viewer open?]}]
   (request-card/request-card
    ctx
-   {:row row
-    :viewer viewer
+   {:row                  row
+    :viewer               viewer
     :board-state-selector (board-state-selector)
-    :open? (boolean open?)}))
+    :open?                (boolean open?)}))
 
 (defn request-accordion
   [{:keys [ctx viewer rows]}]
@@ -600,7 +600,7 @@
     (fn [row]
       (request-card-node
        ctx
-       {:row row
+       {:row    row
         :viewer viewer}))
     rows)))
 
@@ -612,9 +612,9 @@
          :class                   "content-stack-theme"}
    (if (seq rows)
      (request-accordion
-      {:ctx ctx
+      {:ctx    ctx
        :viewer viewer
-       :rows rows})
+       :rows   rows})
      (empty-request-list {:view-state view-state}))])
 
 ;; -----------------------------------------------------------------------------

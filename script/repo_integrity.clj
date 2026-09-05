@@ -84,7 +84,7 @@
   (let [relative (relative-path repo-root path)
         contents (slurp (str path))]
     (if (str/blank? contents)
-      {:file relative
+      {:file     relative
        :warnings
        [(str "empty source placeholder: " relative)]
        :problems []}
@@ -94,7 +94,7 @@
                             vec)]
         (cond
           (not= 1 (count namespaces))
-          {:file relative
+          {:file     relative
            :warnings []
            :problems
            [(str "cannot determine exactly one namespace for " relative
@@ -102,12 +102,12 @@
 
           :else
           (let [namespace (first namespaces)
-                tree (file-tree relative)
+                tree      (file-tree relative)
                 extension (file-extension relative)
-                expected (canonical-path tree namespace extension)]
-            {:file relative
+                expected  (canonical-path tree namespace extension)]
+            {:file      relative
              :namespace namespace
-             :warnings []
+             :warnings  []
              :problems
              (cond-> []
                (not= relative expected)
@@ -140,7 +140,7 @@
             (assoc state
                    :seen
                    (assoc seen namespace file))))
-        {:seen {}
+        {:seen     {}
          :problems []})
        :problems))
 
@@ -165,7 +165,7 @@
                (try
                  (inspect-file repo-root path)
                  (catch Throwable error
-                   {:file (relative-path repo-root path)
+                   {:file     (relative-path repo-root path)
                     :warnings []
                     :problems
                     [(str "cannot read namespace for "

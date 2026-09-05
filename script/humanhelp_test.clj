@@ -78,7 +78,7 @@
   (let [result
         @(process/process
           command
-          {:in :inherit
+          {:in  :inherit
            :out :inherit
            :err :inherit})]
     (when-not
@@ -86,7 +86,7 @@
       (gate-failure!
        "External test command failed."
        {:command command
-        :exit (:exit result)}))
+        :exit    (:exit result)}))
     result))
 
 (defn clojure-command
@@ -108,9 +108,9 @@
 
 (defn parse-command-line
   [args]
-  (let [args (vec args)
+  (let [args        (vec args)
         local-count (count (filter #{"local"} args))
-        positional (vec (remove #{"local"} args))]
+        positional  (vec (remove #{"local"} args))]
     (when (> local-count 1)
       (fail!
        "The local Gesso mode token may be supplied at most once."
@@ -119,7 +119,7 @@
       (fail!
        "Expected at most one test command plus the optional `local` token."
        {:args args}))
-    {:command (or (first positional) "all")
+    {:command      (or (first positional) "all")
      :local-gesso? (pos? local-count)}))
 
 (defn test-alias
@@ -171,11 +171,11 @@
 (def gate-specs
   {:integrity
    {:label "Repo integrity"
-    :run run-repo-integrity!}
+    :run   run-repo-integrity!}
 
    :jvm
    {:label "JVM"
-    :run run-jvm-tests!}})
+    :run   run-jvm-tests!}})
 
 (defn run-gate
   [gate-id opts]
@@ -184,12 +184,12 @@
          (get gate-specs gate-id)
          (fail!
           "Unknown HumanHelp test gate."
-          {:gate-id gate-id
+          {:gate-id     gate-id
            :known-gates (set (keys gate-specs))}))]
     (try
       (run opts)
-      {:gate gate-id
-       :label label
+      {:gate   gate-id
+       :label  label
        :status :pass}
       (catch Throwable error
         (if (gate-failure? error)
@@ -197,11 +197,11 @@
             (println)
             (println (str label ": FAIL"))
             (println (ex-message error))
-            {:gate gate-id
-             :label label
-             :status :fail
+            {:gate    gate-id
+             :label   label
+             :status  :fail
              :message (ex-message error)
-             :data data})
+             :data    data})
           (throw error))))))
 
 (defn print-gate-summary!

@@ -163,7 +163,7 @@
    integration seam is run-command."
   (live/optimistic-server
    {:principal-fn principal
-    :operations operation-entries}))
+    :operations   operation-entries}))
 
 ;; =============================================================================
 ;; HTTP-route command binding
@@ -192,7 +192,7 @@
       {:error/type
        :net.humanhelp.example.optimistic/invalid-command
 
-       :command command
+       :command  command
        :expected expected})))
 
   (when-not (contains? supported-operations operation)
@@ -202,7 +202,7 @@
       {:error/type
        :net.humanhelp.example.optimistic/unsupported-route-operation
 
-       :operation operation
+       :operation            operation
        :supported-operations supported-operations})))
 
   (when-not (= operation (:operation command))
@@ -213,7 +213,7 @@
        :net.humanhelp.example.optimistic/route-operation-mismatch
 
        :expected-operation operation
-       :actual-operation (:operation command)})))
+       :actual-operation   (:operation command)})))
 
   (when-not (= request-id
                (get-in command [:arguments :request-id]))
@@ -224,8 +224,8 @@
        :net.humanhelp.example.optimistic/route-request-mismatch
 
        :expected-request-id request-id
-       :actual-request-id (get-in command [:arguments :request-id])
-       :operation operation})))
+       :actual-request-id   (get-in command [:arguments :request-id])
+       :operation           operation})))
 
   command)
 

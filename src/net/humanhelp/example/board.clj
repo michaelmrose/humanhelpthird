@@ -56,11 +56,11 @@
     :oldest})
 
 (def default-view-state
-  {:search ""
-   :created-order default-created-order
-   :mine-first? false
+  {:search           ""
+   :created-order    default-created-order
+   :mine-first?      false
    :unclaimed-first? false
-   :show-terminal? false})
+   :show-terminal?   false})
 
 (defn present?
   [value]
@@ -211,7 +211,7 @@
           (display-user
            ctx
            (request/requestor-id request-document)
-           {:relation :requestor
+           {:relation   :requestor
             :request-id request-id}))
 
         primary-helper-user
@@ -219,13 +219,13 @@
           (display-user
            ctx
            (request/assignment-helper-id primary-assignment)
-           {:relation :primary-helper
+           {:relation   :primary-helper
             :request-id request-id
             :assignment-id
             (request/assignment-id primary-assignment)}))]
-    {:request request-document
-     :primary-assignment primary-assignment
-     :requestor-user requestor-user
+    {:request             request-document
+     :primary-assignment  primary-assignment
+     :requestor-user      requestor-user
      :primary-helper-user primary-helper-user}))
 
 (defn request-rows-for-location
@@ -260,8 +260,8 @@
      #(request-row ctx %)
      (request/requests-for-location
       ctx
-      {:organization-id organization-id
-       :location-id location-id
+      {:organization-id   organization-id
+       :location-id       location-id
        :include-terminal? true}))))
 
 ;; =============================================================================
@@ -539,7 +539,7 @@
   [ctx row operation arguments target-id]
   (when-let [basis
              (observed-basis ctx)]
-    {:arguments arguments
+    {:arguments      arguments
      :observed-basis basis
      :scope
      [:request
@@ -548,7 +548,7 @@
      {:request/revision
       (request/revision
        (row-request row))}
-     :target-id target-id
+     :target-id      target-id
      :capability
      (or
       (get
@@ -603,13 +603,13 @@
          rows
          viewer-id
          view-state)]
-    {:location-id location-id
-     :viewer viewer
-     :viewer-id viewer-id
-     :view-state view-state
+    {:location-id    location-id
+     :viewer         viewer
+     :viewer-id      viewer-id
+     :view-state     view-state
      :observed-basis (observed-basis ctx)
-     :rows visible
-     :total-count (count rows)
+     :rows           visible
+     :total-count    (count rows)
      :active-count
      (count
       (filter

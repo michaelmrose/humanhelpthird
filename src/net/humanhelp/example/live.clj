@@ -84,8 +84,8 @@
 (defn- board-input
   [ctx id]
   {:location-id id
-   :viewer (render-viewer ctx)
-   :view-state (normalized-render-view-state ctx)})
+   :viewer      (render-viewer ctx)
+   :view-state  (normalized-render-view-state ctx)})
 
 ;; =============================================================================
 ;; Lazy view boundary
@@ -134,12 +134,12 @@
    hx-include.  Only scroll, focus/caret, and native <details> state live here."
   (continuity/preserve
    {:scroll {:selector "[data-humanhelp-request-card]"}
-    :focus true
-    :boxes [(continuity/details-open
-             {:selector
-              "details[data-humanhelp-request-card][data-accordion-value]"
-              :key-attr "data-accordion-value"
-              :single? true})]}))
+    :focus  true
+    :boxes  [(continuity/details-open
+              {:selector
+               "details[data-humanhelp-request-card][data-accordion-value]"
+               :key-attr "data-accordion-value"
+               :single?  true})]}))
 
 ;; =============================================================================
 ;; Live scope authorization
@@ -162,22 +162,22 @@
 
 (defn request-toolbar-query
   [ctx id]
-  (let [data (board/board-data ctx (board-input ctx id))
-        viewer (:viewer data)
+  (let [data       (board/board-data ctx (board-input ctx id))
+        viewer     (:viewer data)
         view-state (:view-state data)
-        basis (:observed-basis data)]
-    {:ctx ctx
-     :location-id id
-     :viewer viewer
+        basis      (:observed-basis data)]
+    {:ctx                ctx
+     :location-id        id
+     :viewer             viewer
      ;; Temporary view key until all non-Request example UI says :viewer.
-     :user viewer
-     :view-state view-state
-     :open-count (:active-count data)
+     :user               viewer
+     :view-state         view-state
+     :open-count         (:active-count data)
      ;; Production Live progression replaces the old demo revision/pending
      ;; revision scheme.  There is no second application revision frontier.
      :pending-open-count 0
-     :stale? false
-     :latest-revision basis}))
+     :stale?             false
+     :latest-revision    basis}))
 
 (defn request-list-query
   [ctx id]
@@ -214,15 +214,15 @@
 
     :scopes
     {:request-toolbar
-     {:topic :humanhelp/request-toolbar
-      :id-key :request/location-id
-      :label "Request toolbar"
+     {:topic       :humanhelp/request-toolbar
+      :id-key      :request/location-id
+      :label       "Request toolbar"
       :authorized? allow-example-location?}
 
      :request-list
-     {:topic :humanhelp/request-list
-      :id-key :request/location-id
-      :label "Request list"
+     {:topic       :humanhelp/request-list
+      :id-key      :request/location-id
+      :label       "Request list"
       :authorized? allow-example-location?}}
 
     ;; Production Request FX emits semantic :request changes carrying
@@ -231,27 +231,27 @@
     ;; invalidates the complete aggregate projection.
     :graph
     {:request
-     [{:scope :request-toolbar
+     [{:scope  :request-toolbar
        :id-key :request/location-id}
-      {:scope :request-list
+      {:scope  :request-list
        :id-key :request/location-id}]}
 
     :fragments
     {:request-toolbar
-     {:scope :request-toolbar
-      :id-fn (fn [_id]
-               (request-toolbar-dom-id))
-      :query request-toolbar-query
+     {:scope  :request-toolbar
+      :id-fn  (fn [_id]
+                (request-toolbar-dom-id))
+      :query  request-toolbar-query
       :render request-toolbar-render
-      :swap :outerHTML}
+      :swap   :outerHTML}
 
      :request-list
-     {:scope :request-list
-      :id-fn (fn [_id]
-               (request-list-dom-id))
-      :query request-list-query
+     {:scope  :request-list
+      :id-fn  (fn [_id]
+                (request-list-dom-id))
+      :query  request-list-query
       :render request-list-render
-      :swap :outerHTML}}}))
+      :swap   :outerHTML}}}))
 
 (def live-rules
   "Compiled invalidation rules exported for the app module."
@@ -272,20 +272,20 @@
    (case fragment-name
      :request-toolbar
      {:fragment-url (routes/request-toolbar-fragment-url)
-      :stream-url (routes/request-toolbar-stream-url)
-      :root-attrs {:hx-include (board-state-selector)}}
+      :stream-url   (routes/request-toolbar-stream-url)
+      :root-attrs   {:hx-include (board-state-selector)}}
 
      :request-list
-     {:fragment-url (routes/request-list-fragment-url)
-      :stream-url (routes/request-list-stream-url)
-      :swap "outerHTML show:none focus-scroll:false"
-      :root-attrs {:hx-include (board-state-selector)}
+     {:fragment-url      (routes/request-list-fragment-url)
+      :stream-url        (routes/request-list-stream-url)
+      :swap              "outerHTML show:none focus-scroll:false"
+      :root-attrs        {:hx-include (board-state-selector)}
       :client-continuity request-list-client-continuity}
 
      (throw
       (ex-info
        "Unknown HumanHelp live fragment."
-       {:fragment fragment-name
+       {:fragment        fragment-name
         :known-fragments [:request-toolbar :request-list]})))))
 
 ;; =============================================================================
@@ -318,7 +318,7 @@
    (page-panels nil))
   ([_view-state]
    {:request-toolbar-panel (request-toolbar-panel)
-    :request-list-panel (request-list-panel)}))
+    :request-list-panel    (request-list-panel)}))
 
 ;; =============================================================================
 ;; Fragment render / response helpers
@@ -374,7 +374,7 @@
   (let [reference
         (or (:request/number request-document)
             (request-id-value request-document))
-        title (:request/title request-document)]
+        title     (:request/title request-document)]
     (str
      "New request "
      reference
@@ -387,9 +387,9 @@
   ([request-document {:keys [actor exclude-user-id]}]
    (let [excluded-user-id (or exclude-user-id
                               (:user/id actor))
-         toast {:variant :info
-                :title "New request received"
-                :description (request-toast-description request-document)}]
+         toast            {:variant     :info
+                           :title       "New request received"
+                           :description (request-toast-description request-document)}]
      (if excluded-user-id
        (client-plumbing/send-toast-to-scope-except-user!
         notification-scope
@@ -404,16 +404,16 @@
   []
   (client-plumbing/send-toast-to-scope!
    notification-scope
-   {:variant :info
-    :title "Demo reset"
+   {:variant     :info
+    :title       "Demo reset"
     :description "The HumanHelp request board was reset."}))
 
 (defn send-request-action-error-toast!
   [message]
   (client-plumbing/send-toast-to-scope!
    notification-scope
-   {:variant :danger
-    :title "Request not updated"
+   {:variant     :danger
+    :title       "Request not updated"
     :description (or message
                      "That request action could not be completed.")}))
 

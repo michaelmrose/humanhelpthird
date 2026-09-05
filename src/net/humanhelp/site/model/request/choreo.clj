@@ -117,9 +117,9 @@
 
 (defn- choreography-options
   [name operation browser-role]
-  {:name name
-   :operation operation
-   :browser-role browser-role
+  {:name           name
+   :operation      operation
+   :browser-role   browser-role
    :authority-role request-authority-role})
 
 (def claim-choreography-options
@@ -161,7 +161,7 @@
    :capability
    (capability/operation-capability
     {:operation (:operation options)
-     :plan-key plan-key})})
+     :plan-key  plan-key})})
 
 (def ^:private claim-artifacts
   (command-artifacts claim-choreography-options claim-plan-key))
@@ -237,21 +237,21 @@
 
    This is convenient for UI composition. It is not a trusted server registry
    and carries no authorization."
-  {claim-operation claim-capability
-   unclaim-operation unclaim-capability
+  {claim-operation           claim-capability
+   unclaim-operation         unclaim-capability
    mark-on-the-way-operation mark-on-the-way-capability
-   complete-operation complete-capability
-   cancel-operation cancel-capability
-   reassign-operation reassign-capability})
+   complete-operation        complete-capability
+   cancel-operation          cancel-capability
+   reassign-operation        reassign-capability})
 
 (def browser-plans
   "Semantic Request operation -> canonical browser ExecutablePlan."
-  {claim-operation claim-browser-plan
-   unclaim-operation unclaim-browser-plan
+  {claim-operation           claim-browser-plan
+   unclaim-operation         unclaim-browser-plan
    mark-on-the-way-operation mark-on-the-way-browser-plan
-   complete-operation complete-browser-plan
-   cancel-operation cancel-browser-plan
-   reassign-operation reassign-browser-plan})
+   complete-operation        complete-browser-plan
+   cancel-operation          cancel-browser-plan
+   reassign-operation        reassign-browser-plan})
 
 ;; =============================================================================
 ;; Trusted Request result -> authoritative protocol observation
@@ -276,7 +276,7 @@
         :invalid-operation-result)
       "request.core operation returned a non-map authoritative result."
       {:operation operation
-       :result result})))
+       :result    result})))
 
   (when-not (= :committed (:commit/status result))
     (throw
@@ -285,9 +285,9 @@
         :claim-not-committed
         :operation-not-committed)
       "A successful Request choreography invocation must represent a committed model transition."
-      {:operation operation
+      {:operation     operation
        :commit/status (:commit/status result)
-       :result-keys (set (keys result))})))
+       :result-keys   (set (keys result))})))
 
   result)
 
@@ -300,17 +300,17 @@
         :invalid-authoritative-request
         "Committed Request operation result does not contain a canonical Request document."
         {:operation operation
-         :request request-document})))
+         :request   request-document})))
 
     (when-not (= expected-status (request/status request-document))
       (throw
        (choreography-error
         :unexpected-authoritative-request-state
         "Committed Request operation result has an unexpected lifecycle state."
-        {:operation operation
+        {:operation       operation
          :expected-status expected-status
-         :request/id (request/request-id request-document)
-         :request/status (request/status request-document)})))
+         :request/id      (request/request-id request-document)
+         :request/status  (request/status request-document)})))
 
     request-document))
 
@@ -323,7 +323,7 @@
         :invalid-authoritative-primary-assignment
         :invalid-authoritative-assignment)
       "Committed Request operation result contains a non-canonical RequestAssignment document."
-      {:operation operation
+      {:operation  operation
        :assignment assignment})))
 
   (when-not (= (request/request-id request-document)
@@ -334,7 +334,7 @@
         :claim-result-aggregate-mismatch
         :operation-result-aggregate-mismatch)
       "Committed Request and RequestAssignment do not belong to the same Request aggregate."
-      {:operation operation
+      {:operation  operation
        :request/id (request/request-id request-document)
        :request-assignment/request
        (request/assignment-request-id assignment)})))
@@ -353,9 +353,9 @@
        (choreography-error
         :unexpected-authoritative-assignment-state
         "Committed Request operation result does not contain an active primary assignment."
-        {:operation operation
-         :request-assignment/id (request/assignment-id assignment)
-         :request-assignment/role (request/assignment-role assignment)
+        {:operation                 operation
+         :request-assignment/id     (request/assignment-id assignment)
+         :request-assignment/role   (request/assignment-role assignment)
          :request-assignment/status (request/assignment-status assignment)})))
     assignment))
 
@@ -371,9 +371,9 @@
        (choreography-error
         :unexpected-authoritative-assignment-state
         "Committed Request operation expected an ended RequestAssignment."
-        {:operation operation
-         :request-assignment/id (request/assignment-id assignment')
-         :request-assignment/role (request/assignment-role assignment')
+        {:operation                 operation
+         :request-assignment/id     (request/assignment-id assignment')
+         :request-assignment/role   (request/assignment-role assignment')
          :request-assignment/status (request/assignment-status assignment')})))
     assignment'))
 
@@ -385,7 +385,7 @@
        (choreography-error
         :invalid-authoritative-assignments
         "Committed Request operation result must contain a vector of ended RequestAssignments."
-        {:operation operation
+        {:operation   operation
          :assignments assignments})))
     (mapv
      #(require-ended-assignment! operation request-document %)
@@ -465,17 +465,17 @@
        (choreography-error
         :missing-commit-progression
         "Committed Request operation cannot be represented as confirmed optimistic authority without transaction-established XTDB progression."
-        {:operation operation
+        {:operation     operation
          :commit/status (:commit/status result)
-         :progression progression})))
+         :progression   progression})))
     basis))
 
 (defn- authoritative
   [operation result projection fact-versions]
   (protocol/authoritative
-   {:presence :present
-    :basis (committed-basis operation result)
-    :projection projection
+   {:presence      :present
+    :basis         (committed-basis operation result)
+    :projection    projection
     :fact-versions fact-versions}))
 
 (defn- confirmed-authoritative-claim
@@ -592,9 +592,9 @@
    rather than becoming a false :rejected or :failed settlement."
   [model-operation outcome authoritative-fn {:keys [ctx arguments]}]
   (let [result (model-operation ctx arguments)]
-    {:resolution :confirmed
+    {:resolution    :confirmed
      :authoritative (authoritative-fn result)
-     :outcome outcome}))
+     :outcome       outcome}))
 
 (defn- execute-claim!
   [trusted-context]
@@ -675,12 +675,12 @@
    The surrounding HumanHelp server supplies the authenticated-context
    :principal-fn. Browser capabilities and this map are deliberately separate:
    rendering an operation never registers or authorizes it."
-  {claim-operation claim-operation-entry
-   unclaim-operation unclaim-operation-entry
+  {claim-operation           claim-operation-entry
+   unclaim-operation         unclaim-operation-entry
    mark-on-the-way-operation mark-on-the-way-operation-entry
-   complete-operation complete-operation-entry
-   cancel-operation cancel-operation-entry
-   reassign-operation reassign-operation-entry})
+   complete-operation        complete-operation-entry
+   cancel-operation          cancel-operation-entry
+   reassign-operation        reassign-operation-entry})
 
 (def claim-authority-plan (:authority-plan claim-operation-entry))
 (def unclaim-authority-plan (:authority-plan unclaim-operation-entry))
@@ -693,9 +693,9 @@
 (def authority-plans
   "Semantic Request operation -> canonical authority ExecutablePlan retained by
    the trusted registry entry."
-  {claim-operation claim-authority-plan
-   unclaim-operation unclaim-authority-plan
+  {claim-operation           claim-authority-plan
+   unclaim-operation         unclaim-authority-plan
    mark-on-the-way-operation mark-on-the-way-authority-plan
-   complete-operation complete-authority-plan
-   cancel-operation cancel-authority-plan
-   reassign-operation reassign-authority-plan})
+   complete-operation        complete-authority-plan
+   cancel-operation          cancel-authority-plan
+   reassign-operation        reassign-authority-plan})

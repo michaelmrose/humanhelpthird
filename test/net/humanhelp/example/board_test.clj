@@ -98,7 +98,7 @@
   [id display-name]
   (command/after
    (user.domain/create-user-command
-    {:id id
+    {:id           id
      :display-name display-name
      :email
      (str
@@ -107,7 +107,7 @@
        #"\s+"
        ".")
       "@example.test")
-     :now t0})))
+     :now          t0})))
 
 (def requestor-user
   (production-user
@@ -133,19 +133,19 @@
   ([id now content-overrides]
    (command/after
     (request.domain/create-request-command
-     {:id id
+     {:id              id
       :organization-id organization-id
-      :location-id location-id
+      :location-id     location-id
       :requestor
       (request.domain/user-requestor
        requestor-id)
       :content
       (merge
-       {:title "Need help"
-        :details "Please help me find the right item."
+       {:title           "Need help"
+        :details         "Please help me find the right item."
         :location-detail "Near the front desk"}
        content-overrides)
-      :now now}))))
+      :now             now}))))
 
 (defn- claimed-request
   ([id]
@@ -184,19 +184,19 @@
         (UUID/fromString
          "50000000-0000-0000-0000-000000000002"))
       :request-id request-id'
-      :helper-id helper-id'
-      :role :primary
-      :source :request/claim
-      :actor-id helper-id'
-      :now t1}))))
+      :helper-id  helper-id'
+      :role       :primary
+      :source     :request/claim
+      :actor-id   helper-id'
+      :now        t1}))))
 
 (defn- row
   ([request-document]
    (row request-document nil nil nil))
   ([request-document assignment requestor helper]
-   {:request request-document
-    :primary-assignment assignment
-    :requestor-user requestor
+   {:request             request-document
+    :primary-assignment  assignment
+    :requestor-user      requestor
     :primary-helper-user helper}))
 
 ;; =============================================================================
@@ -292,19 +292,19 @@
   (is (= board/default-view-state
          (board/normalize-view-state
           nil)))
-  (is (= {:search "needle"
-          :created-order :oldest
-          :mine-first? true
+  (is (= {:search           "needle"
+          :created-order    :oldest
+          :mine-first?      true
           :unclaimed-first? true
-          :show-terminal? true}
+          :show-terminal?   true}
          (board/normalize-view-state
-          {:search "  needle  "
-           :created-order "oldest"
-           :mine-first? "on"
+          {:search           "  needle  "
+           :created-order    "oldest"
+           :mine-first?      "on"
            :unclaimed-first? "true"
-           :show-terminal? 1
+           :show-terminal?   1
            :visible-revision 999
-           :observed-basis :fabricated})))
+           :observed-basis   :fabricated})))
   (is (= :newest
          (:created-order
           (board/normalize-view-state
@@ -684,8 +684,8 @@
             (board/board-data
              {:ctx :production-read}
              {:location-id location-id
-              :viewer helper-user
-              :view-state {}})]
+              :viewer      helper-user
+              :view-state  {}})]
 
         (is (= [[{:ctx :production-read}
                  location-id]]

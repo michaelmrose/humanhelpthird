@@ -21,17 +21,17 @@
   (UUID/fromString "82000000-0000-0000-0000-000000000001"))
 
 (def viewer
-  {:xt/id viewer-id
+  {:xt/id             viewer-id
    :user/display-name "Production Viewer"
-   :user/email "viewer@example.test"})
+   :user/email        "viewer@example.test"})
 
 (def production-row
   {:request
-   {:xt/id request-id
-    :request/status :open
+   {:xt/id           request-id
+    :request/status  :open
     :request/content {:title "Need a ride"}}
-   :primary-assignment nil
-   :requestor-user viewer
+   :primary-assignment  nil
+   :requestor-user      viewer
    :primary-helper-user nil})
 
 (defn- tree-elements
@@ -70,7 +70,7 @@
 
 (deftest request-card-node-delegates-production-row-without-translation-test
   (let [calls (atom [])
-        ctx {:anti-forgery-token "token"}
+        ctx   {:anti-forgery-token "token"}
         stub
         (fn [actual-ctx opts]
           (swap! calls conj [actual-ctx opts])
@@ -81,14 +81,14 @@
         (is (= [:article {:data-test-request-card true}]
                (views/request-card-node
                 ctx
-                {:row production-row
+                {:row    production-row
                  :viewer viewer
-                 :open? true})))
+                 :open?  true})))
         (is (= [[ctx
-                 {:row production-row
-                  :viewer viewer
+                 {:row                  production-row
+                  :viewer               viewer
                   :board-state-selector (views/board-state-selector)
-                  :open? true}]]
+                  :open?                true}]]
                @calls))))))
 
 (deftest request-accordion-renders-every-production-row-through-example-card-test
@@ -97,7 +97,7 @@
          production-row
          [:request :xt/id]
          (UUID/fromString "81000000-0000-0000-0000-000000000002"))
-        calls (atom [])
+        calls      (atom [])
         stub
         (fn [_ctx {:keys [row viewer]}]
           (swap! calls conj [row viewer])
@@ -108,9 +108,9 @@
       (fn []
         (let [markup
               (views/request-accordion
-               {:ctx {:request/context true}
+               {:ctx    {:request/context true}
                 :viewer viewer
-                :rows [production-row second-row]})]
+                :rows   [production-row second-row]})]
           (is (= [[production-row viewer]
                   [second-row viewer]]
                  @calls))
@@ -131,16 +131,16 @@
         [:section {:data-test-production-accordion true}])]
       (let [markup
             (views/request-list-fragment
-             {:ctx {:request/context true}
-              :viewer viewer
-              :rows [production-row]
-              :view-state board/default-view-state
+             {:ctx             {:request/context true}
+              :viewer          viewer
+              :rows            [production-row]
+              :view-state      board/default-view-state
               :latest-revision basis})
             attrs
             (attrs-for-id markup views/request-list-dom-id)]
-        (is (= [{:ctx {:request/context true}
+        (is (= [{:ctx    {:request/context true}
                  :viewer viewer
-                 :rows [production-row]}]
+                 :rows   [production-row]}]
                @calls))
         (is (= "request-list"
                (:data-humanhelp-fragment attrs)))
@@ -150,10 +150,10 @@
 
 (deftest legacy-requests-input-is-not-a-request-rendering-fallback-test
   (let [legacy-request
-        {:id "demo-request"
-         :status :open
+        {:id       "demo-request"
+         :status   :open
          :revision 999}
-        card-called? (atom false)
+        card-called?   (atom false)
         stub
         (fn [& _]
           (reset! card-called? true)
@@ -163,10 +163,10 @@
       (fn []
         (let [markup
               (views/request-list-fragment
-               {:ctx {}
-                :viewer viewer
-                :requests [legacy-request]
-                :view-state board/default-view-state
+               {:ctx             {}
+                :viewer          viewer
+                :requests        [legacy-request]
+                :view-state      board/default-view-state
                 :latest-revision {:xtdb/tx-id 1}})
               text
               (filter string? (tree-seq coll? seq markup))]
@@ -179,23 +179,23 @@
   (testing "empty unfiltered boards render an ordinary empty state"
     (let [markup
           (views/request-list-fragment
-           {:ctx {}
-            :viewer viewer
-            :rows []
-            :view-state board/default-view-state
+           {:ctx             {}
+            :viewer          viewer
+            :rows            []
+            :view-state      board/default-view-state
             :latest-revision {:xtdb/tx-id 2}})
-          text (set (filter string? (tree-seq coll? seq markup)))]
+          text   (set (filter string? (tree-seq coll? seq markup)))]
       (is (contains? text "No requests yet"))))
 
   (testing "search changes only empty-state presentation"
     (let [markup
           (views/request-list-fragment
-           {:ctx {}
-            :viewer viewer
-            :rows []
-            :view-state (assoc board/default-view-state :search "needle")
+           {:ctx             {}
+            :viewer          viewer
+            :rows            []
+            :view-state      (assoc board/default-view-state :search "needle")
             :latest-revision {:xtdb/tx-id 3}})
-          text (set (filter string? (tree-seq coll? seq markup)))]
+          text   (set (filter string? (tree-seq coll? seq markup)))]
       (is (contains? text "No matching requests"))
       (is (contains?
            text

@@ -323,7 +323,7 @@
          #(route-entry handlers (route-spec %))
          required-route-ids)
         (for [route-id optional-route-ids
-              :when (contains? handlers route-id)]
+              :when    (contains? handlers route-id)]
           (route-entry handlers (route-spec route-id)))))])))
 
 ;; -----------------------------------------------------------------------------
@@ -580,5 +580,5 @@
     (throw
      (ex-info "Unknown production HumanHelp Request operation."
               {:request-id request-id
-               :operation operation}))))
+               :operation  operation}))))
 

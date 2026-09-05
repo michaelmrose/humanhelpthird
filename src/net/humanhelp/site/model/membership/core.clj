@@ -752,7 +752,7 @@
   "Commits one already-planned Membership operation and returns its stable
    semantic result plus commit status and authoritative progression."
   [ctx {:keys [result]
-        :as planned}]
+        :as   planned}]
   (let [transaction
         (model.tx/transact!
          ctx

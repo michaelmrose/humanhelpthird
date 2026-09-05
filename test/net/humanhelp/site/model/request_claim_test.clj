@@ -20,21 +20,21 @@
 
 (def sample-ctx
   {:current-user/id :helper-1
-   :test/context :authoritative})
+   :test/context    :authoritative})
 
 (def sample-input
   {:request-id :request-1
-   :helper-id :helper-1})
+   :helper-id  :helper-1})
 
 (def sample-result
   {:request
-   {:xt/id :request-1
+   {:xt/id          :request-1
     :request/status :claimed}
 
    :primary-assignment
-   {:xt/id :assignment-1
+   {:xt/id                      :assignment-1
     :request-assignment/request :request-1
-    :request-assignment/helper :helper-1}})
+    :request-assignment/helper  :helper-1}})
 
 (def sample-fragment
   {:assertions
@@ -45,8 +45,8 @@
     {:write :primary-assignment}]
 
    :changes
-   [{:topic :request
-     :id :request-1
+   [{:topic             :request
+     :id                :request-1
      :request/operation :claim}]})
 
 (def sample-options
@@ -58,23 +58,23 @@
 
 (def sample-progression
   {:gesso.live.progression/kind :test/progression
-   :basis 42})
+   :basis                       42})
 
 (defn planned-claim
   []
-  {:result sample-result
+  {:result               sample-result
    :transaction-fragment sample-fragment
-   :transaction-options sample-options})
+   :transaction-options  sample-options})
 
 (deftest claim-plans-and-commits-one-complete-transaction-test
-  (let [planner-calls (atom [])
+  (let [planner-calls     (atom [])
         transaction-calls (atom [])
         transaction-result
         {:commit/status :committed
-         :progression sample-progression
-         :ctx {:opaque :consistency-aware}
-         :tx-result {:opaque :xtdb}
-         :changes [{:opaque :live-change}]}
+         :progression   sample-progression
+         :ctx           {:opaque :consistency-aware}
+         :tx-result     {:opaque :xtdb}
+         :changes       [{:opaque :live-change}]}
 
         result
         (with-redefs
@@ -208,9 +208,9 @@
         committed-error
         (ex-info
          "Mutation committed; Live delivery later failed."
-         {:error/type :gesso.live/post-commit-delivery-failure
+         {:error/type    :gesso.live/post-commit-delivery-failure
           :commit/status :committed
-          :progression sample-progression})
+          :progression   sample-progression})
 
         actual
         (try

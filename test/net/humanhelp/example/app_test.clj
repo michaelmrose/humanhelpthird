@@ -39,40 +39,40 @@
   (identity/execution-id "humanhelp-example-app-execution-508"))
 
 (def canonical-view-state
-  {:search ""
-   :created-order :newest
-   :mine-first? false
+  {:search           ""
+   :created-order    :newest
+   :mine-first?      false
    :unclaimed-first? false
-   :show-terminal? false})
+   :show-terminal?   false})
 
 (def lifecycle-handlers
   [{:operation :request/claim
-    :route-id routes/claim-request-id
-    :handler app/claim-request!}
+    :route-id  routes/claim-request-id
+    :handler   app/claim-request!}
    {:operation :request/unclaim
-    :route-id routes/unclaim-request-id
-    :handler app/unclaim-request!}
+    :route-id  routes/unclaim-request-id
+    :handler   app/unclaim-request!}
    {:operation :request/mark-on-the-way
-    :route-id routes/mark-on-the-way-request-id
-    :handler app/mark-on-the-way-request!}
+    :route-id  routes/mark-on-the-way-request-id
+    :handler   app/mark-on-the-way-request!}
    {:operation :request/complete
-    :route-id routes/complete-request-id
-    :handler app/complete-request!}
+    :route-id  routes/complete-request-id
+    :handler   app/complete-request!}
    {:operation :request/cancel
-    :route-id routes/cancel-request-id
-    :handler app/cancel-request!}
+    :route-id  routes/cancel-request-id
+    :handler   app/cancel-request!}
    {:operation :request/reassign
-    :route-id routes/reassign-request-id
-    :handler app/reassign-request!}])
+    :route-id  routes/reassign-request-id
+    :handler   app/reassign-request!}])
 
 (defn- command
   ([operation]
    (command operation request-id))
   ([operation target-request-id]
    (protocol/command
-    {:command-id command-id
+    {:command-id   command-id
      :execution-id execution-id
-     :operation operation
+     :operation    operation
      :arguments
      (cond->
       {:request-id target-request-id}
@@ -112,7 +112,7 @@
    execute production XTDB authority."
   [f]
   (with-redefs
-   [board/normalize-view-state (fn [_] canonical-view-state)
+   [board/normalize-view-state    (fn [_] canonical-view-state)
     views/request-lifecycle-extras
     (fn [_ props]
       [:lifecycle-extra props])
@@ -125,9 +125,9 @@
     views/oob-response
     (fn [& nodes]
       (into [:oob] nodes))
-    g/html-response identity
+    g/html-response               identity
     live/complete-optimistic-send (fn [_] nil)]
-   (f)))
+    (f)))
 
 (deftest handlers-register-the-production-request-lifecycle-test
   (is (= 6 (count lifecycle-handlers)))
@@ -146,13 +146,13 @@
 (deftest every-lifecycle-route-binds-exact-operation-and-request-id-test
   (doseq [{:keys [operation handler]} lifecycle-handlers]
     (testing (str operation)
-      (let [seen (atom nil)
+      (let [seen     (atom nil)
             settlement
             {:resolution :confirmed
-             :outcome operation
+             :outcome    operation
              :authoritative
              {:projection {:request/id request-id}}}
-            prepared {:settlement settlement
+            prepared {:settlement        settlement
                       :prepared/sentinel operation}
             response
             (with-lifecycle-shell
@@ -161,9 +161,9 @@
                  (fn [request-ctx decoded-command]
                    (reset! seen [request-ctx decoded-command])
                    prepared)]
-                (handler
-                 (ctx request-id
-                      (encoded-command operation)))))]
+                 (handler
+                  (ctx request-id
+                       (encoded-command operation)))))]
         (is (= operation
                (get-in @seen [1 :operation])))
         (is (= request-id
@@ -174,8 +174,8 @@
         (is (= [:oob
                 [:settlement-marker settlement]
                 [:lifecycle-extra
-                 {:action operation
-                  :request {:request/id request-id}
+                 {:action     operation
+                  :request    {:request/id request-id}
                   :view-state canonical-view-state}]]
                response))))))
 
@@ -188,11 +188,11 @@
              (fn [& _]
                (swap! run-count inc)
                (throw (ex-info "must not run" {})))]
-            (thrown
-             (fn []
-               (app/claim-request!
-                (ctx request-id
-                     (encoded-command :request/cancel)))))))]
+             (thrown
+              (fn []
+                (app/claim-request!
+                 (ctx request-id
+                      (encoded-command :request/cancel)))))))]
     (is (= 0 @run-count))
     (is (= :net.humanhelp.example.optimistic/route-operation-mismatch
            (:error/type (ex-data error))))
@@ -210,12 +210,12 @@
              (fn [& _]
                (swap! run-count inc)
                (throw (ex-info "must not run" {})))]
-            (thrown
-             (fn []
-               (app/claim-request!
-                (ctx request-id
-                     (encoded-command :request/claim
-                                      other-request-id)))))))]
+             (thrown
+              (fn []
+                (app/claim-request!
+                 (ctx request-id
+                      (encoded-command :request/claim
+                                       other-request-id)))))))]
     (is (= 0 @run-count))
     (is (= :net.humanhelp.example.optimistic/route-request-mismatch
            (:error/type (ex-data error))))
@@ -226,7 +226,7 @@
 
 (deftest malformed-route-request-id-fails-before-command-execution-test
   (let [decode-count (atom 0)
-        run-count (atom 0)
+        run-count    (atom 0)
         error
         (with-lifecycle-shell
           #(with-redefs
@@ -238,13 +238,13 @@
              (fn [& _]
                (swap! run-count inc)
                (throw (ex-info "must not run" {})))]
-            (thrown
-             (fn []
-               (app/claim-request!
-                {:path-params {:request-id "not-a-uuid"}
-                 :form-params
-                 {app/optimistic-command-param
-                  (encoded-command :request/claim)}})))))]
+             (thrown
+              (fn []
+                (app/claim-request!
+                 {:path-params {:request-id "not-a-uuid"}
+                  :form-params
+                  {app/optimistic-command-param
+                   (encoded-command :request/claim)}})))))]
     (is (= 0 @decode-count))
     (is (= 0 @run-count))
     (is (= :humanhelp.example/invalid-request-id
@@ -259,11 +259,11 @@
               [optimistic/run-command
                (fn [& _]
                  (swap! run-count inc))]
-              (thrown
-               (fn []
-                 (app/claim-request!
-                  {:path-params
-                   {:request-id (str request-id)}})))))]
+               (thrown
+                (fn []
+                  (app/claim-request!
+                   {:path-params
+                    {:request-id (str request-id)}})))))]
       (is (= 0 @run-count))
       (is (instance? clojure.lang.ExceptionInfo error))))
 
@@ -275,10 +275,10 @@
               [optimistic/run-command
                (fn [& _]
                  (swap! run-count inc))]
-              (thrown
-               (fn []
-                 (app/claim-request!
-                  (ctx request-id "[not valid edn"))))))]
+               (thrown
+                (fn []
+                  (app/claim-request!
+                   (ctx request-id "[not valid edn"))))))]
       (is (= 0 @run-count))
       (is (instance? clojure.lang.ExceptionInfo error)))))
 
@@ -295,15 +295,15 @@
 (deftest settlement-resolution-is-presentation-only-at-the-http-boundary-test
   (testing "rejection renders feedback without constructing replacement authority"
     (let [settlement {:resolution :rejected
-                      :reason :request/not-claimable}
-          prepared {:settlement settlement}
+                      :reason     :request/not-claimable}
+          prepared   {:settlement settlement}
           response
           (with-lifecycle-shell
             #(with-redefs
               [optimistic/run-command (fn [_ _] prepared)]
-              (app/claim-request!
-               (ctx request-id
-                    (encoded-command :request/claim)))))]
+               (app/claim-request!
+                (ctx request-id
+                     (encoded-command :request/claim)))))]
       (is (= [:oob
               [:settlement-marker settlement]
               [:lifecycle-error
@@ -316,11 +316,11 @@
           (with-lifecycle-shell
             #(with-redefs
               [optimistic/run-command (fn [_ _] prepared)]
-              (thrown
-               (fn []
-                 (app/claim-request!
-                  (ctx request-id
-                       (encoded-command :request/claim)))))))]
+               (thrown
+                (fn []
+                  (app/claim-request!
+                   (ctx request-id
+                        (encoded-command :request/claim)))))))]
       (is (instance? clojure.lang.ExceptionInfo error))
       (is (= :request/claim
              (:operation (ex-data error)))))))
@@ -334,7 +334,7 @@
         {:request/sentinel :incoming}
 
         committed-ctx
-        {:request/sentinel :post-fixture-commit
+        {:request/sentinel       :post-fixture-commit
          :gesso.live/progression {:fixture/progression :committed}}
 
         events
@@ -346,15 +346,15 @@
           (fn [actual-ctx]
             (swap! events conj [:ensure actual-ctx])
             {:organization-id mock-data/organization-id
-             :locations mock-data/locations
-             :created-count 4
-             :transaction {:status :committed}
-             :ctx committed-ctx})]
+             :locations       mock-data/locations
+             :created-count   4
+             :transaction     {:status :committed}
+             :ctx             committed-ctx})]
           ((app/wrap-production-fixtures
             (fn [actual-ctx]
               (swap! events conj [:handler actual-ctx])
               {:status 204
-               :ctx actual-ctx}))
+               :ctx    actual-ctx}))
            incoming-ctx))]
 
     (is (= [[:ensure incoming-ctx]
@@ -378,10 +378,10 @@
          [mock-data/ensure!
           (fn [actual-ctx]
             {:organization-id mock-data/organization-id
-             :locations mock-data/locations
-             :created-count 0
-             :transaction nil
-             :ctx actual-ctx})]
+             :locations       mock-data/locations
+             :created-count   0
+             :transaction     nil
+             :ctx             actual-ctx})]
           ((app/wrap-production-fixtures
             (fn [actual-ctx]
               (reset! seen actual-ctx)
