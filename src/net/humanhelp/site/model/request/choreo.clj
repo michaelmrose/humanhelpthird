@@ -13,17 +13,14 @@
    the model beneath it.
 
    The choreography specializes Gesso Live optimistic protocol v3 rather than
-   inventing a second application protocol. Browser-side choreography roles are
-   semantic roles, not authorization tokens:
+   inventing a second application protocol. The browser side has one physical
+   choreography participant, :helper. Historical public names for helper,
+   requestor, and manager browser roles all resolve to that same participant.
+   HumanHelp authorization is deliberately not encoded by choosing a browser
+   runtime role.
 
      :helper
-       claim/unclaim/progress/complete operations;
-
-     :requestor
-       owner cancellation;
-
-     :manager
-       authoritative primary-helper reassignment;
+       the one signed-in Request browser participant;
 
      :request-authority
        the trusted role that invokes the corresponding request.core operation
@@ -31,8 +28,8 @@
 
    Role is not principal, actor, host, or authority identity. In particular:
 
-   - a browser actor carrying a :helper, :requestor, or :manager projection does
-     not establish an authenticated HumanHelp principal or role membership;
+   - carrying the :helper browser projection does not establish helper,
+     requestor, manager, or any other HumanHelp authority;
    - the trusted optimistic server binds principal from authenticated server
      context before an operation adapter runs;
    - a concrete Aleph/web node is only a physical host for the
@@ -68,25 +65,31 @@
 ;; Stable Request choreography vocabulary
 ;; =============================================================================
 
-(def helper-role
-  "Static browser-side choreography role.
+(def request-client-role
+  "The one physical browser-side Choreo participant for Request operations.
 
-   This does not identify a User principal or a particular browser actor."
+   A single signed-in browser may legitimately render helper, requestor, and
+   manager affordances at the same time. Those are HumanHelp authorization facts
+   revalidated by request.core on the server; they must not require separate
+   browser Choreo runtimes."
   :helper)
 
-(def requestor-role
-  "Static browser-side choreography role for Request-owner commands.
+(def helper-role
+  "Compatibility name for the Request browser participant.
 
-   This is descriptive protocol structure only; the browser cannot establish
-   Request ownership by claiming this role."
-  :requestor)
+   This is not proof of helper authority; request.core establishes that from
+   trusted model context."
+  request-client-role)
+
+(def requestor-role
+  "Compatibility name for the same Request browser participant used by owner
+   cancellation. Request ownership remains a trusted server-side fact."
+  request-client-role)
 
 (def manager-role
-  "Static browser-side choreography role for manager commands.
-
-   This is descriptive protocol structure only; request.core establishes real
-   supervisor/administrator authority from trusted model context."
-  :manager)
+  "Compatibility name for the same Request browser participant used by manager
+   operations. Supervisor/administrator authority remains server-side."
+  request-client-role)
 
 (def request-authority-role
   "Static trusted choreography role for Request authority.
@@ -117,9 +120,9 @@
 
 (defn- choreography-options
   [name operation browser-role]
-  {:name           name
-   :operation      operation
-   :browser-role   browser-role
+  {:name name
+   :operation operation
+   :browser-role browser-role
    :authority-role request-authority-role})
 
 (def claim-choreography-options
@@ -161,7 +164,7 @@
    :capability
    (capability/operation-capability
     {:operation (:operation options)
-     :plan-key  plan-key})})
+     :plan-key plan-key})})
 
 (def ^:private claim-artifacts
   (command-artifacts claim-choreography-options claim-plan-key))
@@ -237,21 +240,46 @@
 
    This is convenient for UI composition. It is not a trusted server registry
    and carries no authorization."
-  {claim-operation           claim-capability
-   unclaim-operation         unclaim-capability
+  {claim-operation claim-capability
+   unclaim-operation unclaim-capability
    mark-on-the-way-operation mark-on-the-way-capability
-   complete-operation        complete-capability
-   cancel-operation          cancel-capability
-   reassign-operation        reassign-capability})
+   complete-operation complete-capability
+   cancel-operation cancel-capability
+   reassign-operation reassign-capability})
 
 (def browser-plans
   "Semantic Request operation -> canonical browser ExecutablePlan."
-  {claim-operation           claim-browser-plan
-   unclaim-operation         unclaim-browser-plan
+  {claim-operation claim-browser-plan
+   unclaim-operation unclaim-browser-plan
    mark-on-the-way-operation mark-on-the-way-browser-plan
-   complete-operation        complete-browser-plan
-   cancel-operation          cancel-browser-plan
-   reassign-operation        reassign-browser-plan})
+   complete-operation complete-browser-plan
+   cancel-operation cancel-browser-plan
+   reassign-operation reassign-browser-plan})
+
+(defn- require-single-request-browser-role!
+  []
+  (let [roles
+        (set
+         (map
+          (comp :role val)
+          browser-plans))]
+    (when-not (= #{request-client-role} roles)
+      (throw
+       (ex-info
+        "Request browser ExecutablePlans must all target one physical browser participant."
+        {:error/type :net.humanhelp.site.model.request.choreo/error
+         :error/kind :multiple-browser-roles
+         :expected-role request-client-role
+         :actual-roles roles
+         :operations (set (keys browser-plans))})))
+    true))
+
+;; Load-time application/browser composition invariant. A single page owns one
+;; composed Gesso optimistic browser runtime. If a future Request operation
+;; accidentally projects to a different browser role, fail while constructing
+;; this namespace instead of shipping an affordance that can only fail when
+;; clicked.
+(require-single-request-browser-role!)
 
 ;; =============================================================================
 ;; Trusted Request result -> authoritative protocol observation
@@ -276,7 +304,7 @@
         :invalid-operation-result)
       "request.core operation returned a non-map authoritative result."
       {:operation operation
-       :result    result})))
+       :result result})))
 
   (when-not (= :committed (:commit/status result))
     (throw
@@ -285,9 +313,9 @@
         :claim-not-committed
         :operation-not-committed)
       "A successful Request choreography invocation must represent a committed model transition."
-      {:operation     operation
+      {:operation operation
        :commit/status (:commit/status result)
-       :result-keys   (set (keys result))})))
+       :result-keys (set (keys result))})))
 
   result)
 
@@ -300,17 +328,17 @@
         :invalid-authoritative-request
         "Committed Request operation result does not contain a canonical Request document."
         {:operation operation
-         :request   request-document})))
+         :request request-document})))
 
     (when-not (= expected-status (request/status request-document))
       (throw
        (choreography-error
         :unexpected-authoritative-request-state
         "Committed Request operation result has an unexpected lifecycle state."
-        {:operation       operation
+        {:operation operation
          :expected-status expected-status
-         :request/id      (request/request-id request-document)
-         :request/status  (request/status request-document)})))
+         :request/id (request/request-id request-document)
+         :request/status (request/status request-document)})))
 
     request-document))
 
@@ -323,7 +351,7 @@
         :invalid-authoritative-primary-assignment
         :invalid-authoritative-assignment)
       "Committed Request operation result contains a non-canonical RequestAssignment document."
-      {:operation  operation
+      {:operation operation
        :assignment assignment})))
 
   (when-not (= (request/request-id request-document)
@@ -334,7 +362,7 @@
         :claim-result-aggregate-mismatch
         :operation-result-aggregate-mismatch)
       "Committed Request and RequestAssignment do not belong to the same Request aggregate."
-      {:operation  operation
+      {:operation operation
        :request/id (request/request-id request-document)
        :request-assignment/request
        (request/assignment-request-id assignment)})))
@@ -353,9 +381,9 @@
        (choreography-error
         :unexpected-authoritative-assignment-state
         "Committed Request operation result does not contain an active primary assignment."
-        {:operation                 operation
-         :request-assignment/id     (request/assignment-id assignment)
-         :request-assignment/role   (request/assignment-role assignment)
+        {:operation operation
+         :request-assignment/id (request/assignment-id assignment)
+         :request-assignment/role (request/assignment-role assignment)
          :request-assignment/status (request/assignment-status assignment)})))
     assignment))
 
@@ -371,9 +399,9 @@
        (choreography-error
         :unexpected-authoritative-assignment-state
         "Committed Request operation expected an ended RequestAssignment."
-        {:operation                 operation
-         :request-assignment/id     (request/assignment-id assignment')
-         :request-assignment/role   (request/assignment-role assignment')
+        {:operation operation
+         :request-assignment/id (request/assignment-id assignment')
+         :request-assignment/role (request/assignment-role assignment')
          :request-assignment/status (request/assignment-status assignment')})))
     assignment'))
 
@@ -385,7 +413,7 @@
        (choreography-error
         :invalid-authoritative-assignments
         "Committed Request operation result must contain a vector of ended RequestAssignments."
-        {:operation   operation
+        {:operation operation
          :assignments assignments})))
     (mapv
      #(require-ended-assignment! operation request-document %)
@@ -465,17 +493,17 @@
        (choreography-error
         :missing-commit-progression
         "Committed Request operation cannot be represented as confirmed optimistic authority without transaction-established XTDB progression."
-        {:operation     operation
+        {:operation operation
          :commit/status (:commit/status result)
-         :progression   progression})))
+         :progression progression})))
     basis))
 
 (defn- authoritative
   [operation result projection fact-versions]
   (protocol/authoritative
-   {:presence      :present
-    :basis         (committed-basis operation result)
-    :projection    projection
+   {:presence :present
+    :basis (committed-basis operation result)
+    :projection projection
     :fact-versions fact-versions}))
 
 (defn- confirmed-authoritative-claim
@@ -592,9 +620,9 @@
    rather than becoming a false :rejected or :failed settlement."
   [model-operation outcome authoritative-fn {:keys [ctx arguments]}]
   (let [result (model-operation ctx arguments)]
-    {:resolution    :confirmed
+    {:resolution :confirmed
      :authoritative (authoritative-fn result)
-     :outcome       outcome}))
+     :outcome outcome}))
 
 (defn- execute-claim!
   [trusted-context]
@@ -675,12 +703,12 @@
    The surrounding HumanHelp server supplies the authenticated-context
    :principal-fn. Browser capabilities and this map are deliberately separate:
    rendering an operation never registers or authorizes it."
-  {claim-operation           claim-operation-entry
-   unclaim-operation         unclaim-operation-entry
+  {claim-operation claim-operation-entry
+   unclaim-operation unclaim-operation-entry
    mark-on-the-way-operation mark-on-the-way-operation-entry
-   complete-operation        complete-operation-entry
-   cancel-operation          cancel-operation-entry
-   reassign-operation        reassign-operation-entry})
+   complete-operation complete-operation-entry
+   cancel-operation cancel-operation-entry
+   reassign-operation reassign-operation-entry})
 
 (def claim-authority-plan (:authority-plan claim-operation-entry))
 (def unclaim-authority-plan (:authority-plan unclaim-operation-entry))
@@ -693,9 +721,9 @@
 (def authority-plans
   "Semantic Request operation -> canonical authority ExecutablePlan retained by
    the trusted registry entry."
-  {claim-operation           claim-authority-plan
-   unclaim-operation         unclaim-authority-plan
+  {claim-operation claim-authority-plan
+   unclaim-operation unclaim-authority-plan
    mark-on-the-way-operation mark-on-the-way-authority-plan
-   complete-operation        complete-authority-plan
-   cancel-operation          cancel-authority-plan
-   reassign-operation        reassign-authority-plan})
+   complete-operation complete-authority-plan
+   cancel-operation cancel-authority-plan
+   reassign-operation reassign-authority-plan})
