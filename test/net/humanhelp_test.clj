@@ -19,6 +19,7 @@
    [clojure.test :refer [deftest is testing]]
    [com.biffweb.config :as biff.config]
    [com.biffweb.xtdb :as biff.xtdb]
+   [gesso.model.tx :as model.tx]
    [net.humanhelp :as humanhelp]
    [net.humanhelp.app :as app]
    [net.humanhelp.client-plumbing :as client-plumbing]
@@ -73,6 +74,32 @@
          #'ui/on-error
          (:biff.ring/on-error
           humanhelp/initial-system)))))
+
+(deftest application-model-transaction-handler-is-installed-test
+  (testing "the active application installs the one Gesso model transaction effect"
+    (let [contributing-modules
+          (filterv
+           #(contains?
+             (:biff.fx/handlers %)
+             model.tx/transact-effect)
+           humanhelp/modules)
+
+          handlers
+          (apply
+           merge
+           {}
+           (keep
+            :biff.fx/handlers
+            humanhelp/modules))]
+
+      (is (= 1
+             (count contributing-modules))
+          "Authentication and every active UI surface must share one application-wide model transaction boundary.")
+
+      (is (identical?
+           model.tx/transact!
+           (get handlers model.tx/transact-effect))
+          "An FX machine must execute Gesso model transactions rather than returning an unhandled effect vector as ordinary data."))))
 
 (deftest application-live-rules-assemble-test
   (testing "Live rules are collected from the registered application modules"
