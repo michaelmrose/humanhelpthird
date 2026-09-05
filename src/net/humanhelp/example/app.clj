@@ -15,6 +15,7 @@
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [com.biffweb.fx :as fx]
    [gesso.core :as g]
    [gesso.live.core :as live]
    [gesso.live.progression :as progression]
@@ -512,6 +513,17 @@
 ;; Request creation
 ;; -----------------------------------------------------------------------------
 
+(def create-request-machine
+  (fx/machine
+   ::create-request-machine
+   :start
+   (fn [{::keys [create-request-input]
+         :as ctx}]
+     {:biff.fx/return
+      (request/create
+       (dissoc ctx ::create-request-input)
+       create-request-input)})))
+
 (defn- create-request-success-response
   "Return the creator's authoritative post-create board update.
 
@@ -583,9 +595,11 @@
              (:user/id user))
 
             result
-            (request/create
-             actor-ctx
-             input)]
+            (create-request-machine
+             (assoc
+              actor-ctx
+              ::create-request-input
+              input))]
         (create-request-success-response
          actor-ctx
          {:result
