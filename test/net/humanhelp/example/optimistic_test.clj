@@ -79,15 +79,15 @@
   (let [open-request
         (command/after
          (request.domain/create-request-command
-          {:id              request-id
+          {:id request-id
            :organization-id organization-id
-           :location-id     location-id
-           :requestor       (request.domain/user-requestor requestor-id)
+           :location-id location-id
+           :requestor (request.domain/user-requestor requestor-id)
            :content
-           {:title           "Need help"
-            :details         "Production Request exercised through example app."
+           {:title "Need help"
+            :details "Production Request exercised through example app."
             :location-detail "Front desk"}
-           :now             t0}))]
+           :now t0}))]
     (command/after
      (request.domain/claim-request-command
       open-request
@@ -97,20 +97,20 @@
   []
   (command/after
    (request.domain/create-assignment-command
-    {:id         assignment-id
+    {:id assignment-id
      :request-id request-id
-     :helper-id  helper-id
-     :role       :primary
-     :source     :request/claim
-     :actor-id   helper-id
-     :now        t1})))
+     :helper-id helper-id
+     :role :primary
+     :source :request/claim
+     :actor-id helper-id
+     :now t1})))
 
 (defn- committed-claim-result
   []
-  {:request            (claimed-request)
+  {:request (claimed-request)
    :primary-assignment (primary-assignment)
-   :commit/status      :committed
-   :progression        committed-progression})
+   :commit/status :committed
+   :progression committed-progression})
 
 (defn- claim-command
   ([]
@@ -118,13 +118,13 @@
   ([overrides]
    (protocol/command
     (merge
-     {:command-id     command-id
-      :execution-id   execution-id
-      :operation      request.choreo/claim-operation
-      :arguments      {:request-id request-id}
+     {:command-id command-id
+      :execution-id execution-id
+      :operation request.choreo/claim-operation
+      :arguments {:request-id request-id}
       :observed-basis observed-basis
-      :scope          [:request request-id]
-      :fact-versions  {:request/revision 0}}
+      :scope [:request request-id]
+      :fact-versions {:request/revision 0}}
      overrides))))
 
 (defn- thrown
@@ -195,7 +195,7 @@
           (thrown
            #(optimistic/authenticated-user-id
              {:current-user/id "not-a-uuid"
-              :session         {:uid (str helper-id)}}))]
+              :session {:uid (str helper-id)}}))]
       (is (instance? clojure.lang.ExceptionInfo error))
       (is (= :net.humanhelp.example.optimistic/invalid-user-id
              (:error/type (ex-data error))))
@@ -209,14 +209,14 @@
 
 (deftest production-context-binds-choreo-principal-and-request-actor-to-one-user-test
   (let [reads (atom [])
-        ctx   {:session          {:uid (str helper-id)}
-               :request/sentinel :preserved}
+        ctx {:session {:uid (str helper-id)}
+             :request/sentinel :preserved}
         result
         (with-redefs
          [user/require-user
           (fn [read-ctx user-id]
             (swap! reads conj [read-ctx user-id])
-            {:xt/id       user-id
+            {:xt/id user-id
              :user/status :active})]
           (optimistic/production-context ctx))]
     (is (= [[ctx helper-id]] @reads))
@@ -252,8 +252,8 @@
 ;; =============================================================================
 
 (deftest request-route-binding-accepts-only-the-selected-production-command-test
-  (let [command  (claim-command)
-        expected {:operation  request.choreo/claim-operation
+  (let [command (claim-command)
+        expected {:operation request.choreo/claim-operation
                   :request-id request-id}]
     (is (identical?
          command
@@ -264,7 +264,7 @@
            (error-type
             #(optimistic/require-request-command!
               (claim-command)
-              {:operation  :request/take-over
+              {:operation :request/take-over
                :request-id request-id})))))
 
   (testing "a browser cannot substitute another registered operation"
@@ -272,7 +272,7 @@
            (error-type
             #(optimistic/require-request-command!
               (claim-command)
-              {:operation  request.choreo/cancel-operation
+              {:operation request.choreo/cancel-operation
                :request-id request-id})))))
 
   (testing "a browser cannot retarget a route to another Request"
@@ -290,7 +290,7 @@
            (error-type
             #(optimistic/require-request-command!
               "wire-not-decoded"
-              {:operation  request.choreo/claim-operation
+              {:operation request.choreo/claim-operation
                :request-id request-id}))))))
 
 ;; =============================================================================
@@ -298,17 +298,17 @@
 ;; =============================================================================
 
 (deftest run-command-executes-the-production-request-choreography-with-authenticated-model-context-test
-  (let [user-reads                  (atom [])
-        request-calls               (atom [])
+  (let [user-reads (atom [])
+        request-calls (atom [])
         original-ctx
-        {:session          {:uid (str helper-id)}
+        {:session {:uid (str helper-id)}
          :request/sentinel :example-http-context}
         prepared
         (with-redefs
          [user/require-user
           (fn [ctx user-id]
             (swap! user-reads conj [ctx user-id])
-            {:xt/id       user-id
+            {:xt/id user-id
              :user/status :active})
 
           request/claim
@@ -318,12 +318,20 @@
           (optimistic/run-command
            original-ctx
            (claim-command)))
-        settlement                  (:settlement prepared)
-        authoritative               (:authoritative settlement)
+        settlement (:settlement prepared)
+        authoritative (:authoritative settlement)
         [model-ctx model-arguments] (first @request-calls)]
 
-    (testing "the production User is resolved before entering Gesso authority"
-      (is (= [[original-ctx helper-id]] @user-reads)))
+    (testing "the production User is resolved inside one Biff FX runtime context"
+      (is (= 1 (count @user-reads)))
+      (let [[user-ctx user-id] (first @user-reads)]
+        (is (= helper-id user-id))
+        (is (= (:session original-ctx) (:session user-ctx)))
+        (is (= :example-http-context (:request/sentinel user-ctx)))
+        (is (instance? Instant (:biff.fx/now user-ctx)))
+        (is (integer? (:biff.fx/seed user-ctx)))
+        (is (= (:biff.fx/now user-ctx) (:biff.fx/now model-ctx)))
+        (is (= (:biff.fx/seed user-ctx) (:biff.fx/seed model-ctx)))))
 
     (testing "the public Request operation sees the canonical authenticated actor"
       (is (= 1 (count @request-calls)))
@@ -369,11 +377,11 @@
         (claim-command
          {:arguments
           {:request-id request-id
-           :helper-id  other-helper-id}})]
+           :helper-id other-helper-id}})]
     (with-redefs
      [user/require-user
       (fn [_ctx user-id]
-        {:xt/id       user-id
+        {:xt/id user-id
          :user/status :active})
 
       request/claim
