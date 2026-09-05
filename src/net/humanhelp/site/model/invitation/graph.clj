@@ -27,6 +27,7 @@
    composition belongs here."
   (:require
    [com.biffweb.xtdb :as biff.xtdb]
+   [gesso.live.consistency.xtdb :as live.xtdb]
    [gesso.model.core :as model]
    [gesso.model.schema :as model.schema]
    [net.humanhelp.site.model.invitation.domain :as invitation]
@@ -113,11 +114,60 @@
     (malli-options
      ctx)}))
 
+(defn- read-query-options
+  "Build XTDB query options for an Invitation relationship read.
+
+   Biff's request-start snapshot is the baseline. A later Gesso progression is
+   authoritative and must override that older snapshot for read-your-writes.
+   Explicit Gesso consistency may strengthen the baseline, but progression is
+   applied last by gesso.live.consistency.xtdb/read-query-opts.
+
+   The effective snapshot token is installed back into Biff's query context so
+   the ordinary two-argument biff.xtdb/q seam remains intact for the normal
+   HumanHelp path."
+  [ctx]
+  (live.xtdb/read-query-opts
+   (merge
+    (when-some
+     [snapshot-token
+      (:biff.xtdb/snapshot-token ctx)]
+      {:snapshot-token snapshot-token})
+
+    (live.xtdb/consistency-from ctx))
+
+   (live.xtdb/progression-from ctx)))
+
 (defn- q
   [ctx query]
-  (biff.xtdb/q
-   (query-context! ctx)
-   query))
+  (let [ctx
+        (query-context! ctx)
+
+        query-options
+        (read-query-options ctx)
+
+        snapshot-token
+        (:snapshot-token query-options)
+
+        query-context
+        (cond->
+         (dissoc ctx :biff.xtdb/snapshot-token)
+
+          snapshot-token
+          (assoc
+           :biff.xtdb/snapshot-token
+           snapshot-token))
+
+        extra-query-options
+        (dissoc query-options :snapshot-token)]
+    (if
+     (empty? extra-query-options)
+      (biff.xtdb/q
+       query-context
+       query)
+      (biff.xtdb/q
+       query-context
+       query
+       extra-query-options))))
 
 (defn- rows
   [ctx where]
