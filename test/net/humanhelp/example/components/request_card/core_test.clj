@@ -9,6 +9,7 @@
    [clojure.edn :as edn]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
+   [gesso.live.core :as live]
    [gesso.live.ui :as ui]
    [gesso.model.command :as command]
    [net.humanhelp.example.board :as board]
@@ -99,6 +100,20 @@
           (get ui/optimistic-action-attr)
           edn/read-string))
 
+(defn- render-ctx
+  "Return the Request-card render context used by the assembled example app.
+
+   v593 installs production Request browser plans once at the application
+   middleware boundary. Unit tests that call the card directly must preserve that
+   assembly fact rather than accidentally exercising a context the application
+   never supplies."
+  ([]
+   (render-ctx {:anti-forgery-token "token"}))
+  ([ctx]
+   (live/with-optimistic-browser-plans
+     ctx
+     request.choreo/browser-plans)))
+
 (deftest request-card-does-not-depend-on-example-model-test
   (let [dependencies
         (->> (ns-aliases
@@ -127,7 +142,7 @@
   (with-redefs [board/optimistic-binding (constantly nil)]
     (let [markup
           (card/action-button
-           {:anti-forgery-token "token"}
+           (render-ctx)
            open-row
            claim-affordance
            "#humanhelp-board-state")
@@ -160,7 +175,7 @@
                     binding)]
       (let [markup
             (card/action-button
-             {:anti-forgery-token "token"}
+             (render-ctx)
              open-row
              claim-affordance
              "#humanhelp-board-state")
@@ -187,7 +202,7 @@
                   board/optimistic-binding    (constantly nil)]
       (let [markup
             (card/request-card
-             {:anti-forgery-token "token"}
+             (render-ctx)
              {:row                  open-row
               :viewer               helper-user
               :board-state-selector "#humanhelp-board-state"})
