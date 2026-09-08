@@ -6,9 +6,10 @@
    dependency on net.humanhelp.example.model and does not translate production
    lifecycle operations back into the former demo vocabulary.
 
-   Optimistic operation identity and browser execution policy come from the
-   production Request choreography capability carried by each board affordance.
-   Per-render authority context comes from board/optimistic-binding, whose
+   Optimistic operation identity is declared by semantic operation keyword and
+   resolved by Gesso from the production Request browser-plan registry installed
+   in application render context. Per-render authority context comes from
+   board/optimistic-binding, whose
    observed basis is derived only from Gesso Live's authoritative XTDB
    progression. Request's model revision remains only a fact version.
 
@@ -104,15 +105,15 @@
   "Return the closed per-render binding accepted by Gesso.
 
    board/optimistic-binding currently carries the production capability as a
-   redundant convenience field. The capability is already owned by the board
-   affordance, and Gesso deliberately rejects capability-owned fields inside the
-   closed binding map. Keep that separation explicit here; a following cleanup
-   revision will remove the redundant field from board/optimistic-binding."
+   redundant legacy convenience field. Operation identity is now supplied by
+   :choreo/op and resolved from Gesso's assembled render context, while Gesso
+   deliberately rejects capability-owned fields inside the closed binding map.
+   Keep the binding closed until the board-side legacy field is removed."
   [binding]
   (some-> binding (dissoc :capability)))
 
 (defn action-button
-  [ctx row {:keys [operation capability arguments]} board-state-selector]
+  [ctx row {:keys [operation arguments]} board-state-selector]
   (let [target-id (request-target-id row)
         binding   (board/optimistic-binding
                    ctx
@@ -136,7 +137,7 @@
        [[:span {:data-gesso-button-label true}
          (action-label operation)]]}
        binding'
-       (assoc :optimistic capability
+       (assoc :choreo/op operation
               :optimistic-binding binding')))))
 
 ;; =============================================================================
@@ -303,8 +304,8 @@
      :board-state-selector
        Stable hx-include selector for the example's presentation-state form.
 
-   The component renders only authoritative production documents and inert
-   production Choreo capabilities. When ctx has no justified XTDB progression,
+   The component renders only authoritative production documents and semantic
+   production Choreo operation identities. When ctx has no justified XTDB progression,
    the same action remains an ordinary HTMX POST and optimism is omitted rather
    than fabricating an observed basis."
   [ctx {:keys [row viewer board-state-selector open?]
