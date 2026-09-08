@@ -28,6 +28,7 @@
    [net.humanhelp.example.views :as views]
    [net.humanhelp.middleware :as mid]
    [net.humanhelp.site.mock-data :as mock-data]
+   [net.humanhelp.site.model.request.choreo :as request.choreo]
    [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.model.user.core :as user])
   (:import
@@ -277,6 +278,28 @@
     (let [{ctx' :ctx}
           (mock-data/ensure! ctx)]
       (handler ctx'))))
+
+(defn wrap-request-browser-plans
+  "Install the production Request browser-plan registry into the application
+   context used by HumanHelp render paths.
+
+   This is inert UI composition only. Gesso derives the semantic-operation
+   capability registry from request.choreo/browser-plans so descendant views
+   can bind an affordance with :choreo/op without carrying or reconstructing a
+   capability. The registry grants no Request authority; authenticated server
+   execution still resolves request.choreo/operation-entries and request.core
+   revalidates current domain authority.
+
+   Keep this middleware inside wrap-production-fixtures in the route middleware
+   chain so a fixture-establishing commit may replace/advance ctx first. The
+   resulting progression-aware context is then decorated without reconstructing
+   or weakening it."
+  [handler]
+  (fn [ctx]
+    (handler
+     (live/with-optimistic-browser-plans
+       ctx
+       request.choreo/browser-plans))))
 
 (defn- board-render-options
   [ctx view-state]
@@ -841,4 +864,5 @@
    :routes     (routes/route-table
                 handlers
                 {:middleware [mid/wrap-signed-in
-                              wrap-production-fixtures]})})
+                              wrap-production-fixtures
+                              wrap-request-browser-plans]})})
