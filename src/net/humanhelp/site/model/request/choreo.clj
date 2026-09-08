@@ -151,7 +151,7 @@
 ;; =============================================================================
 
 (defn- command-artifacts
-  [options plan-key]
+  [options]
   {:choreography
    (optimistic-choreo/command-choreography options)
 
@@ -159,32 +159,25 @@
    (optimistic-choreo/command-entry-knowledge options)
 
    :browser-plan
-   (optimistic-choreo/command-plan options (:browser-role options))
-
-   :capability
-   (capability/operation-capability
-    {:operation (:operation options)
-     :plan-key plan-key})})
+   (optimistic-choreo/command-plan options (:browser-role options))})
 
 (def ^:private claim-artifacts
-  (command-artifacts claim-choreography-options claim-plan-key))
+  (command-artifacts claim-choreography-options))
 
 (def ^:private unclaim-artifacts
-  (command-artifacts unclaim-choreography-options unclaim-plan-key))
+  (command-artifacts unclaim-choreography-options))
 
 (def ^:private mark-on-the-way-artifacts
-  (command-artifacts
-   mark-on-the-way-choreography-options
-   mark-on-the-way-plan-key))
+  (command-artifacts mark-on-the-way-choreography-options))
 
 (def ^:private complete-artifacts
-  (command-artifacts complete-choreography-options complete-plan-key))
+  (command-artifacts complete-choreography-options))
 
 (def ^:private cancel-artifacts
-  (command-artifacts cancel-choreography-options cancel-plan-key))
+  (command-artifacts cancel-choreography-options))
 
 (def ^:private reassign-artifacts
-  (command-artifacts reassign-choreography-options reassign-plan-key))
+  (command-artifacts reassign-choreography-options))
 
 (def claim-choreography (:choreography claim-artifacts))
 (def unclaim-choreography (:choreography unclaim-artifacts))
@@ -207,48 +200,13 @@
 (def cancel-browser-plan (:browser-plan cancel-artifacts))
 (def reassign-browser-plan (:browser-plan reassign-artifacts))
 
-;; =============================================================================
-;; View-facing inert capabilities
-;; =============================================================================
-
-(def claim-capability
-  "Inert capability for :request/claim."
-  (:capability claim-artifacts))
-
-(def unclaim-capability
-  "Inert capability for :request/unclaim."
-  (:capability unclaim-artifacts))
-
-(def mark-on-the-way-capability
-  "Inert capability for :request/mark-on-the-way."
-  (:capability mark-on-the-way-artifacts))
-
-(def complete-capability
-  "Inert capability for :request/complete."
-  (:capability complete-artifacts))
-
-(def cancel-capability
-  "Inert capability for :request/cancel."
-  (:capability cancel-artifacts))
-
-(def reassign-capability
-  "Inert capability for :request/reassign."
-  (:capability reassign-artifacts))
-
-(def capabilities
-  "Semantic Request operation -> inert optimistic capability.
-
-   This is convenient for UI composition. It is not a trusted server registry
-   and carries no authorization."
-  {claim-operation claim-capability
-   unclaim-operation unclaim-capability
-   mark-on-the-way-operation mark-on-the-way-capability
-   complete-operation complete-capability
-   cancel-operation cancel-capability
-   reassign-operation reassign-capability})
-
 (def browser-plans
-  "Semantic Request operation -> canonical browser ExecutablePlan."
+  "Semantic Request operation -> canonical browser ExecutablePlan.
+
+   This is the single source of browser operation identity for ordinary Request
+   UI composition. View-facing optimistic capabilities are derived from this
+   closed operation-keyed plan map rather than maintained as a second parallel
+   operation -> plan-key registry."
   {claim-operation claim-browser-plan
    unclaim-operation unclaim-browser-plan
    mark-on-the-way-operation mark-on-the-way-browser-plan
@@ -280,6 +238,44 @@
 ;; this namespace instead of shipping an affordance that can only fail when
 ;; clicked.
 (require-single-request-browser-role!)
+
+;; =============================================================================
+;; View-facing inert capabilities
+;; =============================================================================
+
+(def capabilities
+  "Semantic Request operation -> inert optimistic capability.
+
+   Derived canonically from browser-plans so every ordinary Request capability
+   has :operation == :plan-key == the browser-plans key. This map is convenient
+   for compatibility with existing UI composition while HumanHelp adopts
+   :choreo/op rendering. It is not a trusted server registry and carries no
+   authorization."
+  (capability/operation-capabilities browser-plans))
+
+(def claim-capability
+  "Compatibility binding for the derived :request/claim capability."
+  (get capabilities claim-operation))
+
+(def unclaim-capability
+  "Compatibility binding for the derived :request/unclaim capability."
+  (get capabilities unclaim-operation))
+
+(def mark-on-the-way-capability
+  "Compatibility binding for the derived :request/mark-on-the-way capability."
+  (get capabilities mark-on-the-way-operation))
+
+(def complete-capability
+  "Compatibility binding for the derived :request/complete capability."
+  (get capabilities complete-operation))
+
+(def cancel-capability
+  "Compatibility binding for the derived :request/cancel capability."
+  (get capabilities cancel-operation))
+
+(def reassign-capability
+  "Compatibility binding for the derived :request/reassign capability."
+  (get capabilities reassign-operation))
 
 ;; =============================================================================
 ;; Trusted Request result -> authoritative protocol observation
