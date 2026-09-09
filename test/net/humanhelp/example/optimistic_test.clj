@@ -11,12 +11,18 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [gesso.choreo.identity :as identity]
+   [gesso.choreo.preflight :as choreo-preflight]
+   [gesso.live.browser.preflight :as browser-preflight]
    [gesso.live.consistency.xtdb :as xtdb-live]
    [gesso.live.core :as live]
+   [gesso.live.optimistic.execution-preflight :as execution-preflight]
+   [gesso.live.optimistic.preflight :as operation-preflight]
    [gesso.live.optimistic.protocol :as protocol]
+   [gesso.live.optimistic.route-preflight :as route-preflight]
    [gesso.live.progression :as progression]
    [gesso.model.command :as command]
    [net.humanhelp.example.optimistic :as optimistic]
+   [net.humanhelp.example.routes :as routes]
    [net.humanhelp.site.model.request.choreo :as request.choreo]
    [net.humanhelp.site.model.request.core :as request]
    [net.humanhelp.site.model.request.domain :as request.domain]
@@ -139,6 +145,82 @@
   [f]
   (some-> (thrown f) ex-data :error/type))
 
+(def request-operation-route-paths
+  "Production Request semantic operation -> actual example route template.
+
+   This is a test-side physical realization fixture. Semantic operation identity
+   remains owned by request.choreo; routes.clj owns the concrete HTTP paths."
+  {request.choreo/claim-operation
+   routes/claim-request-route
+
+   request.choreo/unclaim-operation
+   routes/unclaim-request-route
+
+   request.choreo/mark-on-the-way-operation
+   routes/mark-on-the-way-request-route
+
+   request.choreo/complete-operation
+   routes/complete-request-route
+
+   request.choreo/cancel-operation
+   routes/cancel-request-route
+
+   request.choreo/reassign-operation
+   routes/reassign-request-route})
+
+(defn- request-route-assembly
+  "Build the closed Gesso route assembly for the real six-operation HumanHelp
+   Request proving surface.
+
+   The fixture intentionally consumes production Request browser plans,
+   production Request capabilities, production trusted operation entries, and
+   example.routes physical paths. It does not construct a second optimistic
+   server; that is the exact ownership seam under test."
+  []
+  (let [operations
+        optimistic/supported-operations
+
+        plan-registry
+        (choreo-preflight/require-plan-registry!
+         {:name :net.humanhelp.example/request-plans
+          :plans request.choreo/browser-plans
+          :required-keys operations
+          :single-role? true
+          :expected-role request.choreo/request-client-role})
+
+        browser-assembly
+        (browser-preflight/require-browser-assembly!
+         {:name :net.humanhelp.example/request-browser
+          :plan-registry plan-registry
+          :browser-role request.choreo/request-client-role
+          :required-plan-keys operations
+          :optimistic? true
+          :optimistic-htmx? true})
+
+        operation-assembly
+        (operation-preflight/require-operation-assembly!
+         {:name :net.humanhelp.example/request-operations
+          :browser-assembly browser-assembly
+          :operation-capabilities request.choreo/capabilities
+          :server-operations request.choreo/operation-entries})
+
+        route-capabilities
+        (into
+         (sorted-map)
+         (map
+          (fn [[operation relative-path]]
+            [operation
+             (route-preflight/route-capability
+              {:operation operation
+               :method :post
+               :path (routes/path relative-path)
+               :transports #{:htmx}})]))
+         request-operation-route-paths)]
+    (route-preflight/require-route-assembly!
+     {:name :net.humanhelp.example/request-routes
+      :operation-assembly operation-assembly
+      :route-capabilities route-capabilities})))
+
 ;; =============================================================================
 ;; Architecture / exact production registry
 ;; =============================================================================
@@ -174,6 +256,116 @@
                         :request/take-over)))
     (is (not (contains? optimistic/supported-operations
                         :request/done)))))
+
+;; =============================================================================
+;; Exact execution-preflight seam
+;; =============================================================================
+
+(deftest request-execution-preflight-closes-all-six-real-request-routes-test
+  (let [route-assembly
+        (request-route-assembly)
+
+        assembly
+        (optimistic/require-execution-assembly! route-assembly)]
+    (is (execution-preflight/execution-assembly? assembly))
+    (is (= optimistic/execution-assembly-name
+           (:name assembly)))
+    (is (identical? route-assembly
+                    (:route-assembly assembly))
+        "HumanHelp must continue the exact already-closed route product.")
+    (is (= optimistic/supported-operations
+           (set (keys (:routes route-assembly)))))
+    (is (= optimistic/supported-operations
+           (set (keys (get-in assembly [:server :operations]))))
+        "The private prepared server must carry the exact production Request registry.")
+    (is (= optimistic/supported-operations
+           (set
+            (keys
+             (get-in assembly
+                     [:execution-capabilities
+                      :required-by-operation])))))
+    (is (= optimistic/supported-operations
+           (set (keys (:settlement-contracts assembly)))))
+    (is (not (contains? (ns-publics 'net.humanhelp.example.optimistic)
+                        'server))
+        "Preflight must not make the prepared execution server a public bypass.")))
+
+(deftest request-execution-preflight-and-run-command-use-the-same-private-server-test
+  (let [route-assembly
+        (request-route-assembly)
+
+        assembly
+        (optimistic/require-execution-assembly! route-assembly)
+
+        preflight-server
+        (:server assembly)
+
+        executed-server
+        (atom nil)
+
+        executed-context
+        (atom nil)
+
+        executed-command
+        (atom nil)
+
+        command
+        (claim-command)
+
+        result
+        (with-redefs
+         [user/require-user
+          (fn [_ctx user-id]
+            {:xt/id user-id
+             :user/status :active})
+
+          live/run-optimistic-command
+          (fn [prepared-server ctx decoded-command]
+            (reset! executed-server prepared-server)
+            (reset! executed-context ctx)
+            (reset! executed-command decoded-command)
+            ::captured-execution)]
+          (optimistic/run-command
+           {:current-user/id helper-id
+            :request/sentinel :same-private-server}
+           command))]
+    (is (= ::captured-execution result))
+    (is (identical? preflight-server @executed-server)
+        "The server certified by execution preflight must be the object run-command executes.")
+    (is (= helper-id (:current-user/id @executed-context)))
+    (is (= :same-private-server
+           (:request/sentinel @executed-context)))
+    (is (identical? command @executed-command))))
+
+(deftest request-execution-preflight-fails-closed-on-tampered-route-product-test
+  (let [route-assembly
+        (request-route-assembly)
+
+        tampered
+        (update
+         route-assembly
+         :routes
+         dissoc
+         request.choreo/claim-operation)
+
+        error
+        (thrown
+         #(optimistic/require-execution-assembly! tampered))]
+    (is (instance? clojure.lang.ExceptionInfo error))
+    (is (= :gesso.live.optimistic.execution-preflight/error
+           (:error/type (ex-data error))))
+    (is (= :execution-assembly-preflight-failed
+           (:error/kind (ex-data error))))
+    (is (= #{:invalid-route-assembly}
+           (set
+            (map :kind
+                 (get-in (ex-data error)
+                         [:preflight :errors])))))
+    (is (not
+         (execution-preflight/execution-assembly?
+          (assoc
+           (optimistic/require-execution-assembly! route-assembly)
+           :route-assembly tampered))))))
 
 ;; =============================================================================
 ;; Authenticated production identity
