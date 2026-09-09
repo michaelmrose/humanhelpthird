@@ -28,10 +28,9 @@
    gesso.live.application-preflight and are wired by the application entrypoint rather
    than reimplemented here."
   (:require
-   [gesso.choreo.preflight :as choreo-preflight]
    [gesso.live.acquisition-preflight :as acquisition-preflight]
    [gesso.live.application-preflight :as application-preflight]
-   [gesso.live.browser.preflight :as browser-preflight]
+   [gesso.live.browser.entrypoint :as browser-entrypoint]
    [gesso.live.operation-acquisition-preflight :as operation-acquisition-preflight]
    [gesso.live.optimistic.preflight :as operation-preflight]
    [gesso.live.optimistic.route-preflight :as route-preflight]
@@ -64,26 +63,21 @@
    :optimistic? true
    :optimistic-htmx? true})
 
-(defn require-plan-registry!
-  "Return the current closed Request PlanRegistry."
-  []
-  (choreo-preflight/require-plan-registry!
-   {:name :net.humanhelp.example/request-plans
-    :plans request.choreo/browser-plans
-    :required-keys request-operations
-    :single-role? true
-    :expected-role request.choreo/request-client-role}))
-
 (defn require-browser-assembly!
-  "Return the current closed HumanHelp Request BrowserAssemblyManifest."
+  "Return the exact BrowserAssemblyManifest compiled from browser-declaration.
+
+   This deliberately uses Gesso's supported browser entrypoint compiler rather
+   than reconstructing the PlanRegistry/BrowserAssembly in HumanHelp. The same
+   declaration is therefore the single source for both generated-artifact stamping
+   and the server-side application-preflight backbone."
   []
-  (browser-preflight/require-browser-assembly!
-   {:name :net.humanhelp.example/request-browser
-    :plan-registry (require-plan-registry!)
-    :browser-role request.choreo/request-client-role
-    :required-plan-keys request-operations
-    :optimistic? true
-    :optimistic-htmx? true}))
+  (browser-entrypoint/compile-browser-assembly!
+   browser-declaration))
+
+(defn require-plan-registry!
+  "Return the PlanRegistry embedded in the exact compiled browser declaration."
+  []
+  (:plan-registry (require-browser-assembly!)))
 
 ;; =============================================================================
 ;; Physical command-route realization
