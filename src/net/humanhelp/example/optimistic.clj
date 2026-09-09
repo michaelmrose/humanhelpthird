@@ -38,6 +38,7 @@
    [com.biffweb.fx :as fx]
    [gesso.choreo.identity :as choreo.identity]
    [gesso.live.core :as live]
+   [gesso.live.optimistic.execution-preflight :as execution-preflight]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.site.model.request.choreo :as request.choreo]
    [net.humanhelp.site.model.user.core :as user])
@@ -125,9 +126,10 @@
   "Resolve the trusted typed Choreo principal from a production-context.
 
    run-command installs and validates :current-user/id before Gesso invokes this
-   resolver. Keeping the server private ensures callers cannot bypass that
-   canonicalization/read boundary. Browser command data never participates in
-   principal selection."
+   resolver. The prepared server remains private: application assembly can close
+   against it only through require-execution-assembly!, so exposing preflight
+   evidence does not create an alternate command-execution boundary. Browser
+   command data never participates in principal selection."
   [ctx]
   (let [user-id (:current-user/id ctx)]
     (when-not (uuid? user-id)
@@ -160,11 +162,44 @@
 (def ^:private server
   "Trusted protocol-v3 optimistic server for production Request choreography.
 
-   Keep this private so execution cannot bypass production-context. The public
-   integration seam is run-command."
+   Keep this private so execution cannot bypass production-context. Ordinary
+   command execution goes through run-command. Whole-application preflight may
+   close against this exact prepared server only through
+   require-execution-assembly!, which returns Gesso's checked assembly product
+   rather than a second callable server boundary."
   (live/optimistic-server
    {:principal-fn principal
     :operations operation-entries}))
+
+(def execution-assembly-name
+  "Stable diagnostic identity for the example app's production Request execution
+   boundary. This is assembly identity only; it grants no runtime authority."
+  :net.humanhelp.example/request-execution)
+
+(defn require-execution-assembly!
+  "Close one current optimistic route assembly against the exact prepared
+   production Request server used by run-command.
+
+   This is the application-preflight seam for HumanHelp Request execution. It
+   intentionally accepts an already-verified Gesso OptimisticRouteAssembly
+   rather than independently restating routes, operations, browser plans,
+   execution capabilities, settlement contracts, or publication topics.
+
+   Gesso derives those facts through the route assembly and this namespace's
+   private prepared server. The resulting OptimisticExecutionAssembly embeds the
+   exact server product that was checked, allowing later acquisition/application
+   preflight to continue the same closure chain without constructing a parallel
+   server registry.
+
+   Keeping server private remains important: callers cannot use this function to
+   bypass production-context, authenticated User canonicalization, route command
+   binding, or the normal run-command facade. The returned value is preflight
+   evidence/assembly data, not an alternate HumanHelp HTTP execution API."
+  [route-assembly]
+  (execution-preflight/require-execution-assembly!
+   {:name execution-assembly-name
+    :route-assembly route-assembly
+    :server server}))
 
 ;; =============================================================================
 ;; HTTP-route command binding
