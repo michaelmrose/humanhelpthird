@@ -668,10 +668,28 @@
    confirmed-authoritative-reassign
    trusted-context))
 
+(def request-published-change-topics
+  "Semantic Gesso Live primary-change topics published by every currently
+   exposed Request lifecycle operation.
+
+   This is trusted application/model metadata for whole-application preflight,
+   not a second publication mechanism. Request FX remains the owner of actual
+   transaction change production: each lifecycle planner emits a :request
+   change, and RequestAssignment changes deliberately coalesce onto that same
+   :request topic.
+
+   Gesso intentionally does not inspect arbitrary model execution to infer this
+   relation. Keeping the declaration beside the trusted operation registry makes
+   operation -> publication -> Live invalidation closure explicit without
+   duplicating Request business policy."
+  #{:request})
+
 (defn- operation-entry
   [options execute!]
   (optimistic-server/operation
-   (assoc options :execute! execute!)))
+   (assoc options
+          :published-change-topics request-published-change-topics
+          :execute! execute!)))
 
 (def claim-operation-entry
   (operation-entry claim-choreography-options execute-claim!))
