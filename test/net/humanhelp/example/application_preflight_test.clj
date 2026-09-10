@@ -1,23 +1,29 @@
 (ns net.humanhelp.example.application-preflight-test
-  "Cross-layer preflight regression tests for the HumanHelp example Request board.
+  "Cross-layer regression tests for HumanHelp's *production* application-preflight
+   constructor.
 
-   The production Request choreography owns semantic operation identity and trusted
-   publication declarations.  The example application owns the concrete HTTP
-   routes and Gesso Live projection.  These tests intentionally join those layers
-   through Gesso's closed preflight products rather than maintaining a parallel
-   HumanHelp operation -> fragment registry.
+   Earlier versions of this test namespace rebuilt a second browser/route/execution/
+   acquisition assembly inside the test itself.  That was exactly the wrong thing to
+   certify: the test could stay green while net.humanhelp.example.application-preflight
+   drifted or remained unused.
 
-   The key invariant frozen here is:
+   This namespace now treats net.humanhelp.example.application-preflight as the sole
+   HumanHelp assembly owner.  Tests inspect products returned by that source namespace
+   and adversarially remove source declarations to prove the production constructor
+   itself fails closed.
 
-     each exposed Request lifecycle operation
-       -> declares semantic :request publication
-       -> reaches the compiled example Live graph
-       -> affects both Request board scopes/fragments
-       -> has progression-safe authoritative fragment + stream reacquisition.
+   The application boundary frozen here is:
 
-   This is verified application assembly relative to HumanHelp's trusted route and
-   publication declarations; it is not a claim that arbitrary model code is
-   machine-proved to emit those declarations at runtime."
+     production Request Choreo
+       -> canonical HumanHelp browser declaration
+       -> concrete HumanHelp lifecycle routes
+       -> exact prepared optimistic server
+       -> Request publication
+       -> compiled HumanHelp Live graph
+       -> authoritative toolbar/list acquisition.
+
+   Physical generated-artifact currentness and runtime handler installation are later
+   boundaries and are intentionally not reconstructed in this test namespace."
   (:require
    [clojure.test :refer [deftest is testing]]
    [gesso.choreo.preflight :as choreo-preflight]
@@ -27,9 +33,8 @@
    [gesso.live.optimistic.execution-preflight :as execution-preflight]
    [gesso.live.optimistic.preflight :as operation-preflight]
    [gesso.live.optimistic.route-preflight :as route-preflight]
+   [net.humanhelp.example.application-preflight :as application-preflight]
    [net.humanhelp.example.live :as app-live]
-   [net.humanhelp.example.optimistic :as optimistic]
-   [net.humanhelp.example.routes :as routes]
    [net.humanhelp.site.model.request.choreo :as request.choreo]))
 
 (def expected-operations
@@ -48,160 +53,103 @@
   #{:request-toolbar
     :request-list})
 
-(def request-operation-routes
-  {request.choreo/claim-operation
-   routes/claim-request-route
+(defn- thrown-data
+  [f]
+  (try
+    (f)
+    nil
+    (catch clojure.lang.ExceptionInfo error
+      (ex-data error))))
 
-   request.choreo/unclaim-operation
-   routes/unclaim-request-route
+(deftest production-preflight-namespace-owns-the-browser-and-route-assembly-test
+  (let [plan-registry
+        (application-preflight/require-plan-registry!)
 
-   request.choreo/mark-on-the-way-operation
-   routes/mark-on-the-way-request-route
+        browser-assembly
+        (application-preflight/require-browser-assembly!)
 
-   request.choreo/complete-operation
-   routes/complete-request-route
+        operation-assembly
+        (application-preflight/require-operation-assembly!)
 
-   request.choreo/cancel-operation
-   routes/cancel-request-route
+        route-assembly
+        (application-preflight/require-route-assembly!)
 
-   request.choreo/reassign-operation
-   routes/reassign-request-route})
+        route-capabilities
+        (application-preflight/request-route-capabilities)]
+    (is (= expected-operations
+           application-preflight/request-operations))
+    (is (choreo-preflight/plan-registry? plan-registry))
+    (is (browser-preflight/assembly-manifest? browser-assembly))
+    (is (operation-preflight/operation-assembly? operation-assembly))
+    (is (route-preflight/route-assembly? route-assembly))
 
-(defn- request-route-capabilities
-  []
-  (into
-   (sorted-map)
-   (map
-    (fn [[operation relative-path]]
-      [operation
-       (route-preflight/route-capability
-        {:operation operation
-         :method :post
-         :path (routes/path relative-path)
-         :transports #{:htmx}})]))
-   request-operation-routes))
+    ;; The PlanRegistry exposed by HumanHelp is literally the registry embedded in
+    ;; its one canonical compiled BrowserAssemblyManifest, not a separately rebuilt
+    ;; test registry.
+    (is (= plan-registry
+           (:plan-registry browser-assembly)))
+    (is (= request.choreo/browser-plans
+           (get-in browser-assembly [:plan-registry :plans])))
+    (is (= expected-operations
+           (:required-plan-keys browser-assembly)))
+    (is (= expected-operations
+           (set (keys route-capabilities))))
 
-(defn- request-plan-registry
-  []
-  (choreo-preflight/require-plan-registry!
-   {:name :net.humanhelp.example/request-plans
-    :plans request.choreo/browser-plans
-    :required-keys expected-operations
-    :single-role? true
-    :expected-role request.choreo/request-client-role}))
+    (doseq [[operation capability] route-capabilities]
+      (testing (str operation " is realized as one semantic HumanHelp POST route")
+        (is (= operation (:operation capability)))
+        (is (= :post (:method capability)))
+        (is (= #{:htmx} (:transports capability)))
+        (is (re-matches #"/app/requests/:request-id/(claim|unclaim|mark-on-the-way|complete|cancel|reassign)"
+                        (:path capability)))))))
 
-(defn- request-browser-assembly
-  []
-  (browser-preflight/require-browser-assembly!
-   {:name :net.humanhelp.example/request-browser
-    :plan-registry (request-plan-registry)
-    :browser-role request.choreo/request-client-role
-    :required-plan-keys expected-operations
-    :optimistic? true
-    :optimistic-htmx? true}))
+(deftest production-preflight-constructor-closes-exact-server-publication-and-live-acquisition-test
+  (let [execution-assembly
+        (application-preflight/require-execution-assembly!)
 
-(defn- request-operation-assembly
-  []
-  (operation-preflight/require-operation-assembly!
-   {:name :net.humanhelp.example/request-operations
-    :browser-assembly (request-browser-assembly)
-    :operation-capabilities request.choreo/capabilities
-    :server-operations request.choreo/operation-entries}))
+        acquisition-assembly
+        (application-preflight/require-acquisition-assembly!)
 
-(defn- request-route-assembly
-  []
-  (route-preflight/require-route-assembly!
-   {:name :net.humanhelp.example/request-routes
-    :operation-assembly (request-operation-assembly)
-    :route-capabilities (request-route-capabilities)}))
+        operation-acquisition-assembly
+        (application-preflight/require-operation-acquisition-assembly!)
 
-(defn- request-execution-assembly
-  []
-  ;; This deliberately closes through net.humanhelp.example.optimistic's exact
-  ;; private prepared server.  v655 introduced this seam specifically so
-  ;; application preflight cannot construct a second server facade that merely
-  ;; happens to resemble the one run-command uses.
-  (optimistic/require-execution-assembly!
-   (request-route-assembly)))
+        publication
+        (execution-preflight/published-change-topics execution-assembly)
 
-(defn- acquisition-realization
-  [fragment fragment-url stream-url]
-  (acquisition-preflight/require-acquisition-realization!
-   {:name (keyword "net.humanhelp.example"
-                   (str (name fragment) "-acquisition"))
-    :live-app app-live/compiled-live
-    :fragment fragment
-    :fragment-route
-    (acquisition-preflight/fragment-route
-     {:fragment fragment
-      :path fragment-url})
-    :stream-route
-    (acquisition-preflight/stream-route
-     {:fragment fragment
-      :path stream-url})}))
+        obligations
+        (acquisition-preflight/acquisition-obligations app-live/compiled-live)
 
-(defn- request-acquisition-assembly
-  []
-  (acquisition-preflight/require-acquisition-assembly!
-   {:name :net.humanhelp.example/request-acquisition
-    :live-app app-live/compiled-live
-    :realizations
-    {:request-toolbar
-     (acquisition-realization
-      :request-toolbar
-      (routes/request-toolbar-fragment-url)
-      (routes/request-toolbar-stream-url))
+        affected-fragments
+        (operation-acquisition-preflight/affected-fragments
+         operation-acquisition-assembly)
 
-     :request-list
-     (acquisition-realization
-      :request-list
-      (routes/request-list-fragment-url)
-      (routes/request-list-stream-url))}}))
+        affected-scopes
+        (operation-acquisition-preflight/affected-scopes
+         operation-acquisition-assembly)
 
-(defn- request-operation-acquisition-assembly
-  []
-  (operation-acquisition-preflight/require-operation-acquisition-assembly!
-   {:name :net.humanhelp.example/request-operation-acquisition
-    :execution-assembly (request-execution-assembly)
-    :acquisition-assembly (request-acquisition-assembly)}))
+        explanation
+        (operation-acquisition-preflight/explain
+         operation-acquisition-assembly)]
+    (is (execution-preflight/execution-assembly? execution-assembly))
+    (is (acquisition-preflight/acquisition-assembly? acquisition-assembly))
+    (is (operation-acquisition-preflight/operation-acquisition-assembly?
+         operation-acquisition-assembly))
 
-(deftest every-production-request-operation-declares-the-semantic-request-publication-test
-  (let [execution-assembly (request-execution-assembly)
-        publication (execution-preflight/published-change-topics execution-assembly)]
     (is (= expected-operations
            (set (keys publication))))
-    (doseq [operation expected-operations]
-      (testing (str operation " publishes the one semantic Request topic")
-        (is (= #{:request}
-               (get publication operation)))))))
-
-(deftest request-live-graph-derives-both-board-acquisition-obligations-test
-  (let [acquisition-assembly (request-acquisition-assembly)
-        obligations (acquisition-preflight/acquisition-obligations
-                     app-live/compiled-live)]
     (is (= expected-board-fragments
            (set (keys obligations))))
     (is (= expected-board-fragments
            (set (keys (:realizations acquisition-assembly)))))
-    (doseq [[fragment obligation] obligations]
-      (testing (str fragment " is invalidated by semantic Request publication")
-        (is (= #{:request}
-               (:change-topics obligation)))))))
-
-(deftest all-six-request-operations-close-through-live-to-authoritative-board-reacquisition-test
-  (let [assembly (request-operation-acquisition-assembly)
-        affected-fragments
-        (operation-acquisition-preflight/affected-fragments assembly)
-        affected-scopes
-        (operation-acquisition-preflight/affected-scopes assembly)
-        explanation
-        (operation-acquisition-preflight/explain assembly)]
     (is (= expected-operations
            (:operations explanation)))
     (is (= {}
            (:unhandled-published-change-topics explanation)))
+
     (doseq [operation expected-operations]
-      (testing (str operation " closes from trusted publication to both board acquisitions")
+      (testing (str operation " closes through Request publication and authoritative board reacquisition")
+        (is (= #{:request}
+               (get publication operation)))
         (is (= #{:request}
                (get (:published-change-topics explanation) operation)))
         (is (= expected-board-scopes
@@ -211,4 +159,59 @@
         (is (= expected-board-scopes
                (get (:affected-scopes explanation) operation)))
         (is (= expected-board-fragments
-               (get (:affected-fragments explanation) operation)))))))
+               (get (:affected-fragments explanation) operation)))))
+
+    (doseq [[fragment obligation] obligations]
+      (testing (str fragment " is derived from semantic Request publication")
+        (is (= #{:request}
+               (:change-topics obligation)))))))
+
+(deftest deleting-a-production-request-operation-breaks-the-production-constructor-test
+  (let [operation request.choreo/claim-operation
+        error-data
+        (with-redefs [request.choreo/operation-entries
+                      (dissoc request.choreo/operation-entries operation)]
+          (thrown-data
+           application-preflight/require-operation-assembly!))]
+    (is (map? error-data))
+    (is (= :gesso.live.optimistic.preflight/error
+           (:error/type error-data)))
+    (is (= :operation-assembly-preflight-failed
+           (:error/kind error-data)))
+    (is (some #(and (= :missing-trusted-server-operation (:kind %))
+                    (= operation (:operation %)))
+              (get-in error-data [:preflight :errors])))))
+
+(deftest deleting-a-humanhelp-route-breaks-the-production-constructor-test
+  (let [operation request.choreo/claim-operation
+        error-data
+        (with-redefs [application-preflight/request-operation-route-ids
+                      (dissoc application-preflight/request-operation-route-ids
+                              operation)]
+          (thrown-data
+           application-preflight/require-route-assembly!))]
+    (is (map? error-data))
+    (is (= :gesso.live.optimistic.route-preflight/error
+           (:error/type error-data)))
+    (is (= :route-assembly-preflight-failed
+           (:error/kind error-data)))
+    (is (some #(and (= :missing-trusted-route (:kind %))
+                    (= operation (:operation %)))
+              (get-in error-data [:preflight :errors])))))
+
+(deftest deleting-a-managed-fragment-realization-breaks-the-production-constructor-test
+  (let [fragment :request-list
+        error-data
+        (with-redefs [application-preflight/request-fragment-route-ids
+                      (dissoc application-preflight/request-fragment-route-ids
+                              fragment)]
+          (thrown-data
+           application-preflight/require-acquisition-assembly!))]
+    (is (map? error-data))
+    (is (= :gesso.live.acquisition-preflight/error
+           (:error/type error-data)))
+    (is (= :authoritative-acquisition-assembly-failed
+           (:error/kind error-data)))
+    (is (some #(and (= :missing-acquisition-realization (:kind %))
+                    (= fragment (:fragment %)))
+              (get-in error-data [:preflight :errors])))))
