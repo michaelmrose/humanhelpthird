@@ -8,11 +8,13 @@
    [com.biffweb.fx :as biff.fx]
    [com.biffweb.graph :as biff.graph]
    [com.biffweb.xtdb :as biff.xtdb]
+   [gesso.live.application-preflight :as application-preflight]
    [gesso.live.core :as live]
    [gesso.model.tx :as model.tx]
    [malli.core :as malc]
    [malli.registry :as malr]
    [net.humanhelp.app :as app]
+   [net.humanhelp.example.application-preflight :as example.application-preflight]
    [net.humanhelp.client-plumbing :as client-plumbing]
    [net.humanhelp.home :as home]
    [net.humanhelp.middleware :as mid]
@@ -308,13 +310,41 @@
    use-aleph])
 
 ;; -----------------------------------------------------------------------------
+;; Canonical Gesso application preflight boundary
+;; -----------------------------------------------------------------------------
+
+(def browser-artifact-path
+  "Filesystem path of the exact HumanHelp browser artifact built before startup.
+
+   bb browser / bb dev emit this application-specific artifact through
+   gesso.live.browser.build/build-application-artifact!. target/resources is on
+   HumanHelp's classpath ahead of dependency resources, so this same file is the
+   /js/gesso-live.js served by the running application."
+  "target/resources/public/js/gesso-live.js")
+
+(defn require-application-assembly!
+  "Require the exact current HumanHelp ApplicationAssembly used by startup.
+
+   Startup does not accept a caller-supplied assembly or reconstruct application
+   semantics here. The example proving application owns the canonical semantic/
+   route/Live assembly and this entrypoint supplies only the physical generated
+   browser artifact chosen by the build/start path."
+  []
+  (example.application-preflight/require-application-assembly!
+   browser-artifact-path))
+
+;; -----------------------------------------------------------------------------
 ;; Lifecycle
 ;; -----------------------------------------------------------------------------
 
 (defn start
   []
-  (let [new-system
-        (biff.core/start
+  (let [application-assembly
+        (require-application-assembly!)
+
+        new-system
+        (application-preflight/start-biff-application!
+         application-assembly
          initial-system
          #'modules
          components)]
