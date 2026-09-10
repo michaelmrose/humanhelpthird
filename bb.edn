@@ -35,6 +35,7 @@
             "Expected no argument or the single argument: local"
             {:args  args
              :usage ["bb themes [local]"
+                     "bb browser [local]"
                      "bb dev [local]"]})))))
 
     (defn add-gesso!
@@ -55,6 +56,65 @@
       (and path
            (fs/exists? path)
            (fs/directory? path)))
+
+    (def browser-artifact-path
+      "target/resources/public/js/gesso-live.js")
+
+    (def remote-browser-build-sdeps
+      "{:deps {org.clojure/clojurescript {:mvn/version \"1.12.145\"}}}")
+
+    (def local-browser-build-sdeps
+      "{:deps {org.clojure/clojurescript {:mvn/version \"1.12.145\"}
+               michaelmrose/gesso {:local/root \"../gesso\"}}}")
+
+    (def browser-realization-options-var
+      'net.humanhelp.example.browser-realization/realization-options)
+
+    (def browser-build-expression
+      (str
+       "(require '[gesso.live.browser.build :as browser-build] "
+       "'[net.humanhelp.example.application-preflight :as application-preflight]) "
+       "(let [artifact-path \"" browser-artifact-path "\" "
+       "receipt (browser-build/build-application-artifact! "
+       "application-preflight/browser-declaration "
+       "artifact-path "
+       "{:realization-options-var "
+       "'" browser-realization-options-var "})] "
+       "(println \"HumanHelp browser artifact: PASS\") "
+       "(prn {:artifact-path artifact-path "
+       ":receipt-path (browser-build/receipt-path artifact-path) "
+       ":artifact (:artifact receipt) "
+       ":stamp (:stamp receipt)}))"))
+
+    (defn clojure-cli
+      []
+      (or
+       (some-> (fs/which "clojure") str)
+       (some-> (fs/which "clj") str)
+       (throw
+        (ex-info
+         "HumanHelp browser builds require the Clojure CLI on PATH."
+         {}))))
+
+    (defn build-browser!
+      [mode]
+      (let [sdeps
+            (case mode
+              :remote remote-browser-build-sdeps
+              :local local-browser-build-sdeps)]
+        (println
+         (if (= :local mode)
+           "Building HumanHelp browser artifact with local ../gesso."
+           "Building HumanHelp browser artifact with pinned remote Gesso."))
+        ;; Inject local Gesso directly through -Sdeps instead of relying on the
+        ;; :local-gesso alias. tools.deps may otherwise resolve the base pinned
+        ;; git dependency before applying the alias in a clean cache.
+        (shell
+         (clojure-cli)
+         "-Sdeps" sdeps
+         "-M"
+         "-e" browser-build-expression)
+        mode))
 
     (defn build-themes!
       [args]
@@ -120,6 +180,7 @@
     (defn start-dev!
       [args]
       (let [mode (build-themes! args)]
+        (build-browser! mode)
         (case mode
           :remote
           (shell "clj" "-M:dev" "dev")
@@ -172,8 +233,13 @@
    :task
    (build-themes! *command-line-args*)}
 
+  browser
+  {:doc "Build the exact stamped HumanHelp gesso-live.js. Pass 'local' to use ../gesso."
+   :task
+   (build-browser! (gesso-mode *command-line-args*))}
+
   dev
-  {:doc "Build themes and start the dev server. Pass 'local' to use ../gesso."
+  {:doc "Build themes + exact browser artifact and start the dev server. Pass 'local' to use ../gesso."
    :task
    (start-dev! *command-line-args*)}
 
