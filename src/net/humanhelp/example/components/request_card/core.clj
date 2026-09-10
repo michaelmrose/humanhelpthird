@@ -125,9 +125,10 @@
     (live/post-button
      ctx
      (cond->
-      {:to      (routes/operation-url (board/row-request-id row) operation)
-       :swap    "none"
-       :include board-state-selector
+      {:to        (routes/operation-url (board/row-request-id row) operation)
+       :swap      "none"
+       :include   board-state-selector
+       :choreo/op operation
        :form-attrs
        {:class                              "inline-flex"
         :data-humanhelp-request-action-form true}
@@ -137,8 +138,7 @@
        [[:span {:data-gesso-button-label true}
          (action-label operation)]]}
        binding'
-       (assoc :choreo/op operation
-              :optimistic-binding binding')))))
+       (assoc :optimistic-binding binding')))))
 
 ;; =============================================================================
 ;; Request/User display composition
@@ -305,9 +305,11 @@
        Stable hx-include selector for the example's presentation-state form.
 
    The component renders only authoritative production documents and semantic
-   production Choreo operation identities. When ctx has no justified XTDB progression,
-   the same action remains an ordinary HTMX POST and optimism is omitted rather
-   than fabricating an observed basis."
+   production Choreo operation identities. Semantic identity is unconditional:
+   an affordance that means :request/claim remains :request/claim even when ctx
+   lacks a justified XTDB progression. In that case no optimistic binding can be
+   fabricated, so Gesso rejects the unrealizable semantic operation at render
+   time instead of silently degrading it to an anonymous ordinary HTMX POST."
   [ctx {:keys [row viewer board-state-selector open?]
         :or   {open? false}}]
   (let [request-document (board/row-request row)
