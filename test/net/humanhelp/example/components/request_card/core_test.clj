@@ -1,10 +1,12 @@
 (ns net.humanhelp.example.components.request-card.core-test
   "Contract tests for the example Request card backed by production models and Choreo.
 
-   The card is presentation only: it renders production Request/User documents,
-   consumes production Choreo affordances from example.board, and may attach a
-   Gesso optimistic action only when the board can justify an authoritative XTDB
-   observation basis. It must never recover the former example.model semantics."
+   The card is presentation only: it renders production Request/User documents
+   and consumes production Choreo affordances from example.board. A semantic
+   Request operation keeps its :choreo/op identity unconditionally; when the board
+   cannot justify the authoritative XTDB observation basis required by its
+   optimistic realization, rendering must fail closed rather than degrade to an
+   anonymous HTMX POST. It must never recover the former example.model semantics."
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
@@ -138,23 +140,27 @@
   (is (= "/app/requests/71000000-0000-0000-0000-000000000001/complete"
          (routes/operation-url request-id :request/complete))))
 
-(deftest ordinary-action-remains-an-authoritative-htmx-post-without-basis-test
+(deftest semantic-action-fails-closed-without-authoritative-basis-test
   (with-redefs [board/optimistic-binding (constantly nil)]
-    (let [markup
-          (card/action-button
-           (render-ctx)
-           open-row
-           claim-affordance
-           "#humanhelp-board-state")
-          button
-          (button-attrs markup)]
-      (is (= (routes/claim-request-url request-id)
-             (:hx-post button)))
-      (is (= "none" (:hx-swap button)))
-      (is (= "claim"
-             (:data-humanhelp-request-operation button)))
-      (is (not (contains? button ui/optimistic-action-attr)))
-      (is (nil? (decoded-optimistic-action markup))))))
+    (let [error
+          (try
+            (card/action-button
+             (render-ctx)
+             open-row
+             claim-affordance
+             "#humanhelp-board-state")
+            nil
+            (catch clojure.lang.ExceptionInfo e
+              e))]
+      (is (some? error)
+          "A semantic Request operation without a justified binding must not render.")
+      (is (= :gesso.live.ui/optimistic-error
+             (:error/type (ex-data error))))
+      (is (= :missing-optimistic-binding
+             (:error/kind (ex-data error))))
+      (is (= request.choreo/claim-operation
+             (:operation (ex-data error)))
+          "The failure must preserve Claim's semantic identity instead of degrading to anonymous HTMX."))))
 
 (deftest optimistic-action-separates-production-capability-from-closed-binding-test
   (let [basis    {:tx-id       81
@@ -193,25 +199,31 @@
         (is (not (contains? action :capability))
             "Capability-owned data must not leak into Gesso's closed per-render binding.")))))
 
-(deftest request-card-consumes-board-affordances-test
+(deftest request-card-consumes-board-affordances-without-erasing-semantic-identity-test
   (let [calls (atom [])]
     (with-redefs [board/operation-affordances
                   (fn [row viewer-id]
                     (swap! calls conj [row viewer-id])
                     [claim-affordance])
-                  board/optimistic-binding    (constantly nil)]
-      (let [markup
-            (card/request-card
-             (render-ctx)
-             {:row                  open-row
-              :viewer               helper-user
-              :board-state-selector "#humanhelp-board-state"})
-            button
-            (button-attrs markup)]
-        (is (= [[open-row helper-id]] @calls))
-        (is (= (routes/claim-request-url request-id) (:hx-post button)))
-        (is (some #{"Claim"}
-                  (filter string? (tree-seq coll? seq markup))))))))
+                  board/optimistic-binding (constantly nil)]
+      (let [error
+            (try
+              (card/request-card
+               (render-ctx)
+               {:row                  open-row
+                :viewer               helper-user
+                :board-state-selector "#humanhelp-board-state"})
+              nil
+              (catch clojure.lang.ExceptionInfo e
+                e))]
+        (is (= [[open-row helper-id]] @calls)
+            "The card must consume the production board affordance before realization is checked.")
+        (is (some? error))
+        (is (= :missing-optimistic-binding
+               (:error/kind (ex-data error))))
+        (is (= request.choreo/claim-operation
+               (:operation (ex-data error)))
+            "A board-provided Claim affordance remains Claim even when it cannot be realized.")))))
 
 (deftest request-card-fails-closed-on-nonproduction-input-test
   (testing "a demo-shaped Request map is not accepted"
