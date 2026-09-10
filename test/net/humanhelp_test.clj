@@ -7,18 +7,18 @@
      HumanHelp start
        -> canonical Gesso start-biff-application! boundary
 
-   and, before the Claim formulation is repaired:
+   and, after the Claim formulation repair:
 
      actual no-progression Request-card Claim render
-       -> current HumanHelp ApplicationAssembly
-       -> Gesso dynamic rendered-surface preflight
-       -> rejection before response serialization.
+       -> semantic identity remains :request/claim
+       -> Gesso UI construction rejects missing optimistic realization
+       -> no malformed anonymous HTMX action can exist.
 
-   The second test is intentionally a red-before-repair checkpoint for the
-   current malformed Claim rendering.  It must be revised when HumanHelp stops
-   emitting the degraded ordinary HTMX action; until then it proves the running
-   application boundary can see the exact defect that formerly reached the
-   browser and failed as a 500."
+   A separate synthetic downgrade regression preserves the outer runtime guard:
+   if downstream code nevertheless constructs an anonymous POST targeting the
+   assembled Claim route, the current HumanHelp ApplicationAssembly must reject
+   it before response serialization.  Together the tests freeze both the early
+   construction boundary and the application-wide pre-browser backstop."
   (:require
    [clojure.test :refer [deftest is testing]]
    [com.biffweb.config :as biff.config]
@@ -27,7 +27,6 @@
    [gesso.live.application-preflight :as application-preflight]
    [gesso.live.browser.build :as browser-build]
    [gesso.live.core :as live]
-   [gesso.live.ui :as live.ui]
    [gesso.model.tx :as model.tx]
    [gesso.model.command :as command]
    [net.humanhelp :as humanhelp]
@@ -37,6 +36,7 @@
    [net.humanhelp.example.application-preflight :as example.application-preflight]
    [net.humanhelp.example.board :as board]
    [net.humanhelp.example.components.request-card.core :as request-card]
+   [net.humanhelp.example.routes :as example.routes]
    [net.humanhelp.site.model.request.choreo :as request.choreo]
    [net.humanhelp.site.model.request.domain :as request.domain]
    [net.humanhelp.home :as home]
@@ -303,29 +303,49 @@
                        :operation-assembly
                        :operations]))))))))
 
-(deftest current-no-progression-claim-render-is-rejected-before-browser-serialization-test
+(deftest current-no-progression-claim-render-fails-closed-before-malformed-hiccup-exists-test
+  (let [ctx
+        (live/with-optimistic-browser-plans
+         {:anti-forgery-token "test-token"}
+         request.choreo/browser-plans)
+
+        failure
+        (thrown-data
+         #(request-card/action-button
+           ctx
+           open-row
+           claim-affordance
+           "#humanhelp-board-state"))]
+    (testing "Claim keeps its semantic identity when no optimistic basis can be justified"
+      (is (= :gesso.live.ui/optimistic-error
+             (:error/type failure)))
+      (is (= :missing-optimistic-binding
+             (:error/kind failure)))
+      (is (= request.choreo/claim-operation
+             (:operation failure))))
+
+    (testing "the malformed anonymous Claim POST can no longer be constructed"
+      (is (map? failure)))))
+
+(deftest application-preflight-remains-a-backstop-against-synthetic-claim-downgrade-test
   (with-stamped-humanhelp-application
    (fn [{:keys [application-assembly]}]
-     (let [ctx
-           (live/with-optimistic-browser-plans
-            {:anti-forgery-token "test-token"}
-            request.choreo/browser-plans)
+     (let [claim-path
+           (example.routes/claim-request-url request-id)
 
-           ;; This is the actual current HumanHelp Request-card rendering path.
-           ;; There is deliberately no Gesso progression in ctx, so
-           ;; board/optimistic-binding returns nil and the current component drops
-           ;; :choreo/op while leaving its semantic Claim hx-post behind.
+           ;; This Hiccup deliberately simulates downstream code bypassing the
+           ;; corrected Request-card constructor and erasing Claim's semantic
+           ;; identity while retaining its physical semantic-operation route.
            rendered
-           (request-card/action-button
-            ctx
-            open-row
-            claim-affordance
-            "#humanhelp-board-state")
+           [:button {:type "button"
+                     :hx-post claim-path
+                     :hx-swap "none"}
+            "Claim"]
 
            report
            (application-preflight/check-rendered-surface
             application-assembly
-            :net.humanhelp-test/current-no-progression-claim
+            :net.humanhelp-test/synthetic-claim-downgrade
             rendered)
 
            semantic-downgrade
@@ -340,28 +360,19 @@
            (thrown-data
             #(application-preflight/checked-rendered-response!
               application-assembly
-              :net.humanhelp-test/current-no-progression-claim
+              :net.humanhelp-test/synthetic-claim-downgrade
               (fn [_]
                 (reset! response-rendered? true)
                 {:status 200})
               rendered))]
-       (testing "the current component really did produce the degraded form that caused the browser 500"
-         (let [button (get rendered 3)
-               attrs (second button)]
-           (is (= :button (first button)))
-           (is (= (str "/app/requests/" request-id "/claim")
-                  (:hx-post attrs)))
-           (is (nil? (get attrs live.ui/optimistic-action-attr)))))
-
-       (testing "the real HumanHelp ApplicationAssembly rejects that degraded semantic route"
+       (testing "the canonical HumanHelp assembly recognizes the anonymous POST as degraded Claim"
          (is (false? (:valid? report)))
          (is (= #{request.choreo/claim-operation}
                 (:candidate-operations semantic-downgrade)))
          (is (= :post (:method semantic-downgrade)))
-         (is (= (str "/app/requests/" request-id "/claim")
-                (:path semantic-downgrade))))
+         (is (= claim-path (:path semantic-downgrade))))
 
-       (testing "failure occurs before a response renderer can serialize the malformed button"
+       (testing "the application-wide guard still rejects bypassed downgrade before serialization"
          (is (= :gesso.live.application-preflight/error
                 (:error/type failure)))
          (is (= :rendered-surface-preflight-failed
