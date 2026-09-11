@@ -14,19 +14,31 @@
        -> Gesso UI construction rejects missing optimistic realization
        -> no malformed anonymous HTMX action can exist.
 
+   The authoritative request-frontier regressions additionally freeze:
+
+     Aleph request boundary
+       -> browser minimum progression decoded
+       -> one trusted XTDB frontier bound
+       -> matching Biff snapshot + Gesso progression
+       -> real Request-card Claim obtains a canonical optimistic realization.
+
    A separate synthetic downgrade regression preserves the outer runtime guard:
    if downstream code nevertheless constructs an anonymous POST targeting the
    assembled Claim route, the current HumanHelp ApplicationAssembly must reject
    it before response serialization.  Together the tests freeze both the early
    construction boundary and the application-wide pre-browser backstop."
   (:require
+   [aleph.http :as aleph]
+   [clojure.edn :as edn]
    [clojure.test :refer [deftest is testing]]
    [com.biffweb.config :as biff.config]
    [com.biffweb.xtdb :as biff.xtdb]
    [com.biffweb.core :as biff.core]
    [gesso.live.application-preflight :as application-preflight]
    [gesso.live.browser.build :as browser-build]
+   [gesso.live.consistency.xtdb :as live.xtdb]
    [gesso.live.core :as live]
+   [gesso.live.ui :as live.ui]
    [gesso.model.tx :as model.tx]
    [gesso.model.command :as command]
    [net.humanhelp :as humanhelp]
@@ -130,23 +142,23 @@
 (defn- with-stamped-humanhelp-application
   [f]
   (with-temp-dir
-    (fn [dir]
-      (let [artifact-path (child-path dir "gesso-live.js")
-            browser-assembly
-            (example.application-preflight/require-browser-assembly!)]
+   (fn [dir]
+     (let [artifact-path (child-path dir "gesso-live.js")
+           browser-assembly
+           (example.application-preflight/require-browser-assembly!)]
        ;; This test exercises artifact correspondence/currentness, not Closure
        ;; optimization.  Record harmless bytes under the exact HumanHelp browser
        ;; manifest using the same public receipt machinery as the supported build.
-        (spit artifact-path
-              "console.log('humanhelp runtime-preflight fixture');\n"
-              :encoding "UTF-8")
-        (browser-build/record-generated-artifact!
-         browser-assembly
-         artifact-path)
-        (with-redefs [humanhelp/browser-artifact-path artifact-path]
-          (f {:artifact-path artifact-path
-              :application-assembly
-              (humanhelp/require-application-assembly!)}))))))
+       (spit artifact-path
+             "console.log('humanhelp runtime-preflight fixture');\n"
+             :encoding "UTF-8")
+       (browser-build/record-generated-artifact!
+        browser-assembly
+        artifact-path)
+       (with-redefs [humanhelp/browser-artifact-path artifact-path]
+         (f {:artifact-path artifact-path
+             :application-assembly
+             (humanhelp/require-application-assembly!)}))))))
 
 (defn- contributes-module?
   [module]
@@ -289,25 +301,25 @@
 
 (deftest top-level-application-assembly-is-the-current-production-humanhelp-assembly-test
   (with-stamped-humanhelp-application
-    (fn [{:keys [artifact-path application-assembly]}]
-      (is (application-preflight/application-assembly? application-assembly))
-      (is (= artifact-path
-             (:browser-artifact-path application-assembly)))
-      (is (= example.application-preflight/request-operations
-             (set
-              (keys
-               (get-in application-assembly
-                       [:operation-acquisition-assembly
-                        :execution-assembly
-                        :route-assembly
-                        :operation-assembly
-                        :operations]))))))))
+   (fn [{:keys [artifact-path application-assembly]}]
+     (is (application-preflight/application-assembly? application-assembly))
+     (is (= artifact-path
+            (:browser-artifact-path application-assembly)))
+     (is (= example.application-preflight/request-operations
+            (set
+             (keys
+              (get-in application-assembly
+                      [:operation-acquisition-assembly
+                       :execution-assembly
+                       :route-assembly
+                       :operation-assembly
+                       :operations]))))))))
 
 (deftest current-no-progression-claim-render-fails-closed-before-malformed-hiccup-exists-test
   (let [ctx
         (live/with-optimistic-browser-plans
-          {:anti-forgery-token "test-token"}
-          request.choreo/browser-plans)
+         {:anti-forgery-token "test-token"}
+         request.choreo/browser-plans)
 
         failure
         (thrown-data
@@ -327,54 +339,265 @@
     (testing "the malformed anonymous Claim POST can no longer be constructed"
       (is (map? failure)))))
 
+(deftest aleph-request-boundary-orders-browser-minimum-before-authoritative-frontier-test
+  (let [captured-handler (atom nil)
+        events (atom [])
+        handler
+        (fn [ctx]
+          (swap! events conj
+                 [:handler
+                  (::browser-progression-bound? ctx)
+                  (::authoritative-frontier-bound? ctx)])
+          {:status 204})]
+    (with-redefs [aleph/start-server
+                  (fn [actual-handler _opts]
+                    (reset! captured-handler actual-handler)
+                    ::test-server)
+
+                  live/bind-request-progression
+                  (fn [ctx]
+                    (swap! events conj :browser-progression)
+                    (assoc ctx ::browser-progression-bound? true))
+
+                  live.xtdb/bind-request-frontier
+                  (fn [ctx]
+                    (swap! events conj
+                           [:authoritative-frontier
+                            (::browser-progression-bound? ctx)])
+                    (assoc ctx ::authoritative-frontier-bound? true))]
+      (humanhelp/use-aleph
+       {:biff.ring/handler handler
+        :biff.ring/port 8080
+        ::system-value :system})
+
+      (is (ifn? @captured-handler))
+      (is (= {:status 204}
+             (@captured-handler
+              {:request-method :get
+               :uri "/app"
+               ::request-value :request})))
+      (is (= [:browser-progression
+              [:authoritative-frontier true]
+              [:handler true true]]
+             @events)
+          "The untrusted browser minimum must be decoded before the trusted XTDB frontier, and both must precede rendering."))))
+
+(deftest normal-authoritative-get-binds-one-frontier-that-realizes-claim-test
+  (let [frontier
+        (live.xtdb/basis
+         :xtdb
+         676
+         (Instant/parse "2026-09-10T22:30:00Z"))
+
+        snapshot-token
+        (live.xtdb/basis-snapshot-token frontier)
+
+        captured-handler
+        (atom nil)
+
+        frontier-calls
+        (atom [])
+
+        handled-ctx
+        (atom nil)
+
+        rendered
+        (atom nil)
+
+        handler
+        (fn [ctx]
+          (reset! handled-ctx ctx)
+          (let [render-ctx
+                (-> ctx
+                    (assoc :anti-forgery-token "test-token")
+                    (live/with-optimistic-browser-plans
+                     request.choreo/browser-plans))
+
+                action
+                (request-card/action-button
+                 render-ctx
+                 open-row
+                 claim-affordance
+                 "#humanhelp-board-state")]
+            (reset! rendered action)
+            {:status 200
+             :body action}))]
+
+    (with-redefs [aleph/start-server
+                  (fn [actual-handler _opts]
+                    (reset! captured-handler actual-handler)
+                    ::test-server)
+
+                  live.xtdb/latest-completed-basis
+                  (fn [ctx database]
+                    (swap! frontier-calls conj
+                           {:ctx ctx
+                            :database database})
+                    frontier)]
+      (humanhelp/use-aleph
+       {:biff.ring/handler handler
+        :biff.ring/port 8080
+        :biff.xtdb/node ::trusted-node
+        ::system-value :system})
+
+      (let [response
+            (@captured-handler
+             {:request-method :get
+              :uri "/app"
+              :headers {}
+              ::request-value :request})
+
+            bound
+            @handled-ctx
+
+            claim-node
+            @rendered
+
+            button
+            (nth claim-node 3)
+
+            button-attrs
+            (second button)
+
+            action
+            (edn/read-string
+             (:data-gesso-live-optimistic button-attrs))
+
+            affordances
+            (live.ui/rendered-choreo-affordances claim-node)
+
+            wrapped-body
+            ((:biff.core/wrap-db-snapshot bound)
+             (fn [ctx]
+               (:biff.xtdb/snapshot-token ctx)))]
+
+        (testing "the real v676 boundary joins system and request context before observing one authoritative frontier"
+          (is (= 200 (:status response)))
+          (is (= 1 (count @frontier-calls)))
+          (is (= :system
+                 (get-in @frontier-calls [0 :ctx ::system-value])))
+          (is (= :request
+                 (get-in @frontier-calls [0 :ctx ::request-value])))
+          (is (nil? (get-in @frontier-calls [0 :database]))))
+
+        (testing "Biff snapshot and Gesso progression name the same authoritative observation"
+          (is (= snapshot-token
+                 (:biff.xtdb/snapshot-token bound)))
+          (is (= frontier
+                 (board/observed-basis bound)))
+          (is (= snapshot-token
+                 (wrapped-body {}))))
+
+        (testing "the authoritative GET context is sufficient for the real Claim constructor"
+          (is (= [{:gesso.live.ui/type :gesso.live.ui/rendered-choreo-affordance
+                   :gesso.live.ui/version 1
+                   :kind :post-button
+                   :operation request.choreo/claim-operation
+                   :plan-key request.choreo/claim-operation
+                   :method :post
+                   :path (example.routes/claim-request-url request-id)
+                   :render-path [3]}]
+                 affordances))
+          (is (= request.choreo/claim-operation
+                 (:operation action)))
+          (is (= request.choreo/claim-operation
+                 (:plan-key action)))
+          (is (= frontier
+                 (:observed-basis action)))
+          (is (= {:request-id request-id}
+                 (:arguments action)))
+          (is (= (example.routes/claim-request-url request-id)
+                 (:hx-post button-attrs)))
+          (is (not (contains? action :command-id))
+              "The server render must not fabricate the browser-owned command identity.")
+          (is (not (contains? action :execution-id))
+              "The server render must not fabricate the browser-owned execution identity."))))))
+
+(deftest bypassing-authoritative-frontier-at-http-boundary-restores-the-expected-claim-failure-test
+  (let [captured-handler (atom nil)
+        handler
+        (fn [ctx]
+          (request-card/action-button
+           (-> ctx
+               (assoc :anti-forgery-token "test-token")
+               (live/with-optimistic-browser-plans
+                request.choreo/browser-plans))
+           open-row
+           claim-affordance
+           "#humanhelp-board-state"))]
+    (with-redefs [aleph/start-server
+                  (fn [actual-handler _opts]
+                    (reset! captured-handler actual-handler)
+                    ::test-server)
+
+                  live.xtdb/bind-request-frontier
+                  identity]
+      (humanhelp/use-aleph
+       {:biff.ring/handler handler
+        :biff.ring/port 8080
+        :biff.xtdb/node ::trusted-node})
+
+      (let [failure
+            (thrown-data
+             #(@captured-handler
+               {:request-method :get
+                :uri "/app"
+                :headers {}}))]
+        (is (= :gesso.live.ui/optimistic-error
+               (:error/type failure)))
+        (is (= :missing-optimistic-binding
+               (:error/kind failure)))
+        (is (= request.choreo/claim-operation
+               (:operation failure)))))))
+
 (deftest application-preflight-remains-a-backstop-against-synthetic-claim-downgrade-test
   (with-stamped-humanhelp-application
-    (fn [{:keys [application-assembly]}]
-      (let [claim-path
-            (example.routes/claim-request-url request-id)
+   (fn [{:keys [application-assembly]}]
+     (let [claim-path
+           (example.routes/claim-request-url request-id)
 
            ;; This Hiccup deliberately simulates downstream code bypassing the
            ;; corrected Request-card constructor and erasing Claim's semantic
            ;; identity while retaining its physical semantic-operation route.
-            rendered
-            [:button {:type "button"
-                      :hx-post claim-path
-                      :hx-swap "none"}
-             "Claim"]
+           rendered
+           [:button {:type "button"
+                     :hx-post claim-path
+                     :hx-swap "none"}
+            "Claim"]
 
-            report
-            (application-preflight/check-rendered-surface
-             application-assembly
-             :net.humanhelp-test/synthetic-claim-downgrade
-             rendered)
+           report
+           (application-preflight/check-rendered-surface
+            application-assembly
+            :net.humanhelp-test/synthetic-claim-downgrade
+            rendered)
 
-            semantic-downgrade
-            (some
-             #(when (= :rendered-semantic-route-without-choreo-operation
-                       (:kind %))
-                %)
-             (:errors report))
+           semantic-downgrade
+           (some
+            #(when (= :rendered-semantic-route-without-choreo-operation
+                      (:kind %))
+               %)
+            (:errors report))
 
-            response-rendered? (atom false)
-            failure
-            (thrown-data
-             #(application-preflight/checked-rendered-response!
-               application-assembly
-               :net.humanhelp-test/synthetic-claim-downgrade
-               (fn [_]
-                 (reset! response-rendered? true)
-                 {:status 200})
-               rendered))]
-        (testing "the canonical HumanHelp assembly recognizes the anonymous POST as degraded Claim"
-          (is (false? (:valid? report)))
-          (is (= #{request.choreo/claim-operation}
-                 (:candidate-operations semantic-downgrade)))
-          (is (= :post (:method semantic-downgrade)))
-          (is (= claim-path (:path semantic-downgrade))))
+           response-rendered? (atom false)
+           failure
+           (thrown-data
+            #(application-preflight/checked-rendered-response!
+              application-assembly
+              :net.humanhelp-test/synthetic-claim-downgrade
+              (fn [_]
+                (reset! response-rendered? true)
+                {:status 200})
+              rendered))]
+       (testing "the canonical HumanHelp assembly recognizes the anonymous POST as degraded Claim"
+         (is (false? (:valid? report)))
+         (is (= #{request.choreo/claim-operation}
+                (:candidate-operations semantic-downgrade)))
+         (is (= :post (:method semantic-downgrade)))
+         (is (= claim-path (:path semantic-downgrade))))
 
-        (testing "the application-wide guard still rejects bypassed downgrade before serialization"
-          (is (= :gesso.live.application-preflight/error
-                 (:error/type failure)))
-          (is (= :rendered-surface-preflight-failed
-                 (:error/kind failure)))
-          (is (false? @response-rendered?)))))))
+       (testing "the application-wide guard still rejects bypassed downgrade before serialization"
+         (is (= :gesso.live.application-preflight/error
+                (:error/type failure)))
+         (is (= :rendered-surface-preflight-failed
+                (:error/kind failure)))
+         (is (false? @response-rendered?)))))))
