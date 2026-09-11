@@ -9,6 +9,7 @@
    [com.biffweb.graph :as biff.graph]
    [com.biffweb.xtdb :as biff.xtdb]
    [gesso.live.application-preflight :as application-preflight]
+   [gesso.live.consistency.xtdb :as live.xtdb]
    [gesso.live.core :as live]
    [gesso.model.tx :as model.tx]
    [malli.core :as malc]
@@ -206,7 +207,13 @@
 
    Biff 2's standard server component is Jetty. HumanHelp intentionally keeps
    Aleph, but consumes the same :biff.ring/host, :biff.ring/port, and
-   :biff.ring/handler keys."
+   :biff.ring/handler keys.
+
+   Each request is joined with the fully initialized system context, then the
+   optional browser progression requirement is decoded before Gesso binds one
+   trusted XTDB request frontier. The resulting context gives ordinary Biff
+   reads and Gesso progression the same authoritative observation before the
+   checked application handler runs."
   [{:biff.ring/keys
     [host
      port
@@ -239,9 +246,11 @@
         handler'
         (fn [request]
           (handler
-           (merge
-            ctx
-            request)))
+           (-> (merge
+                ctx
+                request)
+               live/bind-request-progression
+               live.xtdb/bind-request-frontier)))
 
         thread-factory
         (io.netty.util.concurrent.DefaultThreadFactory.
