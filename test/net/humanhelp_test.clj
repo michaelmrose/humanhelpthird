@@ -130,23 +130,23 @@
 (defn- with-stamped-humanhelp-application
   [f]
   (with-temp-dir
-   (fn [dir]
-     (let [artifact-path (child-path dir "gesso-live.js")
-           browser-assembly
-           (example.application-preflight/require-browser-assembly!)]
+    (fn [dir]
+      (let [artifact-path (child-path dir "gesso-live.js")
+            browser-assembly
+            (example.application-preflight/require-browser-assembly!)]
        ;; This test exercises artifact correspondence/currentness, not Closure
        ;; optimization.  Record harmless bytes under the exact HumanHelp browser
        ;; manifest using the same public receipt machinery as the supported build.
-       (spit artifact-path
-             "console.log('humanhelp runtime-preflight fixture');\n"
-             :encoding "UTF-8")
-       (browser-build/record-generated-artifact!
-        browser-assembly
-        artifact-path)
-       (with-redefs [humanhelp/browser-artifact-path artifact-path]
-         (f {:artifact-path artifact-path
-             :application-assembly
-             (humanhelp/require-application-assembly!)}))))))
+        (spit artifact-path
+              "console.log('humanhelp runtime-preflight fixture');\n"
+              :encoding "UTF-8")
+        (browser-build/record-generated-artifact!
+         browser-assembly
+         artifact-path)
+        (with-redefs [humanhelp/browser-artifact-path artifact-path]
+          (f {:artifact-path artifact-path
+              :application-assembly
+              (humanhelp/require-application-assembly!)}))))))
 
 (defn- contributes-module?
   [module]
@@ -289,25 +289,25 @@
 
 (deftest top-level-application-assembly-is-the-current-production-humanhelp-assembly-test
   (with-stamped-humanhelp-application
-   (fn [{:keys [artifact-path application-assembly]}]
-     (is (application-preflight/application-assembly? application-assembly))
-     (is (= artifact-path
-            (:browser-artifact-path application-assembly)))
-     (is (= example.application-preflight/request-operations
-            (set
-             (keys
-              (get-in application-assembly
-                      [:operation-acquisition-assembly
-                       :execution-assembly
-                       :route-assembly
-                       :operation-assembly
-                       :operations]))))))))
+    (fn [{:keys [artifact-path application-assembly]}]
+      (is (application-preflight/application-assembly? application-assembly))
+      (is (= artifact-path
+             (:browser-artifact-path application-assembly)))
+      (is (= example.application-preflight/request-operations
+             (set
+              (keys
+               (get-in application-assembly
+                       [:operation-acquisition-assembly
+                        :execution-assembly
+                        :route-assembly
+                        :operation-assembly
+                        :operations]))))))))
 
 (deftest current-no-progression-claim-render-fails-closed-before-malformed-hiccup-exists-test
   (let [ctx
         (live/with-optimistic-browser-plans
-         {:anti-forgery-token "test-token"}
-         request.choreo/browser-plans)
+          {:anti-forgery-token "test-token"}
+          request.choreo/browser-plans)
 
         failure
         (thrown-data
@@ -329,52 +329,52 @@
 
 (deftest application-preflight-remains-a-backstop-against-synthetic-claim-downgrade-test
   (with-stamped-humanhelp-application
-   (fn [{:keys [application-assembly]}]
-     (let [claim-path
-           (example.routes/claim-request-url request-id)
+    (fn [{:keys [application-assembly]}]
+      (let [claim-path
+            (example.routes/claim-request-url request-id)
 
            ;; This Hiccup deliberately simulates downstream code bypassing the
            ;; corrected Request-card constructor and erasing Claim's semantic
            ;; identity while retaining its physical semantic-operation route.
-           rendered
-           [:button {:type "button"
-                     :hx-post claim-path
-                     :hx-swap "none"}
-            "Claim"]
+            rendered
+            [:button {:type "button"
+                      :hx-post claim-path
+                      :hx-swap "none"}
+             "Claim"]
 
-           report
-           (application-preflight/check-rendered-surface
-            application-assembly
-            :net.humanhelp-test/synthetic-claim-downgrade
-            rendered)
+            report
+            (application-preflight/check-rendered-surface
+             application-assembly
+             :net.humanhelp-test/synthetic-claim-downgrade
+             rendered)
 
-           semantic-downgrade
-           (some
-            #(when (= :rendered-semantic-route-without-choreo-operation
-                      (:kind %))
-               %)
-            (:errors report))
+            semantic-downgrade
+            (some
+             #(when (= :rendered-semantic-route-without-choreo-operation
+                       (:kind %))
+                %)
+             (:errors report))
 
-           response-rendered? (atom false)
-           failure
-           (thrown-data
-            #(application-preflight/checked-rendered-response!
-              application-assembly
-              :net.humanhelp-test/synthetic-claim-downgrade
-              (fn [_]
-                (reset! response-rendered? true)
-                {:status 200})
-              rendered))]
-       (testing "the canonical HumanHelp assembly recognizes the anonymous POST as degraded Claim"
-         (is (false? (:valid? report)))
-         (is (= #{request.choreo/claim-operation}
-                (:candidate-operations semantic-downgrade)))
-         (is (= :post (:method semantic-downgrade)))
-         (is (= claim-path (:path semantic-downgrade))))
+            response-rendered? (atom false)
+            failure
+            (thrown-data
+             #(application-preflight/checked-rendered-response!
+               application-assembly
+               :net.humanhelp-test/synthetic-claim-downgrade
+               (fn [_]
+                 (reset! response-rendered? true)
+                 {:status 200})
+               rendered))]
+        (testing "the canonical HumanHelp assembly recognizes the anonymous POST as degraded Claim"
+          (is (false? (:valid? report)))
+          (is (= #{request.choreo/claim-operation}
+                 (:candidate-operations semantic-downgrade)))
+          (is (= :post (:method semantic-downgrade)))
+          (is (= claim-path (:path semantic-downgrade))))
 
-       (testing "the application-wide guard still rejects bypassed downgrade before serialization"
-         (is (= :gesso.live.application-preflight/error
-                (:error/type failure)))
-         (is (= :rendered-surface-preflight-failed
-                (:error/kind failure)))
-         (is (false? @response-rendered?)))))))
+        (testing "the application-wide guard still rejects bypassed downgrade before serialization"
+          (is (= :gesso.live.application-preflight/error
+                 (:error/type failure)))
+          (is (= :rendered-surface-preflight-failed
+                 (:error/kind failure)))
+          (is (false? @response-rendered?)))))))
