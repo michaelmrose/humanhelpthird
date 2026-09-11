@@ -36,6 +36,7 @@
             {:args  args
              :usage ["bb themes [local]"
                      "bb browser [local]"
+                     "bb test:browser [local]"
                      "bb dev [local]"]})))))
 
     (defn add-gesso!
@@ -177,6 +178,29 @@
 
         mode))
 
+    (defn run-browser-acceptance!
+      [args]
+      (let [mode  (gesso-mode args)
+            sdeps (case mode
+                    :remote remote-browser-build-sdeps
+                    :local  local-browser-build-sdeps)]
+        ;; Browser acceptance must run against the exact artifact generated from
+        ;; the same dependency mode.  In local mode, inject ../gesso through
+        ;; -Sdeps for the test JVM as well as the build JVM; this avoids a clean
+        ;; tools.deps cache resolving the pinned remote Gesso before the
+        ;; :local-gesso override can take effect.
+        (build-browser! mode)
+        (println
+         (if (= :local mode)
+           "Running HumanHelp Chromium acceptance with local ../gesso."
+           "Running HumanHelp Chromium acceptance with pinned remote Gesso."))
+        (shell
+         (clojure-cli)
+         "-Sdeps" sdeps
+         "-M:browser-test"
+         "-m" "net.humanhelp.example.chromium-acceptance")
+        mode))
+
     (defn start-dev!
       [args]
       (let [mode (build-themes! args)]
@@ -260,6 +284,11 @@
                  "script/humanhelp_test.clj"
                  "jvm"]
                 *command-line-args*))}
+
+  test:browser
+  {:doc "Build the exact stamped HumanHelp browser artifact and run real Chromium acceptance. Pass 'local' to use ../gesso."
+   :task
+   (run-browser-acceptance! *command-line-args*)}
 
   test:integrity
   {:doc "Verify namespace/path integrity. Included by `bb test` and `bb test:jvm`."
