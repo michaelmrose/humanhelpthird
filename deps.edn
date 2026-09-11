@@ -187,6 +187,27 @@
    :main-opts
    ["-m" "net.humanhelp"]}
 
+  :browser-test
+  {:extra-paths ["test"]
+
+   ;; Real HumanHelp browser acceptance deliberately launches the system
+   ;; Chromium executable through Playwright. Keep this dependency out of the
+   ;; ordinary JVM test alias so `bb test:jvm` remains a lightweight server/model
+   ;; gate. The browser harness itself lives in a non-*-test namespace and is
+   ;; invoked explicitly by the browser gate.
+   :extra-deps
+   {com.microsoft.playwright/playwright
+    {:mvn/version "1.61.0"}}
+
+   :jvm-opts
+   ["--add-opens=java.base/java.nio=ALL-UNNAMED"
+    "--enable-native-access=ALL-UNNAMED"
+    "-Dio.netty.tryReflectionSetAccessible=true"
+    "-Dio.netty.noUnsafe=false"
+    "-XX:-OmitStackTraceInFastThrow"
+    "-XX:+CrashOnOutOfMemoryError"
+    "-Dbiff.env.BIFF_PROFILE=prod"]}
+
   :test
   {:extra-paths ["test"]
 
