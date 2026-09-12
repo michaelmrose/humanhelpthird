@@ -49,6 +49,12 @@
 (def board-state-form-id
   "humanhelp-board-state")
 
+(def refresh-form-dom-id
+  "humanhelp-refresh-form")
+
+(def refresh-advisory-dom-id
+  "humanhelp-refresh-advisory")
+
 ;; -----------------------------------------------------------------------------
 ;; Stable board-state selectors
 ;; -----------------------------------------------------------------------------
@@ -453,13 +459,29 @@
 
 (defn refresh-form
   [ctx view-state stale?]
-  (g/form
-   ctx
-   {:post    (routes/refresh-requests-url)
-    :swap    "none"
-    :inline? true
-    :attrs   {:hx-include (board-state-selector)}}
-   (refresh-button {:stale? stale?})))
+  [:div {:id    refresh-form-dom-id
+         :style {:display "contents"}}
+   (g/form
+    ctx
+    {:post    (routes/refresh-requests-url)
+     :swap    "none"
+     :inline? true
+     :attrs   {:hx-include (board-state-selector)}}
+    (refresh-button {:stale? stale?}))])
+
+(defn refresh-advisory
+  "Render the independently replaceable advisory message next to Refresh.
+
+   The node is always present so client-plumbing can mark a browser stale
+   without replacing the authoritative Request toolbar/list projection. The
+   empty non-stale node is intentional: explicit Refresh or any canonical
+   toolbar replacement resets advisory state by ordinary server rendering."
+  [stale?]
+  [:div {:id                              refresh-advisory-dom-id
+         :data-humanhelp-refresh-advisory true
+         :aria-live                       "polite"}
+   (when stale?
+     (muted "New request data is available. Refresh when you are ready."))])
 
 (defn request-toolbar-heading
   [{:keys [open-count pending-open-count]}]
@@ -526,8 +548,7 @@
                   :terminal-visibility-option terminal-visibility-option
                   :open?                      false}))]})
 
-     (when stale?
-       (muted "New request data is available. Refresh when you are ready."))]))
+     (refresh-advisory stale?)]))
 
 ;; -----------------------------------------------------------------------------
 ;; Search / board-state form
@@ -718,6 +739,22 @@
 (defn replace-dialog-oob
   [dialog]
   (g/oob-outer-html create-request-dialog-id dialog))
+
+(defn refresh-advisory-oob
+  "Replace only the browser-local Refresh/advisory surfaces.
+
+   This deliberately does not replace the Request toolbar fragment or Request
+   list. It is the view boundary used when a connected browser learns that
+   newer Request authority exists but has not explicitly adopted that authority
+   yet."
+  [ctx view-state stale?]
+  (oob-response
+   (g/oob-outer-html
+    refresh-form-dom-id
+    (refresh-form ctx view-state stale?))
+   (g/oob-outer-html
+    refresh-advisory-dom-id
+    (refresh-advisory stale?))))
 
 (defn replace-board-state-oob
   "Render an OOB replacement for the stable board-state/search form.
