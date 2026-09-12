@@ -6,7 +6,7 @@
    browser gate invokes -main explicitly after building the exact HumanHelp
    gesso-live.js artifact.
 
-   The first scenario is the Request Claim -> Unclaim round trip and deliberately
+   The current scenario is the Request Claim -> Unclaim -> Claim -> On-the-way trajectory and deliberately
    crosses the real joins that the preflight recovery work is meant to protect:
 
      real HumanHelp Ring middleware / session
@@ -21,6 +21,8 @@
        -> real rendered Unclaim control
        -> second browser-generated protocol-v3 command
        -> real Unclaim route
+      -> real Claim route again
+      -> real Mark-on-the-way route
        -> production Request Choreo/model commit
        -> settlement + authoritative reacquisition
        -> persisted open reload
@@ -544,6 +546,8 @@
           :claim-responses []
           :unclaim-requests []
           :unclaim-responses []
+          :mark-on-the-way-requests []
+          :mark-on-the-way-responses []
           :request-list-fragment-requests []
           :request-list-fragment-responses []})]
 
@@ -614,6 +618,17 @@
             :post-data (.postData request)}))
 
         (when (and
+               (= "POST" (.method request))
+               (str/ends-with? (uri-path (.url request)) "/mark-on-the-way"))
+          (swap!
+           diagnostics
+           update
+           :mark-on-the-way-requests
+           conj
+           {:url (.url request)
+            :post-data (.postData request)}))
+
+        (when (and
                (= "GET" (.method request))
                (= (routes/request-list-fragment-url)
                   (uri-path (.url request))))
@@ -647,6 +662,17 @@
            diagnostics
            update
            :unclaim-responses
+           conj
+           {:url (.url response)
+            :status (.status response)}))
+
+        (when (and
+               (= "POST" (.method (.request response)))
+               (str/ends-with? (uri-path (.url response)) "/mark-on-the-way"))
+          (swap!
+           diagnostics
+           update
+           :mark-on-the-way-responses
            conj
            {:url (.url response)
             :status (.status response)}))
@@ -738,6 +764,18 @@
    "#humanhelp-request-" request-id
    " [data-humanhelp-request-operation=\"unclaim\"]"))
 
+(defn- mark-on-the-way-button-selector
+  [request-id]
+  (str
+   "#humanhelp-request-" request-id
+   " [data-humanhelp-request-operation=\"mark-on-the-way\"]"))
+
+(defn- complete-button-selector
+  [request-id]
+  (str
+   "#humanhelp-request-" request-id
+   " [data-humanhelp-request-operation=\"complete\"]"))
+
 (defn- claim-through-browser!
   [^Page page request-id]
   (let [claim-button
@@ -766,6 +804,20 @@
 
   request-id)
 
+(defn- mark-on-the-way-through-browser!
+  [^Page page request-id]
+  (let [button
+        (.locator page (mark-on-the-way-button-selector request-id))]
+    (.waitFor button)
+
+    (when-not (.isVisible button)
+      (.click
+       (.locator page (request-summary-selector request-id))))
+
+    (.click button))
+
+  request-id)
+
 (defn- wait-for-authoritative-status!
   [system request-id expected-status]
   (eventually
@@ -784,6 +836,10 @@
   [system request-id]
   (wait-for-authoritative-status! system request-id :open))
 
+(defn- wait-for-authoritative-on-the-way!
+  [system request-id]
+  (wait-for-authoritative-status! system request-id :on-the-way))
+
 (defn- wait-for-claimed-dom!
   [^Page page request-id]
   (let [unclaim-button
@@ -798,6 +854,22 @@
     (eventually
      default-timeout-ms
      #(when (= 1 (.count claim-button)) claim-button))))
+
+(defn- wait-for-mark-on-the-way-dom!
+  [^Page page request-id]
+  (let [button
+        (.locator page (mark-on-the-way-button-selector request-id))]
+    (eventually
+     default-timeout-ms
+     #(when (= 1 (.count button)) button))))
+
+(defn- wait-for-on-the-way-dom!
+  [^Page page request-id]
+  (let [button
+        (.locator page (complete-button-selector request-id))]
+    (eventually
+     default-timeout-ms
+     #(when (= 1 (.count button)) button))))
 
 (defn- request-card-selector
   [request-id]
@@ -1185,6 +1257,188 @@
                     (is (some?
                          (wait-for-open-dom! page request-id)))
                     (is (= :open
+                           (request/status
+                            (request/require-request system request-id))))))
+
+                ;; Reclaim the same authoritative Request so the next lifecycle edge is
+                ;; exercised from a state reached entirely through the real browser.
+                (claim-through-browser! page request-id)
+                (is (some?
+                     (wait-for-authoritative-claim! system request-id))
+                    (pr-str @(:diagnostics browser-context)))
+
+                (let [mark-button
+                      (wait-for-mark-on-the-way-dom! page request-id)
+
+                      rendered-mark-action
+                      (decode-rendered-action mark-button)
+
+                      pre-mark-basis
+                      (:observed-basis rendered-mark-action)
+
+                      mark-request-start
+                      (count
+                       (:mark-on-the-way-requests
+                        @(:diagnostics browser-context)))
+
+                      mark-response-start
+                      (count
+                       (:mark-on-the-way-responses
+                        @(:diagnostics browser-context)))
+
+                      mark-fragment-request-start
+                      (count
+                       (:request-list-fragment-requests
+                        @(:diagnostics browser-context)))
+
+                      mark-fragment-response-start
+                      (count
+                       (:request-list-fragment-responses
+                        @(:diagnostics browser-context)))]
+                  (testing "the reclaimed authoritative state exposes semantic Mark-on-the-way without browser-owned correlation identity"
+                    (is (some? mark-button)
+                        (pr-str @(:diagnostics browser-context)))
+                    (is (= request.choreo/mark-on-the-way-operation
+                           (:operation rendered-mark-action)))
+                    (is (= {:request-id request-id}
+                           (:arguments rendered-mark-action)))
+                    (is (some? pre-mark-basis))
+                    (is (not (contains? rendered-mark-action :command-id)))
+                    (is (not (contains? rendered-mark-action :execution-id))))
+
+                  (mark-on-the-way-through-browser! page request-id)
+
+                  (testing "the browser creates the protocol-v3 Mark-on-the-way command"
+                    (is
+                     (eventually
+                      default-timeout-ms
+                      #(when (> (count (:mark-on-the-way-requests
+                                       @(:diagnostics browser-context)))
+                                mark-request-start)
+                         (last (:mark-on-the-way-requests
+                                @(:diagnostics browser-context)))))
+                     (pr-str @(:diagnostics browser-context)))
+
+                    (let [mark-request
+                          (last (:mark-on-the-way-requests
+                                 @(:diagnostics browser-context)))
+
+                          params
+                          (encoded-form-params (:post-data mark-request))
+
+                          encoded-command
+                          (get params example.app/optimistic-command-param)
+
+                          command
+                          (some-> encoded-command
+                                  edn/read-string
+                                  optimistic.protocol/wire->command)]
+                      (is (string? encoded-command)
+                          "The real Mark-on-the-way POST must contain a browser-generated optimistic command parameter.")
+                      (is (= (:operation rendered-mark-action)
+                             (:operation command)))
+                      (is (= (:arguments rendered-mark-action)
+                             (:arguments command)))
+                      (is (= (:observed-basis rendered-mark-action)
+                             (:observed-basis command)))
+                      (is (= (:scope rendered-mark-action)
+                             (:scope command)))
+                      (is (= (:fact-versions rendered-mark-action)
+                             (:fact-versions command)))
+                      (is (some? (:command-id command)))
+                      (is (some? (:execution-id command)))))
+
+                  (testing "the real server path commits Mark-on-the-way authoritatively"
+                    (is (some?
+                         (wait-for-authoritative-on-the-way!
+                          system
+                          request-id))
+                        (pr-str @(:diagnostics browser-context)))
+                    (is
+                     (eventually
+                      default-timeout-ms
+                      #(some
+                        (fn [{:keys [status]}]
+                          (when (< status 400) status))
+                        (drop
+                         mark-response-start
+                         (:mark-on-the-way-responses
+                          @(:diagnostics browser-context)))))
+                     (pr-str @(:diagnostics browser-context))))
+
+                  (testing "Mark-on-the-way settlement performs a progression-bearing authoritative Request-list reread"
+                    (is
+                     (eventually
+                      default-timeout-ms
+                      #(progression-bearing-request-list-refresh
+                        (:diagnostics browser-context)
+                        mark-fragment-request-start))
+                     (pr-str @(:diagnostics browser-context)))
+                    (is
+                     (eventually
+                      default-timeout-ms
+                      #(successful-request-list-response-after?
+                        (:diagnostics browser-context)
+                        mark-fragment-response-start))
+                     (pr-str @(:diagnostics browser-context))))
+
+                  (testing "canonical Mark-on-the-way reread exposes Complete from a newer authoritative frontier"
+                    (let [complete-button
+                          (wait-for-on-the-way-dom! page request-id)
+
+                          request-card
+                          (.locator page (request-card-selector request-id))
+
+                          refresh-request
+                          (progression-bearing-request-list-refresh
+                           (:diagnostics browser-context)
+                           mark-fragment-request-start)
+
+                          required-basis
+                          (some-> refresh-request
+                                  :progression
+                                  xtdb-live/strongest-required-basis)
+
+                          complete-action
+                          (decode-rendered-action complete-button)
+
+                          canonical-on-the-way-basis
+                          (:observed-basis complete-action)]
+                      (is (some? complete-button)
+                          (pr-str @(:diagnostics browser-context)))
+                      (is (nil?
+                           (.getAttribute
+                            request-card
+                            "data-gesso-optimistic-provisional"))
+                          "Canonical Request-list replacement must retire Mark-on-the-way provisional ownership.")
+                      (is (= request.choreo/complete-operation
+                             (:operation complete-action)))
+                      (is (some? required-basis)
+                          (pr-str refresh-request))
+                      (is (some? canonical-on-the-way-basis)
+                          (pr-str complete-action))
+                      (is (and
+                           (some? required-basis)
+                           (some? canonical-on-the-way-basis)
+                           (not
+                            (pos?
+                             (xtdb-live/compare-bases
+                              required-basis
+                              canonical-on-the-way-basis))))
+                          "The canonical Complete affordance must be rendered from an authoritative frontier satisfying the Live-requested minimum.")
+                      (is (and
+                           (some? pre-mark-basis)
+                           (some? canonical-on-the-way-basis)
+                           (xtdb-live/basis-advances?
+                            pre-mark-basis
+                            canonical-on-the-way-basis))
+                          "The post-Mark-on-the-way canonical basis must strictly advance the claimed render basis.")))
+
+                  (testing "reload reconstructs the on-the-way state from persisted authority"
+                    (.reload page)
+                    (is (some?
+                         (wait-for-on-the-way-dom! page request-id)))
+                    (is (= :on-the-way
                            (request/status
                             (request/require-request system request-id))))))
 
