@@ -396,15 +396,19 @@
      (when (board/present? title)
        (str ": " title)))))
 
+(defn- new-request-toast
+  [request-document]
+  {:variant     :info
+   :title       "New request received"
+   :description (request-toast-description request-document)})
+
 (defn send-new-request-toast!
   ([request-document]
    (send-new-request-toast! request-document {}))
   ([request-document {:keys [actor exclude-user-id]}]
    (let [excluded-user-id (or exclude-user-id
                               (:user/id actor))
-         toast            {:variant     :info
-                           :title       "New request received"
-                           :description (request-toast-description request-document)}]
+         toast            (new-request-toast request-document)]
      (if excluded-user-id
        (client-plumbing/send-toast-to-scope-except-user!
         notification-scope
@@ -413,6 +417,57 @@
        (client-plumbing/send-toast-to-scope!
         notification-scope
         toast)))))
+
+(defn- advisory-creator-user-id
+  [{:keys [actor exclude-user-id]}]
+  (or exclude-user-id
+      (:user/id actor)
+      (:xt/id actor)))
+
+(defn- refresh-advisory-oob
+  []
+  ;; v693 deliberately made this a request-context-free presentation payload.
+  ;; Keep that property here: advisory broadcast must never capture or transfer
+  ;; another browser's form, anti-forgery token, board state, or session data.
+  (call-view
+   'net.humanhelp.example.views/refresh-advisory-oob
+   true))
+
+(defn send-new-request-advisory!
+  "Queue one non-adopting new-Request advisory for every connected browser
+   except browsers owned by the creator.
+
+   `options` must identify the creator with either `:exclude-user-id` or an
+   authenticated `:actor` carrying `:user/id` (or compatibility `:xt/id`).
+
+   Delivery contains exactly two app-owned presentation fragments:
+
+   - the CSRF-safe v693 Refresh button/advisory OOB payload;
+   - the existing `New request received` toast.
+
+   It deliberately contains no Request-toolbar or Request-list fragment. A new
+   Request may therefore advance known authority without silently advancing
+   another browser's adopted Request projection.
+
+   Creator identity is mandatory. Missing identity fails closed rather than
+   degrading to an app-wide broadcast that could notify the creator too."
+  [request-document options]
+  (let [excluded-user-id (advisory-creator-user-id options)]
+    (when-not excluded-user-id
+      (throw
+       (ex-info
+        "New Request advisory requires the creator's authenticated user id."
+        {:error/type
+         :humanhelp.example.live/missing-advisory-creator
+
+         :request/id
+         (request-id-value request-document)})))
+    (client-plumbing/send-to-scope-except-user!
+     notification-scope
+     excluded-user-id
+     (refresh-advisory-oob)
+     (client-plumbing/toast-oob
+      (new-request-toast request-document)))))
 
 (defn send-reset-toast!
   "Temporary notification retained for the old demo reset route."
