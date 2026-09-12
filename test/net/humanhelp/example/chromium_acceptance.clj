@@ -747,47 +747,69 @@
               (fn []
                 (sign-in! page base-url)
 
-                (testing "the authoritative initial /app render exposes a real semantic Claim control"
-                  (is (= 1
-                         (.count
-                          (.locator
-                           page
-                           (claim-button-selector request-id)))))
-                  (is (= :open
-                         (request/status
-                          (request/require-request system request-id)))))
+                (let [claim-button
+                      (.locator page (claim-button-selector request-id))
 
-                (claim-through-browser! page request-id)
+                      encoded-rendered-action
+                      (.getAttribute
+                       claim-button
+                       "data-gesso-live-optimistic")
 
-                (testing "the browser, not the test, produces protocol-v3 command transport"
-                  (is
-                   (eventually
-                    default-timeout-ms
-                    #(first (:claim-requests @(:diagnostics browser-context))))
-                   (pr-str @(:diagnostics browser-context)))
+                      rendered-action
+                      (some-> encoded-rendered-action edn/read-string)]
+                  (testing "the authoritative initial /app render exposes a real semantic Claim control"
+                    (is (= 1
+                           (.count claim-button)))
+                    (is (= :open
+                           (request/status
+                            (request/require-request system request-id)))))
 
-                  (let [claim-request
-                        (first (:claim-requests @(:diagnostics browser-context)))
-
-                        params
-                        (encoded-form-params (:post-data claim-request))
-
-                        encoded-command
-                        (get params example.app/optimistic-command-param)
-
-                        command
-                        (some-> encoded-command
-                                edn/read-string
-                                optimistic.protocol/wire->command)]
-                    (is (string? encoded-command)
-                        "The real HTMX POST must contain the browser-generated optimistic command parameter.")
+                  (testing "the server render carries semantic action data but no browser-owned correlation identity"
+                    (is (string? encoded-rendered-action))
                     (is (= request.choreo/claim-operation
-                           (:operation command)))
+                           (:operation rendered-action)))
                     (is (= {:request-id request-id}
-                           (:arguments command)))
-                    (is (some? (:command-id command)))
-                    (is (some? (:execution-id command)))
-                    (is (some? (:observed-basis command)))))
+                           (:arguments rendered-action)))
+                    (is (some? (:observed-basis rendered-action)))
+                    (is (not (contains? rendered-action :command-id)))
+                    (is (not (contains? rendered-action :execution-id))))
+
+                  (claim-through-browser! page request-id)
+
+                  (testing "the browser, not the test, adds protocol-v3 correlation identity and preserves the rendered semantics"
+                    (is
+                     (eventually
+                      default-timeout-ms
+                      #(first (:claim-requests @(:diagnostics browser-context))))
+                     (pr-str @(:diagnostics browser-context)))
+
+                    (let [claim-request
+                          (first (:claim-requests @(:diagnostics browser-context)))
+
+                          params
+                          (encoded-form-params (:post-data claim-request))
+
+                          encoded-command
+                          (get params example.app/optimistic-command-param)
+
+                          command
+                          (some-> encoded-command
+                                  edn/read-string
+                                  optimistic.protocol/wire->command)]
+                      (is (string? encoded-command)
+                          "The real HTMX POST must contain the browser-generated optimistic command parameter.")
+                      (is (= (:operation rendered-action)
+                             (:operation command)))
+                      (is (= (:arguments rendered-action)
+                             (:arguments command)))
+                      (is (= (:observed-basis rendered-action)
+                             (:observed-basis command)))
+                      (is (= (:scope rendered-action)
+                             (:scope command)))
+                      (is (= (:fact-versions rendered-action)
+                             (:fact-versions command)))
+                      (is (some? (:command-id command)))
+                      (is (some? (:execution-id command))))))
 
                 (testing "the real server path commits Claim authoritatively"
                   (is (some?
