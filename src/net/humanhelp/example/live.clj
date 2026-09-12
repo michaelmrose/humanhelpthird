@@ -226,15 +226,30 @@
       :authorized? allow-example-location?}}
 
     ;; Production Request FX emits semantic :request changes carrying
-    ;; :request/location-id.  Assignment changes deliberately coalesce onto the
-    ;; owning Request and use the same topic/location identity, so one rule
-    ;; invalidates the complete aggregate projection.
+    ;; :request/location-id and :change/kind.
+    ;;
+    ;; Creation is intentionally *not* a managed-fragment invalidation.  The
+    ;; creator receives its committed toolbar/list synchronously from the create
+    ;; response, while already-viewing clients must remain on their currently
+    ;; adopted Request projection until they explicitly Refresh.  Those other
+    ;; clients receive separate app-owned advisory UI through client-plumbing;
+    ;; allowing :created to reach request-list here would silently collapse
+    ;; "authority advanced" into "browser adopted the new authority".
+    ;;
+    ;; Ordinary Request updates still invalidate both managed fragments.  The
+    ;; temporary nil-kind allowance preserves compatibility with older explicit
+    ;; app/test invalidations that predate :change/kind; production Request FX
+    ;; always supplies :created or :updated.
     :graph
     {:request
      [{:scope  :request-toolbar
-       :id-key :request/location-id}
+       :id-key :request/location-id
+       :when   (fn [_ctx change]
+                 (not= :created (:change/kind change)))}
       {:scope  :request-list
-       :id-key :request/location-id}]}
+       :id-key :request/location-id
+       :when   (fn [_ctx change]
+                 (not= :created (:change/kind change)))}]}
 
     :fragments
     {:request-toolbar
