@@ -38,6 +38,7 @@
    [clojure.string :as str]
    [gesso.live.consistency.xtdb :as xtdb-live]
    [gesso.live.core :as live]
+   [net.humanhelp.site.model.membership.core :as membership]
    [net.humanhelp.site.model.organization.core :as organization]
    [net.humanhelp.site.model.request.choreo :as request.choreo]
    [net.humanhelp.site.model.request.core :as request]
@@ -317,6 +318,133 @@
     viewer-id)))
 
 ;; =============================================================================
+;; Manager reassignment read composition
+;; =============================================================================
+
+(defn- manager-at-location?
+  "Return whether viewer has exact supervisor/admin authority at Location.
+
+   This is presentation eligibility only. The authoritative Request reassign
+   operation re-proves manager authority atomically before commit."
+  [ctx viewer-id location-id]
+  (let [scope
+        (organization/location-scope
+         location-id)]
+    (or
+     (membership/supervisor?
+      ctx
+      viewer-id
+      scope)
+     (membership/admin?
+      ctx
+      viewer-id
+      scope))))
+
+(defn- helper-user-sort-key
+  [user-document]
+  [(or
+    (some-> (user/user-display-name user-document) str/trim not-empty str/lower-case)
+    (some-> (user/user-email user-document) str/trim not-empty str/lower-case)
+    "")
+   (str
+    (user/user-id
+     user-document))])
+
+(defn eligible-reassign-target-users
+  "Return production Users that viewer may legitimately select as Reassign targets.
+
+   This is a read-side UI candidate set, not authorization. It mirrors only the
+   public eligibility shape required by Request reassignment:
+
+   - viewer must currently have exact supervisor or admin authority at Location;
+   - target must be an active User with effective exact :helper authority there.
+
+   The trusted Request operation still re-reads and atomically proves both sides
+   when the browser submits :request/reassign."
+  [ctx location-id viewer-id]
+  (require-user-id!
+   viewer-id
+   {:relation :reassign-manager
+    :location-id location-id})
+  (when-not
+   (uuid? location-id)
+    (throw
+     (ex-info
+      "HumanHelp example Reassign target discovery requires a production Location UUID."
+      {:location-id location-id})))
+  (if-not
+   (manager-at-location?
+    ctx
+    viewer-id
+    location-id)
+    []
+    (let [location-document
+          (organization/require-location
+           ctx
+           location-id)
+
+          organization-id
+          (organization/location-organization-id
+           location-document)
+
+          scope
+          (organization/location-scope
+           location-id)]
+      (->>
+       (membership/active-memberships-for-organization
+        ctx
+        organization-id)
+       (map
+        membership/membership-user-id)
+       distinct
+       (keep
+        (fn [candidate-user-id]
+          (let [role-state
+                (membership/effective-role-state
+                 ctx
+                 candidate-user-id
+                 scope)]
+            (when
+             (contains?
+              (or (:roles role-state) #{})
+              :helper)
+              (:user role-state)))))
+       (sort-by helper-user-sort-key)
+       vec))))
+
+(defn row-reassign-target-users
+  "Return the precomposed selectable Reassign target Users for row."
+  [row]
+  (or
+   (:reassign-target-users row)
+   []))
+
+(defn- attach-reassign-target-users
+  [rows target-users]
+  (mapv
+   (fn [row]
+     (let [current-primary-helper-id
+           (row-primary-helper-id row)
+
+           selectable
+           (if
+            (request/claimed?
+             (row-request row))
+             (->>
+              target-users
+              (remove
+               #(=
+                 current-primary-helper-id
+                 (user/user-id %)))
+              vec)
+             [])]
+       (assoc
+        row
+        :reassign-target-users
+        selectable)))
+   rows))
+
+;; =============================================================================
 ;; Search/filter/sort
 ;; =============================================================================
 
@@ -531,6 +659,39 @@
          :arguments
          {:request-id request-id}})))))
 
+(defn reassign-affordances
+  "Return one inert :request/reassign affordance per legitimate selected target.
+
+   Each affordance closes over the target helper UUID in its semantic arguments.
+   A later request-card UI may therefore present a real target selector without
+   asking browser JavaScript or a raw form field to mutate Gesso's semantic
+   command after render."
+  [row]
+  (let [request-id
+        (row-request-id row)
+
+        capability
+        (get
+         request.choreo/capabilities
+         request.choreo/reassign-operation)]
+    (mapv
+     (fn [target-user]
+       {:operation
+        request.choreo/reassign-operation
+
+        :capability
+        capability
+
+        :arguments
+        {:request-id request-id
+         :helper-id
+         (user/user-id
+          target-user)}
+
+        :target-helper-user
+        target-user})
+     (row-reassign-target-users row))))
+
 (defn optimistic-binding
   "Return a protocol-v3 binding for one production operation when ctx carries a
    justified authoritative XTDB observation basis.
@@ -602,7 +763,24 @@
         (visible-rows
          rows
          viewer-id
-         view-state)]
+         view-state)
+
+        reassign-target-users
+        (if
+         (some
+          #(request/claimed?
+            (row-request %))
+          visible)
+          (eligible-reassign-target-users
+           ctx
+           location-id
+           viewer-id)
+          [])
+
+        visible
+        (attach-reassign-target-users
+         visible
+         reassign-target-users)]
     {:location-id    location-id
      :viewer         viewer
      :viewer-id      viewer-id
