@@ -31,7 +31,9 @@
    [clojure.test :refer [deftest is run-tests testing]]
    [com.biffweb.core :as biff.core]
    [gesso.live.application-preflight :as application-preflight]
+   [gesso.live.consistency.xtdb :as xtdb-live]
    [gesso.live.optimistic.protocol :as optimistic.protocol]
+   [gesso.live.progression.http :as progression.http]
    [gesso.model.command :as model.command]
    [gesso.model.tx :as model.tx]
    [net.humanhelp :as humanhelp]
@@ -534,7 +536,9 @@
           :web-errors []
           :request-failures []
           :claim-requests []
-          :claim-responses []})]
+          :claim-responses []
+          :request-list-fragment-requests []
+          :request-list-fragment-responses []})]
 
     (.setDefaultTimeout context (double default-timeout-ms))
     (.setDefaultNavigationTimeout context (double default-timeout-ms))
@@ -589,7 +593,19 @@
            :claim-requests
            conj
            {:url (.url request)
-            :post-data (.postData request)})))))
+            :post-data (.postData request)}))
+
+        (when (and
+               (= "GET" (.method request))
+               (= (routes/request-list-fragment-url)
+                  (uri-path (.url request))))
+          (swap!
+           diagnostics
+           update
+           :request-list-fragment-requests
+           conj
+           {:url (.url request)
+            :headers (into {} (.allHeaders request))})))))
 
     (.onResponse
      context
@@ -602,6 +618,18 @@
            diagnostics
            update
            :claim-responses
+           conj
+           {:url (.url response)
+            :status (.status response)}))
+
+        (when (and
+               (= "GET" (.method (.request response)))
+               (= (routes/request-list-fragment-url)
+                  (uri-path (.url response))))
+          (swap!
+           diagnostics
+           update
+           :request-list-fragment-responses
            conj
            {:url (.url response)
             :status (.status response)})))))
@@ -712,6 +740,37 @@
     (.waitFor unclaim-button)
     unclaim-button))
 
+(defn- request-card-selector
+  [request-id]
+  (str "#humanhelp-request-" request-id))
+
+(defn- decode-rendered-action
+  [locator]
+  (some-> (.getAttribute locator "data-gesso-live-optimistic")
+          edn/read-string))
+
+(defn- progression-bearing-request-list-refresh
+  [diagnostics start-index]
+  (some
+   (fn [{:keys [headers] :as request}]
+     (when-let [encoded
+                (get headers progression.http/request-header-name)]
+       (assoc
+        request
+        :progression
+        (progression.http/decode-request-progression encoded))))
+   (drop start-index
+         (:request-list-fragment-requests @diagnostics))))
+
+(defn- successful-request-list-response-after?
+  [diagnostics start-index]
+  (some
+   (fn [{:keys [status] :as response}]
+     (when (< status 400)
+       response))
+   (drop start-index
+         (:request-list-fragment-responses @diagnostics))))
+
 ;; =============================================================================
 ;; Claim acceptance
 ;; =============================================================================
@@ -756,7 +815,20 @@
                        "data-gesso-live-optimistic")
 
                       rendered-action
-                      (some-> encoded-rendered-action edn/read-string)]
+                      (some-> encoded-rendered-action edn/read-string)
+
+                      initial-observed-basis
+                      (:observed-basis rendered-action)
+
+                      fragment-request-start
+                      (count
+                       (:request-list-fragment-requests
+                        @(:diagnostics browser-context)))
+
+                      fragment-response-start
+                      (count
+                       (:request-list-fragment-responses
+                        @(:diagnostics browser-context)))]
                   (testing "the authoritative initial /app render exposes a real semantic Claim control"
                     (is (= 1
                            (.count claim-button)))
@@ -826,10 +898,73 @@
                       (:claim-responses @(:diagnostics browser-context))))
                    (pr-str @(:diagnostics browser-context))))
 
-                (testing "settlement/reacquisition replaces the visible affordance with authoritative claimed state"
-                  (is (some?
-                       (wait-for-claimed-dom! page request-id))
-                      (pr-str @(:diagnostics browser-context))))
+                (testing "settlement/reacquisition performs a progression-bearing authoritative Request-list reread"
+                  (is
+                   (eventually
+                    default-timeout-ms
+                    #(progression-bearing-request-list-refresh
+                      (:diagnostics browser-context)
+                      fragment-request-start))
+                   (pr-str @(:diagnostics browser-context)))
+                  (is
+                   (eventually
+                    default-timeout-ms
+                    #(successful-request-list-response-after?
+                      (:diagnostics browser-context)
+                      fragment-response-start))
+                   (pr-str @(:diagnostics browser-context))))
+
+                (testing "canonical reread replaces provisional ownership with a newer authoritative Claim frontier"
+                  (let [unclaim-button
+                        (wait-for-claimed-dom! page request-id)
+
+                        request-card
+                        (.locator page (request-card-selector request-id))
+
+                        refresh-request
+                        (progression-bearing-request-list-refresh
+                         (:diagnostics browser-context)
+                         fragment-request-start)
+
+                        required-basis
+                        (some-> refresh-request
+                                :progression
+                                xtdb-live/strongest-required-basis)
+
+                        unclaim-action
+                        (decode-rendered-action unclaim-button)
+
+                        canonical-basis
+                        (:observed-basis unclaim-action)]
+                    (is (some? unclaim-button)
+                        (pr-str @(:diagnostics browser-context)))
+                    (is (nil?
+                         (.getAttribute
+                          request-card
+                          "data-gesso-optimistic-provisional"))
+                        "Canonical Request-list replacement must retire Gesso provisional ownership.")
+                    (is (= request.choreo/unclaim-operation
+                           (:operation unclaim-action)))
+                    (is (some? required-basis)
+                        (pr-str refresh-request))
+                    (is (some? canonical-basis)
+                        (pr-str unclaim-action))
+                    (is (and
+                         (some? required-basis)
+                         (some? canonical-basis)
+                         (not
+                          (pos?
+                           (xtdb-live/compare-bases
+                            required-basis
+                            canonical-basis))))
+                        "The canonical Unclaim affordance must be rendered from an authoritative frontier satisfying the Live-requested minimum.")
+                    (is (and
+                         (some? initial-observed-basis)
+                         (some? canonical-basis)
+                         (xtdb-live/basis-advances?
+                          initial-observed-basis
+                          canonical-basis))
+                        "The post-Claim canonical basis must strictly advance the initial rendered Claim basis.")))
 
                 (testing "reload reconstructs the claimed state from authority rather than provisional DOM"
                   (.reload page)
