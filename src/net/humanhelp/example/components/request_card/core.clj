@@ -89,9 +89,31 @@
     "btn-sm"))
 
 (defn- action-button-attrs
-  [operation]
-  {:class                            (action-button-class operation)
-   :data-humanhelp-request-operation (name operation)})
+  [operation arguments]
+  (cond->
+   {:class                            (action-button-class operation)
+    :data-humanhelp-request-operation (name operation)}
+    (= :request/reassign operation)
+    (assoc
+     :role "menuitem"
+     :data-humanhelp-request-reassign-helper-id
+     (some-> (:helper-id arguments) str))))
+
+(defn- reassign-target-label
+  [target-helper-user]
+  (or
+   (some-> (user/user-display-name target-helper-user) str/trim not-empty)
+   (some-> (user/user-email target-helper-user) str/trim not-empty)
+   (some-> (user/user-phone target-helper-user) str/trim not-empty)
+   (some-> (user/user-id target-helper-user) str)
+   "helper"))
+
+(defn- affordance-label
+  [{:keys [operation target-helper-user]}]
+  (if
+   (= :request/reassign operation)
+    (str "Reassign to " (reassign-target-label target-helper-user))
+    (action-label operation)))
 
 ;; =============================================================================
 ;; Stable DOM identity and authoritative optimistic binding
@@ -113,7 +135,7 @@
   (some-> binding (dissoc :capability)))
 
 (defn action-button
-  [ctx row {:keys [operation arguments]} board-state-selector]
+  [ctx row {:keys [operation arguments] :as affordance} board-state-selector]
   (let [target-id (request-target-id row)
         binding   (board/optimistic-binding
                    ctx
@@ -133,10 +155,10 @@
        {:class                              "inline-flex"
         :data-humanhelp-request-action-form true}
        :button-attrs
-       (action-button-attrs operation)
+       (action-button-attrs operation arguments)
        :children
        [[:span {:data-gesso-button-label true}
-         (action-label operation)]]}
+         (affordance-label affordance)]]}
        binding'
        (assoc :optimistic-binding binding')))))
 
@@ -216,19 +238,62 @@
          :class "text-xs-theme"
          :text  (str "waiting " elapsed)}))]))
 
+(defn- reassign-target-menu
+  [ctx row board-state-selector]
+  (let [affordances
+        (board/reassign-affordances row)]
+    (when
+     (seq affordances)
+      (g/dropdown-menu
+       {:attrs
+        {:data-humanhelp-request-reassign-menu true}}
+       (g/dropdown-menu-trigger
+        {:text "Reassign"
+         :class "btn-sm-outline"
+         :attrs
+         {:data-humanhelp-request-reassign-trigger true}})
+       (apply
+        g/dropdown-menu-content
+        {:side  :top
+         :align :end
+         :attrs
+         {:data-humanhelp-request-reassign-content true}}
+        (cons
+         (g/dropdown-menu-label
+          {:text "Reassign to"})
+         (map
+          #(action-button
+            ctx
+            row
+            %
+            board-state-selector)
+          affordances)))))))
+
 (defn request-card-actions
   [ctx row viewer-id board-state-selector]
-  (let [affordances (board/operation-affordances row viewer-id)]
-    (when (seq affordances)
+  (let [affordances
+        (board/operation-affordances row viewer-id)
+
+        reassign-menu
+        (reassign-target-menu
+         ctx
+         row
+         board-state-selector)]
+    (when
+     (or (seq affordances)
+         reassign-menu)
       (into
        [:div (attr/actions-attrs)]
-       (map
-        #(action-button
-          ctx
-          row
-          %
-          board-state-selector))
-       affordances))))
+       (concat
+        (map
+         #(action-button
+           ctx
+           row
+           %
+           board-state-selector)
+         affordances)
+        (when reassign-menu
+          [reassign-menu]))))))
 
 (defn request-summary
   [row viewer-id open?]
