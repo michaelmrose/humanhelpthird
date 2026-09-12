@@ -2,18 +2,22 @@
   "Portable HumanHelp test-gate orchestrator.
 
    This harness intentionally mirrors Gesso's gate-oriented test entry point
-   without pretending HumanHelp already owns Gesso's CLJS/runtime/browser
-   suites. The current HumanHelp gate is:
+   while keeping the project gates explicit. The current HumanHelp full gate is:
 
-     repository integrity -> JVM tests
+     repository integrity -> JVM tests -> real Chromium acceptance
 
    Use the optional `local` token while HumanHelp is being developed against
    the sibling ../gesso checkout:
 
      bb script/humanhelp_test.clj all local
      bb script/humanhelp_test.clj jvm local
+     bb script/humanhelp_test.clj browser local
 
-   Omitting `local` uses the pinned Gesso dependency declared by deps.edn."
+   Omitting `local` uses the pinned Gesso dependency declared by deps.edn.
+
+   The browser stage delegates to `bb test:browser` so browser artifact
+   construction and Chromium acceptance share the single source-owned dependency
+   mode and build/run composition defined in bb.edn."
   (:require
    [babashka.fs :as fs]
    [babashka.process :as process]
@@ -168,6 +172,41 @@
      "JVM tests"
      started-at)))
 
+(defn babashka-command
+  []
+  (or
+   (some-> (fs/which "bb") str)
+   (fail!
+    "HumanHelp browser acceptance requires Babashka on PATH."
+    {})))
+
+(defn browser-gate-command
+  [{:keys [local-gesso?]}]
+  (cond-> [(babashka-command)
+           "test:browser"]
+    local-gesso?
+    (conj "local")))
+
+(defn run-browser-tests!
+  [{:keys [local-gesso?] :as opts}]
+  (println)
+  (println "== Chromium acceptance ==")
+  (println
+   (if local-gesso?
+     "Gesso dependency: local ../gesso checkout"
+     "Gesso dependency: pinned deps.edn release"))
+
+  (let [started-at (monotonic-nanos)]
+    ;; Keep browser build/run ownership in bb.edn. In particular, local mode must
+    ;; reach both the stamped-artifact build and the acceptance JVM as `local`;
+    ;; duplicating those tools.deps details here would recreate the mixed-Gesso
+    ;; failure class that the browser task is designed to prevent.
+    (run-command!
+     (browser-gate-command opts))
+    (print-stage-pass!
+     "Chromium acceptance"
+     started-at)))
+
 (def gate-specs
   {:integrity
    {:label "Repo integrity"
@@ -175,7 +214,11 @@
 
    :jvm
    {:label "JVM"
-    :run   run-jvm-tests!}})
+    :run   run-jvm-tests!}
+
+   :browser
+   {:label "Chromium"
+    :run   run-browser-tests!}})
 
 (defn run-gate
   [gate-id opts]
@@ -243,7 +286,8 @@
   (case command
     "all"
     [:integrity
-     :jvm]
+     :jvm
+     :browser]
 
     "integrity"
     [:integrity]
@@ -252,17 +296,21 @@
     [:integrity
      :jvm]
 
+    "browser"
+    [:browser]
+
     nil))
 
 (defn usage!
   []
   (println
-   "Usage: bb script/humanhelp_test.clj [all|integrity|jvm] [local]")
+   "Usage: bb script/humanhelp_test.clj [all|integrity|jvm|browser] [local]")
   (println)
-  (println "  all        Repository integrity + JVM tests (default)")
+  (println "  all        Integrity + JVM + real Chromium acceptance (default)")
   (println "  integrity  Repository namespace/path integrity only")
   (println "  jvm        Repository integrity + JVM tests")
-  (println "  local      Use sibling ../gesso through :local-gesso")
+  (println "  browser    Exact browser build + real Chromium acceptance")
+  (println "  local      Use sibling ../gesso consistently across selected gates")
   (System/exit 2))
 
 (defn -main
