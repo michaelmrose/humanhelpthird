@@ -15,6 +15,7 @@
   (:require
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [clojure.tools.logging :as log]
    [com.biffweb.fx :as fx]
    [gesso.core :as g]
    [gesso.live.core :as live]
@@ -571,22 +572,69 @@
           :request request}
          fragments))))))
 
+(defn- require-create-creator-user-id!
+  "Require the authenticated production User identity before creation begins.
+
+   New-Request advisory delivery must exclude the creator. That exclusion is a
+   semantic precondition of this route, not a best-effort post-commit detail.
+   Rejecting a malformed current-user projection here prevents authority from
+   committing first and only then discovering that safe advisory fanout is
+   impossible."
+  [user]
+  (or
+   (:user/id user)
+   (throw
+    (ex-info
+     "Request creation requires the authenticated creator's production User id."
+     {:error/type :humanhelp.example/missing-create-creator
+      :user        (select-keys user [:xt/id :user/id])}))))
+
+(defn- send-new-request-advisory-best-effort!
+  "Queue the post-commit advisory without changing the creator's HTTP result.
+
+   Request creation is already authoritative by the time this helper runs. If
+   advisory fanout fails, returning an HTTP failure would misrepresent committed
+   authority and invite an ambiguous client retry. The failure is therefore
+   reported through application logging while the creator keeps the success
+   response that was constructed before delivery began.
+
+   The v694 sender itself remains fail-closed: missing creator identity never
+   broadens into an app-wide broadcast."
+  [request-document creator-user-id]
+  (try
+    (app-live/send-new-request-advisory!
+     request-document
+     {:exclude-user-id creator-user-id})
+    (catch Exception error
+      (log/error
+       error
+       "Request committed successfully, but new-Request advisory delivery failed."
+       {:request/id      (or (:xt/id request-document)
+                             (:request/id request-document))
+        :creator/user-id creator-user-id})
+      nil)))
+
 (defn create-request!
   "Create a production Request from the modal dialog.
 
    The HTTP boundary performs transport extraction and optional pre-validation
-   through the public Request content helpers.  Authoritative identity,
+   through the public Request content helpers. Authoritative identity,
    Organization/Location validity, Request construction, atomic commit, and
    semantic Live publication all belong to request.core/create and its model
    dependencies.
 
-   The creator rereads the production board from the committed progression.
-   Other connected browsers learn the new Request through the canonical
-   production :request Live change emitted by Request FX; this route does not
-   synthesize a second example-specific Request notification."
+   On success the creator first receives an authoritative board response built
+   from the committed progression. Only after that response has been constructed
+   does the route queue the non-adopting v694 advisory for other connected
+   browsers. Advisory delivery is post-commit/best-effort: a fanout failure is
+   logged but cannot turn already-committed Request authority into a false HTTP
+   failure or retry signal."
   [ctx]
   (let [user
         (current-user ctx)
+
+        creator-user-id
+        (require-create-creator-user-id! user)
 
         view-state
         (request-view-state ctx)
@@ -615,7 +663,7 @@
             (assoc
              ctx
              :current-user/id
-             (:user/id user))
+             creator-user-id)
 
             result
             (create-request-machine
@@ -623,13 +671,22 @@
               actor-ctx
               ::create-request-input
               input))]
-        (create-request-success-response
-         actor-ctx
-         {:result
-          result
+        (let [response
+              (create-request-success-response
+               actor-ctx
+               {:result
+                result
 
-          :view-state
-          view-state})))))
+                :view-state
+                view-state})]
+          ;; Do not queue advisory delivery until the creator's authoritative
+          ;; response has been rendered successfully. Conversely, once authority
+          ;; has committed, advisory failure must not rewrite that success into a
+          ;; 500 and tempt the browser to retry the creation.
+          (send-new-request-advisory-best-effort!
+           (:request result)
+           creator-user-id)
+          response)))))
 
 ;; -----------------------------------------------------------------------------
 ;; Request list interactions
