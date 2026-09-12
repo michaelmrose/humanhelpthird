@@ -52,6 +52,9 @@
 (def refresh-form-dom-id
   "humanhelp-refresh-form")
 
+(def refresh-button-dom-id
+  "humanhelp-refresh-button-surface")
+
 (def refresh-advisory-dom-id
   "humanhelp-refresh-advisory")
 
@@ -457,6 +460,17 @@
 ;; Request toolbar
 ;; -----------------------------------------------------------------------------
 
+(defn refresh-button-surface
+  "Render the browser-local Refresh presentation inside the recipient-owned form.
+
+   This surface is deliberately narrower than refresh-form. Live advisory
+   delivery may replace it OOB without replacing the form itself, preserving
+   the recipient's existing anti-forgery token and form ownership."
+  [stale?]
+  [:div {:id    refresh-button-dom-id
+         :style {:display "contents"}}
+   (refresh-button {:stale? stale?})])
+
 (defn refresh-form
   [ctx view-state stale?]
   [:div {:id    refresh-form-dom-id
@@ -467,7 +481,7 @@
      :swap    "none"
      :inline? true
      :attrs   {:hx-include (board-state-selector)}}
-    (refresh-button {:stale? stale?}))])
+    (refresh-button-surface stale?))])
 
 (defn refresh-advisory
   "Render the independently replaceable advisory message next to Refresh.
@@ -741,20 +755,27 @@
   (g/oob-outer-html create-request-dialog-id dialog))
 
 (defn refresh-advisory-oob
-  "Replace only the browser-local Refresh/advisory surfaces.
+  "Replace only browser-local Refresh presentation and advisory text.
 
-   This deliberately does not replace the Request toolbar fragment or Request
-   list. It is the view boundary used when a connected browser learns that
-   newer Request authority exists but has not explicitly adopted that authority
-   yet."
-  [ctx view-state stale?]
-  (oob-response
-   (g/oob-outer-html
-    refresh-form-dom-id
-    (refresh-form ctx view-state stale?))
-   (g/oob-outer-html
-    refresh-advisory-dom-id
-    (refresh-advisory stale?))))
+   Crucially, this never replaces refresh-form. The form is recipient-owned and
+   contains that browser session's anti-forgery token; rendering a form in one
+   request context and broadcasting it to another user would transfer the wrong
+   token across sessions. Advisory delivery therefore replaces only the inert
+   Refresh button surface plus advisory text, leaving the recipient's form,
+   board state, toolbar projection, and Request list untouched."
+  ([stale?]
+   (oob-response
+    (g/oob-outer-html
+     refresh-button-dom-id
+     (refresh-button-surface stale?))
+    (g/oob-outer-html
+     refresh-advisory-dom-id
+     (refresh-advisory stale?))))
+  ([_ctx _view-state stale?]
+   ;; Compatibility arity for the v692 call shape. The request context and
+   ;; view-state are intentionally ignored so no recipient-owned form material
+   ;; can enter a broadcast advisory payload.
+   (refresh-advisory-oob stale?)))
 
 (defn replace-board-state-oob
   "Render an OOB replacement for the stable board-state/search form.
